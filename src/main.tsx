@@ -1,11 +1,33 @@
-import { StrictMode, Suspense } from "react";
+import { scan } from "react-scan";
+import { StrictMode, Suspense, use } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { DbProvider, initDb } from "./db.ts";
+
+scan({
+  enabled: true,
+});
+
+const db = initDb();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Suspense fallback={<div>Loading...</div>}>
-      <App />
+    <Suspense fallback={<Loading />}>
+      <Root>
+        <App />
+      </Root>
     </Suspense>
   </StrictMode>
 );
+
+// eslint-disable-next-line react-refresh/only-export-components
+function Root({ children }: { children: React.ReactNode }) {
+  const _db = use(db);
+  return <DbProvider db={_db}>{children}</DbProvider>;
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+function Loading() {
+  console.log("Loading");
+  return <div>Loading...</div>;
+}

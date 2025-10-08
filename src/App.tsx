@@ -1,177 +1,57 @@
-import { SQLocalKysely } from "sqlocal/kysely";
-import { atom, useAtom } from "jotai";
-import { seedDatabase } from "./seed";
-import { Kysely } from "kysely";
-
-function createDelayedPromise<T>() {
-  let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((_resolve) => {
-    resolve = _resolve;
-  });
-  return { promise, resolve };
-}
-
-type SyncedDbOptions = {
-  dbPath: string;
-};
-
-class SyncedDb<Database> {
-  public readonly memoryDb: SQLocalKysely;
-  public readonly workerDb: SQLocalKysely;
-  public readonly readyPromise: Promise<void>;
-  public readonly kysely: Kysely<Database>;
-
-  private tableListeners: Map<string, Set<() => void>> = new Map();
-
-  constructor(
-    memoryDb: SQLocalKysely,
-    workerDb: SQLocalKysely,
-    readyPromise: Promise<void>,
-    kysely: Kysely<Database>
-  ) {
-    this.memoryDb = memoryDb;
-    this.workerDb = workerDb;
-    this.readyPromise = readyPromise;
-    this.kysely = kysely;
-  }
-
-  public static async create<Database>(options: SyncedDbOptions) {
-    const memoryDbReadyPromise = createDelayedPromise<boolean>();
-    const memoryDb = new SQLocalKysely({
-      databasePath: ":memory:",
-      onConnect: () => memoryDbReadyPromise.resolve(true),
-    });
-
-    const workerDbReadyPromise = createDelayedPromise<boolean>();
-    const workerDb = new SQLocalKysely({
-      databasePath: options.dbPath,
-      onConnect: () => workerDbReadyPromise.resolve(true),
-    });
-
-    const readyPromise = Promise.all([
-      memoryDbReadyPromise.promise,
-      workerDbReadyPromise.promise,
-    ]).then(() => {});
-
-    const kysely = new Kysely<Database>({ dialect: memoryDb.dialect });
-
-    return new SyncedDb<Database>(memoryDb, workerDb, readyPromise, kysely);
-  }
-
-  public async getQueriedTables(query: string) {
-    const rootPages = (await this.memoryDb.sql(`EXPLAIN ${query}`))
-      .filter(
-        (x) => x.opcode === "OpenRead" && x.p3 === 0 && typeof x.p2 === "number"
-      )
-      .map((x) => x.p2);
-
-    const tables = await this.memoryDb.sql(
-      `SELECT DISTINCT tbl_name FROM sqlite_master WHERE rootpage IN (${rootPages.join(
-        ","
-      )})`
-    );
-
-    return tables.map((x) => x.tbl_name) as string[];
-  }
-
-  async getAllTables() {
-    const tables = await this.memoryDb.sql(
-      `SELECT * FROM sqlite_schema WHERE type = 'table'`
-    );
-
-    return tables
-      .map((x) => x.tbl_name as string)
-      .filter((x) => !x.startsWith("sqlite_"));
-  }
-
-  async watchQuery<Results = any[]>(
-    query: string,
-    callback: (result: Results) => void
-  ) {
-    const [tables] = await Promise.all([
-      this.getQueriedTables(query),
-      this.memoryDb.sql(query),
-    ]);
-
-    for (const table of tables) {
-      this.registerTableListener(table, () => {});
-    }
-  }
-
-  registerTableListener(table: string, callback: () => void) {
-    if (!this.tableListeners.has(table)) {
-      this.tableListeners.set(table, new Set());
-    }
-
-    this.tableListeners.get(table)!.add(callback);
-    return () => {
-      this.tableListeners.get(table)!.delete(callback);
-    };
-  }
-
-  async initTableListeners() {
-    const [tables] = await Promise.all([
-      this.getAllTables(),
-      this.memoryDb.createCallbackFunction(
-        "table_changed",
-        (tableName: string, type: "insert" | "update" | "delete") => {
-          console.log(tableName, type);
-        }
-      ),
-    ]);
-
-    for (const table of tables) {
-      await this.memoryDb.sql(`
-        CREATE TEMP TRIGGER __${table}_insert AFTER INSERT ON ${table}
-        BEGIN
-          SELECT table_changed('${table}', 'insert');
-        END;
-  
-        CREATE TEMP TRIGGER __${table}_update AFTER UPDATE ON ${table}
-        BEGIN
-          SELECT table_changed('${table}', 'update');
-        END;
-  
-        CREATE TEMP TRIGGER __${table}_delete AFTER DELETE ON ${table}
-        BEGIN
-          SELECT table_changed('${table}', 'delete');
-        END;
-        `);
-    }
-  }
-}
-
-const dbAtom = atom(async () => {
-  const db = await SyncedDb.create({ dbPath: "db.sqlite3" });
-
-  await db.readyPromise;
-
-  await seedDatabase(db.memoryDb);
-  await seedDatabase(db.memoryDb);
-
-  await db.initTableListeners();
-
-  console.log(
-    await db.getQueriedTables(
-      "SELECT * FROM users INNER JOIN posts ON users.id = posts.user_id"
-    )
-  );
-
-  return db;
-});
+import { useState } from "react";
+import { useDb, useDbQuery } from "./db";
 
 export function App() {
-  // Database initialization happens automatically via the atom
-  const [db] = useAtom(dbAtom);
+  const db = useDb();
+
+  const [search, setSearch] = useState("");
+  const { rows: users } = useDbQuery({
+    params: [search],
+    queryFn: (db, [search]) => {
+      let query = db
+        .selectFrom("users")
+        .select(["id", "name"])
+        .limit(100)
+        .orderBy("name");
+      if (search) {
+        query = query.where("name", "like", `${search}%`);
+      }
+      return query.compile();
+    },
+  });
+
+  const {
+    rows: [totalUsers],
+  } = useDbQuery({
+    queryFn: (db) =>
+      db
+        .selectFrom("users")
+        .select(({ fn }) => [fn.countAll<number>().as("total")])
+        .compile(),
+  });
+
+  const [showPosts, setShowPosts] = useState(false);
 
   const createRandomUser = async () => {
-    await db.memoryDb.sql`
-      INSERT INTO users (name, email) VALUES (${Math.random()
-        .toString(36)
-        .substring(2, 15)}, ${
-      Math.random().toString(36).substring(2, 15) + "@example.com"
-    })  
-    `;
+    await db.kysely
+      .insertInto("users")
+      .values(
+        Array.from({ length: 16000 }, () => ({
+          name: Math.random().toString(36).substring(2, 15),
+          email: Math.random().toString(36).substring(2, 15) + "@example.com",
+        }))
+      )
+      .execute();
+  };
+
+  const clearUsers = async () => {
+    await db.kysely.deleteFrom("users").execute();
+    db.memoryDb.forceTablesUpdate(["users"]);
+  };
+
+  const [query, setQuery] = useState("");
+  const executeQuery = async () => {
+    console.log("result", db.memoryDb.execute(query));
   };
 
   return (
@@ -188,7 +68,65 @@ export function App() {
           <br />✅ Sample data seeded
         </p>
       </div>
-      <button onClick={createRandomUser}>Create Random User</button>
+
+      <div className="flex gap-2 flex-col">
+        <input
+          className="border border-gray-300"
+          type="text"
+          placeholder="Search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <input
+          className="border border-gray-300"
+          type="text"
+          placeholder="Query"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <p>Total Users: {totalUsers.total}</p>
+
+      <button className="border border-gray-300" onClick={createRandomUser}>
+        Create Random User
+      </button>
+      <button className="border border-gray-300" onClick={clearUsers}>
+        Clear Users
+      </button>
+      <button className="border border-gray-300" onClick={executeQuery}>
+        Execute Query
+      </button>
+
+      <div>
+        {users.map((user) => (
+          <div key={user.id}>{user.name}</div>
+        ))}
+      </div>
+
+      <button
+        onClick={() => {
+          setShowPosts(!showPosts);
+        }}
+      >
+        {showPosts ? "Hide Posts" : "Show Posts"}
+      </button>
+
+      {showPosts && <Posts />}
+    </div>
+  );
+}
+
+function Posts() {
+  const { rows: posts } = useDbQuery({
+    queryFn: (db) => db.selectFrom("posts").selectAll().compile(),
+  });
+
+  return (
+    <div>
+      {posts.map((post) => (
+        <div key={post.id}>{post.title}</div>
+      ))}
     </div>
   );
 }

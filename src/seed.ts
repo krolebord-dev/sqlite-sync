@@ -1,21 +1,28 @@
-import { SQLocalKysely } from "sqlocal/kysely";
+import type { Generated, ColumnType } from "kysely";
 
 // Define table schemas
 interface Database {
   users: {
-    id: number;
+    id: Generated<number>;
     name: string;
     email: string;
-    created_at: string;
+    created_at: ColumnType<string, string | undefined>;
   };
   posts: {
-    id: number;
+    id: Generated<number>;
     user_id: number;
     title: string;
     content: string;
-    created_at: string;
+    created_at: ColumnType<string, string | undefined>;
   };
 }
+
+type SeedDb = {
+  sql: (
+    queryTemplate: TemplateStringsArray | string,
+    ...params: unknown[]
+  ) => Promise<unknown[]>;
+};
 
 // Sample data
 const sampleUsers = [
@@ -51,7 +58,7 @@ const samplePosts = [
   },
 ];
 
-async function createTables(db: SQLocalKysely) {
+async function createTables(db: SeedDb) {
   // Create users table
   await db.sql`
     CREATE TABLE IF NOT EXISTS users (
@@ -75,7 +82,7 @@ async function createTables(db: SQLocalKysely) {
   `;
 }
 
-async function seedUsers(db: SQLocalKysely) {
+async function seedUsers(db: SeedDb) {
   for (const user of sampleUsers) {
     await db.sql`
       INSERT OR IGNORE INTO users (name, email)
@@ -84,7 +91,7 @@ async function seedUsers(db: SQLocalKysely) {
   }
 }
 
-async function seedPosts(db: SQLocalKysely) {
+async function seedPosts(db: SeedDb) {
   for (const post of samplePosts) {
     await db.sql`
       INSERT OR IGNORE INTO posts (user_id, title, content)
@@ -93,7 +100,7 @@ async function seedPosts(db: SQLocalKysely) {
   }
 }
 
-export async function seedDatabase(db: SQLocalKysely) {
+export async function seedDatabase(db: SeedDb) {
   console.log("Creating tables...");
   await createTables(db);
 
@@ -106,14 +113,14 @@ export async function seedDatabase(db: SQLocalKysely) {
   console.log("Database seeding completed!");
 }
 
-export async function clearDatabase(db: SQLocalKysely) {
+export async function clearDatabase(db: SeedDb) {
   console.log("Clearing database...");
   await db.sql`DROP TABLE IF EXISTS posts`;
   await db.sql`DROP TABLE IF EXISTS users`;
   console.log("Database cleared!");
 }
 
-export async function resetDatabase(db: SQLocalKysely) {
+export async function resetDatabase(db: SeedDb) {
   await clearDatabase(db);
   await seedDatabase(db);
 }
