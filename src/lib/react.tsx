@@ -1,12 +1,4 @@
-import {
-  createContext,
-  use,
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useState,
-} from "react";
+import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import type { SyncedDb } from "./sync-db";
 import type { CompiledQuery, Kysely } from "kysely";
 
@@ -49,61 +41,21 @@ export function createDbContext<Database>() {
   }: UseDbQueryOptions<TParams, TResult, Database>) => {
     const db = useDb();
 
-    const query = useMemo(
-      () => {
-        const compiledQuery = queryFn(db.memoryDb.kysely, params as TParams);
-        const fetchRows = () =>
-          db.memoryDb.execute<TResult>({
-            sql: compiledQuery.sql,
-            params: compiledQuery.parameters ?? [],
-          }).rows;
-
-        return {
-          sql: compiledQuery.sql,
-          params: compiledQuery.parameters as TParams,
-          fetchRows,
-        };
-      },
+    const compiledQuery = useMemo(() => {
+      return queryFn(db.memoryDb.kysely, params as TParams);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [db, ...(params ?? [])]
-    );
+    }, [db, ...(params ?? [])]);
 
-    const [initialState] = useState(() => {
-      return {
-        query: query,
-        rows: query.fetchRows(),
-      };
-    });
-
-    const [rows, setRows] = useState<TResult[]>(initialState.rows);
-
-    const refresh = useCallback(() => {
-      setRows(query.fetchRows());
-    }, [query]);
-
-    const refetchRows = useEffectEvent(() => {
-      if (rows !== initialState.rows || query !== initialState.query) {
-        setRows(query.fetchRows());
-      }
-    });
-
-    useEffect(() => {
-      refetchRows();
-
-      const { unsubscribe } = db.memoryDb.subsribeToQueryChanges({
-        sql: query.sql,
-        onDataChange: () => {
-          setRows(query.fetchRows());
-        },
+    const liveQuery = useMemo(() => {
+      return db.memoryDb.createLiveQuery<TResult>({
+        sql: compiledQuery.sql,
+        parameters: compiledQuery.parameters,
       });
+    }, [db, compiledQuery]);
 
-      return () => {
-        unsubscribe();
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [db, query]);
+    const rows = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
 
-    return { rows, refresh };
+    return { rows, refresh: liveQuery.refresh };
   };
 
   return { useDb, DbProvider, useDbQuery };

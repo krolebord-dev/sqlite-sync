@@ -231,6 +231,52 @@ export class SQLiteMemoryDb<Database> {
     });
   }
 
+  createLiveQuery<TResult>(query: {
+    sql: string;
+    parameters: readonly unknown[];
+  }) {
+    const fetchRows = () =>
+      this.execute<TResult>({
+        sql: query.sql,
+        params: query.parameters ?? [],
+      }).rows;
+
+    let rows: TResult[] | null = null;
+
+    const getRows = () => {
+      if (!rows) {
+        rows = fetchRows();
+      }
+      return rows;
+    };
+
+    let subscriber: (() => void) | null = null;
+
+    const refresh = () => {
+      rows = fetchRows();
+      subscriber?.();
+    };
+
+    const subscribe = (onchange: () => void) => {
+      if (subscriber) {
+        throw new Error("Subscriber already exists");
+      }
+
+      subscriber = onchange;
+      const subscription = this.subscribeToQueryChanges({
+        sql: query.sql,
+        onDataChange: refresh,
+      });
+
+      return () => {
+        subscription.unsubscribe();
+        subscriber = null;
+      };
+    };
+
+    return { getRows, refresh, subscribe };
+  }
+
   subscribeToQueryChanges(params: { sql: string; onDataChange: () => void }) {
     const { sql, onDataChange } = params;
 
