@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDb, useDbQuery } from "./db";
+import { QueryShell } from "./QueryShell";
 
 export function App() {
   const db = useDb();
@@ -49,11 +50,6 @@ export function App() {
     db.memoryDb.notifyTableSubscribers(["users"]);
   };
 
-  const [query, setQuery] = useState("");
-  const executeQuery = async () => {
-    console.log("result", db.memoryDb.execute(query));
-  };
-
   const [snapshot, setSnapshot] = useState<Uint8Array<ArrayBuffer> | null>(
     null
   );
@@ -74,6 +70,9 @@ export function App() {
       <p className="text-gray-600">
         Database initialized and seeded! Check the console for sample data.
       </p>
+
+      <QueryShell />
+
       <div className="mt-4 p-4 bg-gray-100 rounded">
         <p className="text-sm">
           ✅ Optimistic DB (in-memory) ready
@@ -91,13 +90,6 @@ export function App() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <input
-          className="border border-gray-300"
-          type="text"
-          placeholder="Query"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
       </div>
 
       <p>Total Users: {totalUsers.total}</p>
@@ -107,9 +99,6 @@ export function App() {
       </button>
       <button className="border border-gray-300" onClick={clearUsers}>
         Clear Users
-      </button>
-      <button className="border border-gray-300" onClick={executeQuery}>
-        Execute Query
       </button>
       <button className="border border-gray-300" onClick={createSnapshot}>
         Create Snapshot
