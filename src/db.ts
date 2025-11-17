@@ -13,9 +13,5 @@ export async function initDb() {
     },
   });
 
-  console.log("recordChanges");
-  db.memoryDb.recordChanges();
-  console.log("recordChanges");
-
   return db;
 }

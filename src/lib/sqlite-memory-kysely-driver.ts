@@ -8,19 +8,25 @@ import {
   type Driver,
   type QueryResult,
 } from "kysely";
-import type { SQLiteMemoryDb } from "./sqlite-memory-db";
 import type { BindableValue } from "@sqlite.org/sqlite-wasm";
 
-export class SQLiteMemoryDriver<Database> implements Driver {
-  private db: SQLiteMemoryDb<Database>;
+type MemoryDb = {
+  execute: (opts: { sql: string; params: BindableValue[] }) => {
+    rows: unknown[];
+  };
+  close: () => void;
+};
 
-  constructor(db: SQLiteMemoryDb<Database>) {
+export class SQLiteMemoryDriver implements Driver {
+  private db: MemoryDb;
+
+  constructor(db: MemoryDb) {
     this.db = db;
   }
 
   async init(): Promise<void> {}
 
-  async acquireConnection(): Promise<SQLiteMemoryConnection<Database>> {
+  async acquireConnection(): Promise<SQLiteMemoryConnection> {
     return new SQLiteMemoryConnection(this.db);
   }
 
@@ -43,10 +49,10 @@ export class SQLiteMemoryDriver<Database> implements Driver {
   }
 }
 
-class SQLiteMemoryConnection<Database> implements DatabaseConnection {
-  private db: SQLiteMemoryDb<Database>;
+class SQLiteMemoryConnection implements DatabaseConnection {
+  private db: MemoryDb;
 
-  constructor(db: SQLiteMemoryDb<Database>) {
+  constructor(db: MemoryDb) {
     this.db = db;
   }
 
@@ -69,9 +75,7 @@ class SQLiteMemoryConnection<Database> implements DatabaseConnection {
   }
 }
 
-export function createSQLiteMemoryKysely<Database>(
-  memoryDb: SQLiteMemoryDb<Database>
-) {
+export function createSQLiteMemoryKysely<Database>(memoryDb: MemoryDb) {
   return new Kysely<Database>({
     dialect: {
       createAdapter: () => new SqliteAdapter(),

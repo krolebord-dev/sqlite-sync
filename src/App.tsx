@@ -33,7 +33,7 @@ export function App() {
   const [showPosts, setShowPosts] = useState(false);
 
   const createRandomUser = async () => {
-    await db.kysely
+    await db.memoryDb.kysely
       .insertInto("users")
       .values(
         Array.from({ length: 16000 }, () => ({
@@ -45,13 +45,27 @@ export function App() {
   };
 
   const clearUsers = async () => {
-    await db.kysely.deleteFrom("users").execute();
-    db.memoryDb.forceTablesUpdate(["users"]);
+    await db.memoryDb.kysely.deleteFrom("users").execute();
+    db.memoryDb.notifyTableSubscribers(["users"]);
   };
 
   const [query, setQuery] = useState("");
   const executeQuery = async () => {
     console.log("result", db.memoryDb.execute(query));
+  };
+
+  const [snapshot, setSnapshot] = useState<Uint8Array<ArrayBuffer> | null>(
+    null
+  );
+
+  const createSnapshot = async () => {
+    const snapshot = db.memoryDb.createSnapshot();
+    setSnapshot(snapshot);
+  };
+
+  const useSnapshot = async () => {
+    if (!snapshot) return;
+    db.memoryDb.useSnapshot(snapshot!);
   };
 
   return (
@@ -96,6 +110,16 @@ export function App() {
       </button>
       <button className="border border-gray-300" onClick={executeQuery}>
         Execute Query
+      </button>
+      <button className="border border-gray-300" onClick={createSnapshot}>
+        Create Snapshot
+      </button>
+      <button
+        className="border border-gray-300"
+        onClick={useSnapshot}
+        disabled={!snapshot}
+      >
+        Use Snapshot
       </button>
 
       <div>

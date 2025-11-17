@@ -4,6 +4,8 @@ import sqlite3InitModule, {
   type SqlValue,
   type Sqlite3Static,
 } from "@sqlite.org/sqlite-wasm";
+import type { Kysely } from "kysely";
+import { createSQLiteMemoryKysely } from "./sqlite-memory-kysely-driver";
 
 let sqliteModule: Sqlite3Static | null = null;
 
@@ -59,32 +61,38 @@ class PerformanceLogger {
 }
 
 export class SQLiteMemoryDb<Database> {
+  kysely: Kysely<Database>;
+
   private db: SQLiteDatabase | null = null;
   private sqlite3: Sqlite3Static;
 
   private readonly performanceLogger: PerformanceLogger;
 
-  private tableSunscribers: Map<string, Set<(type: ChangeType) => void>> =
+  private tableSubscribers: Map<string, Set<(type: ChangeType) => void>> =
     new Map();
 
   private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
-  private tablesUsedStatememnt: PreparedStatement<
+  private tablesUsedStatement: PreparedStatement<
     [string],
     { name: string; isWrite: boolean }
   > | null = null;
+
+  private dataPointers = [] as number[];
 
   private constructor(sqlite3: Sqlite3Static, opts?: SQLiteMemoryDbOptions) {
     this.sqlite3 = sqlite3;
     this.db = new sqlite3.oo1.DB({ filename: ":memory:" });
     this.performanceLogger = new PerformanceLogger(opts?.logger ?? (() => {}));
+
+    this.kysely = createSQLiteMemoryKysely<Database>(this);
   }
 
-  static async create(opts?: SQLiteMemoryDbOptions) {
+  static async create<Database>(opts?: SQLiteMemoryDbOptions) {
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
     }
 
-    const db = new SQLiteMemoryDb(sqliteModule, opts);
+    const db = new SQLiteMemoryDb<Database>(sqliteModule, opts);
 
     db.registerOnUpdateHook();
 
@@ -114,59 +122,63 @@ export class SQLiteMemoryDb<Database> {
     return { rows: rows as T[] };
   }
 
-  recordChanges() {
-    const wasm = this.sqlite3.wasm;
-    const capi = this.sqlite3.capi;
-
-    const ptrStart = wasm.pstack.pointer;
-    try {
-      const ppOut = wasm.pstack.allocPtr();
-      capi.sqlite3session_create(this.ensureDb, "main", ppOut);
-
-      const pSession = wasm.peekPtr(ppOut);
-      capi.sqlite3session_attach(pSession, null);
-
-      for (let i = 0; i < 16000; i++) {
-        this.execute({
-          sql: 'insert into "users" ("name", "email") values (?, ?)',
-          params: ["test" + i, "test" + i + "@test.com"],
-        });
-      }
-
-      const pnChanges = wasm.pstack.alloc("i32");
-
-      const result = capi.sqlite3session_changeset(pSession, pnChanges, ppOut);
-
-      const size = wasm.peek32(pnChanges);
-      const changesetPtr = wasm.peekPtr(ppOut);
-
-      if (!changesetPtr || (!wasm.isPtr(changesetPtr) && changesetPtr < 1)) {
-        throw new Error("Failed to get changeset");
-      }
-
-      capi.sqlite3changeset_invert(size, changesetPtr, pnChanges, ppOut);
-      capi.sqlite3changeset_apply(
-        this.ensureDb,
-        wasm.peek32(pnChanges),
-        wasm.peekPtr(ppOut),
-        (...args) => {
-          console.log("apply", ...args);
-          return 1;
-        },
-        (...args) => {
-          console.log("apply", ...args);
-          return capi.SQLITE_CHANGESET_OMIT;
-        },
-        0
-      );
-
-      capi.sqlite3_free(changesetPtr);
-
-      console.log("changeset", result, pnChanges, size);
-    } finally {
-      wasm.pstack.restore(ptrStart);
-    }
+  executeTransaction<T>(callback: (db: SQLiteDatabase) => T): T {
+    return this.ensureDb.transaction(callback);
   }
+
+  // recordChanges() {
+  //   const wasm = this.sqlite3.wasm;
+  //   const capi = this.sqlite3.capi;
+
+  //   const ptrStart = wasm.pstack.pointer;
+  //   try {
+  //     const ppOut = wasm.pstack.allocPtr();
+  //     capi.sqlite3session_create(this.ensureDb, "main", ppOut);
+
+  //     const pSession = wasm.peekPtr(ppOut);
+  //     capi.sqlite3session_attach(pSession, null);
+
+  //     for (let i = 0; i < 16000; i++) {
+  //       this.execute({
+  //         sql: 'insert into "users" ("name", "email") values (?, ?)',
+  //         params: ["test" + i, "test" + i + "@test.com"],
+  //       });
+  //     }
+
+  //     const pnChanges = wasm.pstack.alloc("i32");
+
+  //     const result = capi.sqlite3session_changeset(pSession, pnChanges, ppOut);
+
+  //     const size = wasm.peek32(pnChanges);
+  //     const changesetPtr = wasm.peekPtr(ppOut);
+
+  //     if (!changesetPtr || (!wasm.isPtr(changesetPtr) && changesetPtr < 1)) {
+  //       throw new Error("Failed to get changeset");
+  //     }
+
+  //     capi.sqlite3changeset_invert(size, changesetPtr, pnChanges, ppOut);
+  //     capi.sqlite3changeset_apply(
+  //       this.ensureDb,
+  //       wasm.peek32(pnChanges),
+  //       wasm.peekPtr(ppOut),
+  //       (...args) => {
+  //         console.log("apply", ...args);
+  //         return 1;
+  //       },
+  //       (...args) => {
+  //         console.log("apply", ...args);
+  //         return capi.SQLITE_CHANGESET_OMIT;
+  //       },
+  //       0
+  //     );
+
+  //     capi.sqlite3_free(changesetPtr);
+
+  //     console.log("changeset", result, pnChanges, size);
+  //   } finally {
+  //     wasm.pstack.restore(ptrStart);
+  //   }
+  // }
 
   prepare<TParams extends SqlValue[], TResult>(sql: string) {
     const stmt = this.ensureDb.prepare(sql);
@@ -219,22 +231,19 @@ export class SQLiteMemoryDb<Database> {
     });
   }
 
-  subsribeToQueryChanges(params: { sql: string; onDataChange: () => void }) {
+  subscribeToQueryChanges(params: { sql: string; onDataChange: () => void }) {
     const { sql, onDataChange } = params;
 
     const tables = this.getTablesUsed(sql);
     const readTables = new Set<string>();
     for (const table of tables) {
-      if (readTables.has(table.name)) {
-        if (table.isWrite) {
-          throw new Error(
-            "This query writes and reads from the same table. This may cause infinite loops."
-          );
-        }
-        continue;
+      if (!readTables.has(table.name)) {
+        readTables.add(table.name);
+      } else if (table.isWrite) {
+        throw new Error(
+          "This query writes and reads from the same table. This may cause infinite loops."
+        );
       }
-
-      readTables.add(table.name);
     }
 
     const notifyDataChange = createDebouncedCallback(() => {
@@ -242,10 +251,10 @@ export class SQLiteMemoryDb<Database> {
     }, 30);
 
     for (const table of readTables) {
-      let subscribers = this.tableSunscribers.get(table);
+      let subscribers = this.tableSubscribers.get(table);
       if (!subscribers) {
         subscribers = new Set();
-        this.tableSunscribers.set(table, subscribers);
+        this.tableSubscribers.set(table, subscribers);
       }
       subscribers.add(notifyDataChange);
     }
@@ -253,15 +262,15 @@ export class SQLiteMemoryDb<Database> {
     return {
       unsubscribe: () => {
         for (const table of readTables) {
-          this.tableSunscribers.get(table)?.delete(notifyDataChange);
+          this.tableSubscribers.get(table)?.delete(notifyDataChange);
         }
       },
     };
   }
 
-  getTablesUsed(query: string & {}) {
-    if (!this.tablesUsedStatememnt) {
-      this.tablesUsedStatememnt = this.prepare<
+  getTablesUsed(query: string) {
+    if (!this.tablesUsedStatement) {
+      this.tablesUsedStatement = this.prepare<
         [string],
         { name: string; isWrite: boolean }
       >(
@@ -269,12 +278,12 @@ export class SQLiteMemoryDb<Database> {
       );
     }
 
-    const tables = this.tablesUsedStatememnt.execute([query]);
+    const tables = this.tablesUsedStatement.execute([query]);
 
-    // if (query.toLowerCase().includes("delete")) {
-    //   // tables_used function does not work with delete queries that clear entire tables
-    //   tables.push(...this.getClearedTables(query));
-    // }
+    if (tables.length == 0 && query.toLowerCase().includes("delete")) {
+      // tables_used function does not work with delete queries that clear entire tables
+      tables.push(...this.getClearedTables(query));
+    }
 
     return tables;
   }
@@ -303,8 +312,6 @@ export class SQLiteMemoryDb<Database> {
       ).join(",")})`
     ).rows;
 
-    console.log("clearedTablesRootPages", clearedTablesRootPages);
-
     return tableNames;
   }
 
@@ -323,11 +330,17 @@ export class SQLiteMemoryDb<Database> {
   }
 
   private onUpdateHook(table: string, type: ChangeType) {
-    this.tableSunscribers.get(table)?.forEach((subscriber) => subscriber(type));
+    this.tableSubscribers.get(table)?.forEach((subscriber) => {
+      try {
+        subscriber(type);
+      } catch (error) {
+        console.error(`Error calling table [${table}] subscriber`, error);
+      }
+    });
   }
 
-  forceTablesUpdate(tables: (TableName<Database> | (string & {}))[] = []) {
-    this.tableSunscribers.forEach((subscribers, table) => {
+  notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] = []) {
+    this.tableSubscribers.forEach((subscribers, table) => {
       if (tables.length > 0 && !tables.includes(table)) {
         return;
       }
@@ -352,9 +365,41 @@ export class SQLiteMemoryDb<Database> {
     );
   }
 
+  createSnapshot() {
+    this.performanceLogger.logStart();
+    const snapshot = this.sqlite3.capi.sqlite3_js_db_export(this.ensureDb);
+    this.performanceLogger.logEnd(
+      "createSnapshot",
+      `snapshot size: ${snapshot.byteLength}`,
+      "info"
+    );
+
+    return snapshot;
+  }
+
+  useSnapshot(snapshot: Uint8Array<ArrayBuffer>) {
+    this.performanceLogger.logStart();
+    const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
+    this.dataPointers.push(dataPointer);
+
+    const resultCode = this.sqlite3.capi.sqlite3_deserialize(
+      this.ensureDb,
+      "main",
+      dataPointer,
+      snapshot.byteLength,
+      snapshot.byteLength,
+      this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+    );
+
+    this.ensureDb.checkRc(resultCode);
+    this.performanceLogger.logEnd("useSnapshot", "success", "info");
+
+    this.notifyTableSubscribers();
+  }
+
   close() {
     this.preparedStatements.forEach((stmt) => stmt.finalize());
-    this.tablesUsedStatememnt = null;
+    this.tablesUsedStatement = null;
     this.preparedStatements = [];
 
     this.db?.close();

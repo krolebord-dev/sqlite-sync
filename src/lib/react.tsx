@@ -51,7 +51,7 @@ export function createDbContext<Database>() {
 
     const query = useMemo(
       () => {
-        const compiledQuery = queryFn(db.kysely, params as TParams);
+        const compiledQuery = queryFn(db.memoryDb.kysely, params as TParams);
         const fetchRows = () =>
           db.memoryDb.execute<TResult>({
             sql: compiledQuery.sql,
