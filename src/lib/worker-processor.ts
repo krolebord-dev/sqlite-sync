@@ -32,7 +32,7 @@ import { logger } from "../logger";
 import { applyCrdtEvent } from "./apply-crdt-event";
 
 type WorkerProcessorOptions = {
-  nodeId: string;
+  clientId: string;
   dbPath: string;
   broadcastChannels: WorkerBroadcastChannels;
   sqlite3: Sqlite3Static;
@@ -42,7 +42,7 @@ type WorkerProcessorOptions = {
 };
 
 export class WorkerProcessor implements WorkerRpc {
-  private readonly nodeId: string;
+  private readonly clientId: string;
   private readonly dbPath: string;
   private readonly broadcastChannels: WorkerBroadcastChannels;
   private readonly sqlite3: Sqlite3Static;
@@ -53,7 +53,7 @@ export class WorkerProcessor implements WorkerRpc {
   private syncId: number;
 
   private constructor(opts: WorkerProcessorOptions) {
-    this.nodeId = opts.nodeId;
+    this.clientId = opts.clientId;
     this.dbPath = opts.dbPath.startsWith("/") ? opts.dbPath : `/${opts.dbPath}`;
     this.broadcastChannels = opts.broadcastChannels;
     this.sqlite3 = opts.sqlite3;
@@ -167,7 +167,7 @@ export class WorkerProcessor implements WorkerRpc {
     await migrator.migrateToLatest();
 
     const processor = new WorkerProcessor({
-      nodeId: config.nodeId,
+      clientId: config.clientId,
       dbPath: config.dbPath,
       broadcastChannels,
       sqlite3,

@@ -14,12 +14,15 @@ import { applyCrdtEvent } from "./apply-crdt-event";
 
 type SyncedDbOptions = {
   dbPath: string;
-  nodeId: string;
+  tabId?: string;
+  clientId: string;
   logger?: Logger;
 };
 
 export class SyncedDb<Database> {
-  public readonly nodeId: string;
+  public readonly tabId: string;
+  public readonly clientId: string;
+
   public readonly hlcCounter: HLCCounter;
   public readonly memoryDb: SQLiteMemoryDb<Database>;
   public readonly workerDb: SQLiteWorkerDb;
@@ -30,7 +33,8 @@ export class SyncedDb<Database> {
   private shouldTriggerCrdtEvents: 0 | 1 = 1;
 
   private constructor(
-    nodeId: string,
+    tabId: string,
+    clientId: string,
     hlcCounter: HLCCounter,
     memoryDb: SQLiteMemoryDb<Database>,
     workerDb: SQLiteWorkerDb,
@@ -40,19 +44,24 @@ export class SyncedDb<Database> {
     this.memoryDb = memoryDb;
     this.workerDb = workerDb;
     this.logger = logger;
-    this.nodeId = nodeId;
+    this.tabId = tabId;
+    this.clientId = clientId;
     this.memoryDbSyncId = 0;
   }
 
   public static async create<Database>(options: SyncedDbOptions) {
     const logger = options.logger ?? (() => {});
 
-    const hlcCounter = new HLCCounter(options.nodeId, () => Date.now());
+    const clientId = `c-${options.clientId}`;
+    const tabId = `${clientId}:t-${options.tabId ?? generateId()}`;
+
+    const hlcCounter = new HLCCounter(tabId, () => Date.now());
 
     const [memoryDb, workerDb] = await Promise.all([
       SQLiteMemoryDb.create<Database>({ logger }),
       SQLiteWorkerDb.create({
-        nodeId: options.nodeId,
+        tabId,
+        clientId,
         dbPath: options.dbPath,
         logger,
         onNotification: (notification) => {
@@ -62,7 +71,8 @@ export class SyncedDb<Database> {
     ]);
 
     const syncedDb = new SyncedDb<Database>(
-      options.nodeId,
+      tabId,
+      clientId,
       hlcCounter,
       memoryDb,
       workerDb,
@@ -136,7 +146,8 @@ export class SyncedDb<Database> {
     this.memoryDb.db.execute(`
 create trigger ${table}_created
 after insert on ${table}
-when should_trigger_crdt_events()
+for each row
+when should_trigger_crdt_events() = 1
 begin
   insert into pending_crdt_events (id, timestamp, type, dataset, item_id, payload)
   values (
@@ -156,9 +167,9 @@ end;
 create trigger ${table}_updated
 after update on ${table}
 for each row
-when should_trigger_crdt_events() and ${valueColumnNames
+when should_trigger_crdt_events() = 1 and (${valueColumnNames
       .map((column) => `old.${column} is not new.${column}`)
-      .join(" or ")}
+      .join(" or ")})
 begin
   insert into pending_crdt_events (id, timestamp, type, dataset, item_id, payload)
   values (
@@ -182,7 +193,8 @@ end;
     this.memoryDb.db.execute(`
 create trigger ${table}_deleted
 before delete on ${table}
-when should_trigger_crdt_events()
+for each row
+when should_trigger_crdt_events() = 1
 begin
   update ${table}
   set tombstone = 1
@@ -209,7 +221,7 @@ where tombstone = 0;`);
       return;
     }
 
-    await this.workerDb.pushLocalEvents(this.nodeId, pendingCrdtEvents);
+    await this.workerDb.pushLocalEvents(this.tabId, pendingCrdtEvents);
 
     perf.logEnd(
       "flushPendingCrdtEvents",
@@ -235,7 +247,7 @@ where tombstone = 0;`);
           return;
         }
         this.memoryDbSyncId = notification.event.sync_id;
-        if (notification.event.node_id !== this.nodeId) {
+        if (notification.event.node_id !== this.tabId) {
           try {
             this.shouldTriggerCrdtEvents = 0;
             applyCrdtEvent(this.memoryDb.db, notification.event);

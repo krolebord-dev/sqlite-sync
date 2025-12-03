@@ -93,7 +93,8 @@ export const createBroadcastChannels = (): WorkerBroadcastChannels => {
 
 export type WorkerConfig = {
   dbPath: string;
-  nodeId: string;
+  tabId: string;
+  clientId: string;
   clearOnInit?: boolean;
 };
 

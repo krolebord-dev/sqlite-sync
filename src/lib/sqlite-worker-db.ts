@@ -23,14 +23,16 @@ import type { ExecuteParams, ExecuteResult } from "./sqlite-db-wrapper";
 type SQLiteWorkerDbOptions = {
   dbPath: string;
   logger: Logger;
-  nodeId: string;
+  tabId: string;
+  clientId: string;
   worker: Worker;
   onNotification?: (notification: WorkerNotificationMessage) => void;
 };
 
 export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
   private readonly logger: Logger;
-  private readonly nodeId: string;
+  private readonly tabId: string;
+  private readonly clientId: string;
   private readonly dbPath: string;
 
   private readonly worker: Worker;
@@ -49,7 +51,8 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
   private constructor(opts: SQLiteWorkerDbOptions) {
     this.logger = opts.logger;
     this.worker = opts.worker;
-    this.nodeId = opts.nodeId;
+    this.tabId = opts.tabId;
+    this.clientId = opts.clientId;
     this.dbPath = opts.dbPath;
     this.onNotification = opts.onNotification;
     this.requestsChannel = new BroadcastChannel(broadcastChannelNames.requests);
@@ -163,7 +166,8 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
       type: "init",
       config: {
         dbPath: this.dbPath,
-        nodeId: this.nodeId,
+        tabId: this.tabId,
+        clientId: this.clientId,
         clearOnInit: window.location.search.includes("clear"),
       },
     };

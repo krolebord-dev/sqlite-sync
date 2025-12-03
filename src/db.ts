@@ -14,11 +14,17 @@ export const { useDb, DbProvider, useDbQuery } = createDbContext<{
   };
 }>();
 
+const clientId = new URLSearchParams(window.location.search).get("clientId");
+if (!clientId) {
+  throw new Error("clientId is required");
+}
+
 export async function initDb() {
   const perf = startPerformanceLogger(logger);
   const db = await SyncedDb.create<Database>({
     dbPath: "db.sqlite3",
-    nodeId: `tab-${generateId()}`,
+    tabId: generateId(),
+    clientId: clientId!,
     logger,
   });
 
