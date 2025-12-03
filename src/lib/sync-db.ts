@@ -81,8 +81,8 @@ export class SyncedDb<Database> {
 
     this.registerSystemFunctions();
 
-    await this.memoryDb.kysely.transaction().execute(async (tx) => {
-      await memoryDbMigration.up(tx);
+    this.memoryDb.db.executeTransaction(() => {
+      memoryDbMigration.up(this.memoryDb.db);
     });
 
     this.memoryDb.subscribeToTableChanges("pending_crdt_events", () => {

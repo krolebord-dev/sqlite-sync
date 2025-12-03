@@ -1,6 +1,7 @@
 import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import type { SyncedDb } from "./sync-db";
-import type { CompiledQuery, Kysely } from "kysely";
+import type { Compilable, Kysely } from "kysely";
+import { dummyKysely } from "./dummy-kysely";
 
 type UseDbQueryOptions<
   TParams extends readonly unknown[] | undefined,
@@ -8,7 +9,7 @@ type UseDbQueryOptions<
   Database
 > = {
   parameters?: TParams;
-  queryFn: (kysely: Kysely<Database>, keys: TParams) => CompiledQuery<TResult>;
+  queryFn: (kysely: Kysely<Database>, keys: TParams) => Compilable<TResult>;
 };
 
 export function createDbContext<Database>() {
@@ -42,7 +43,7 @@ export function createDbContext<Database>() {
     const db = useDb();
 
     const compiledQuery = useMemo(() => {
-      return queryFn(db.memoryDb.kysely, parameters as TParams);
+      return queryFn(dummyKysely, parameters as TParams).compile();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [db, ...(parameters ?? [])]);
 

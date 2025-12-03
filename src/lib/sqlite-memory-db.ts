@@ -3,10 +3,7 @@ import sqlite3InitModule, {
   type SqlValue,
   type Sqlite3Static,
 } from "@sqlite.org/sqlite-wasm";
-import type { Kysely } from "kysely";
-import { createSQLiteKysely } from "./sqlite-kysely";
 import { startPerformanceLogger, type Logger } from "./logger";
-import type { MemoryDbSchema } from "./migrations/system-schema";
 import { SQLiteDbWrapper, type PreparedStatement } from "./sqlite-db-wrapper";
 
 let sqliteModule: Sqlite3Static | null = null;
@@ -28,8 +25,6 @@ type ScalarFunctionOptions<
 } & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
 
 export class SQLiteMemoryDb<Database> {
-  readonly kysely: Kysely<Database & MemoryDbSchema>;
-
   readonly db: SQLiteDbWrapper;
   private sqlite3: Sqlite3Static;
 
@@ -53,7 +48,6 @@ export class SQLiteMemoryDb<Database> {
       logger: this.logger,
       loggerPrefix: "memory",
     });
-    this.kysely = createSQLiteKysely<Database & MemoryDbSchema>(this.db);
   }
 
   static async create<Database>(opts?: SQLiteMemoryDbOptions) {

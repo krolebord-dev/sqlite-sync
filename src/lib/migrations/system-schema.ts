@@ -1,4 +1,6 @@
 import type { Kysely, Migration, ColumnType } from "kysely";
+import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { dummyKysely } from "../dummy-kysely";
 
 const metaTableName = "sync_db_meta" as const;
 
@@ -67,9 +69,11 @@ export const systemMigration: Migration = {
   },
 };
 
-export const memoryDbMigration: Migration = {
-  async up(db) {
-    await createPendingCrdtEventsTable(db, "pending_crdt_events").execute();
+export const memoryDbMigration = {
+  up(db: SQLiteDbWrapper) {
+    db.execute(
+      createPendingCrdtEventsTable(dummyKysely, "pending_crdt_events").compile()
+    );
   },
 };
 

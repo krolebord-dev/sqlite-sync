@@ -4,15 +4,8 @@ import type {
   SqlValue,
 } from "@sqlite.org/sqlite-wasm";
 import { startPerformanceLogger, type Logger } from "./logger";
-import {
-  DummyDriver,
-  Kysely,
-  SqliteAdapter,
-  SqliteIntrospector,
-  SqliteQueryCompiler,
-  type Compilable,
-  type CompiledQuery,
-} from "kysely";
+import { Kysely, type Compilable, type CompiledQuery } from "kysely";
+import { dummyKysely } from "./dummy-kysely";
 
 export type ExecuteParams = {
   sql: string;
@@ -36,14 +29,6 @@ type SqliteWrapperOptions = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const dummyKysely: Kysely<any> = new Kysely({
-  dialect: {
-    createAdapter: () => new SqliteAdapter(),
-    createDriver: () => new DummyDriver(),
-    createQueryCompiler: () => new SqliteQueryCompiler(),
-    createIntrospector: (db) => new SqliteIntrospector(db),
-  },
-});
 
 export class SQLiteDbWrapper<TDatabase = unknown> {
   private db: SQLiteDatabase | null = null;
@@ -84,7 +69,9 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   executeTransaction<T>(
-    callback: (db: Pick<SQLiteDbWrapper, "execute" | "sql">) => T
+    callback: (
+      db: Pick<SQLiteDbWrapper<TDatabase>, "execute" | "sql" | "executeKysely">
+    ) => T
   ): T {
     return this.ensureDb.transaction(() => callback(this));
   }
