@@ -1,0 +1,18 @@
+sequenceDiagram
+    actor U as User
+    participant MM as other tabs
+    participant M as Memory DB<br>active tab
+    participant P as Persisted DB<br>worker
+    participant S as Remote DB<br>server
+
+    U->>+M: Execute read query
+    M->>-U: Return result
+    U->>+M: Execute write query
+    M->>M: Write crdt events
+    M->>-U: Return result
+    M->>M: Notify live queries
+    M->>P: Flush crdt events
+    P->>P: Persist and apply crdt events
+    P->>MM: Broadcast crdt events
+    MM->>MM: Apply crdt events
+    MM->>U: Refetch live queries

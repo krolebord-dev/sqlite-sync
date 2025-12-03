@@ -1,0 +1,16 @@
+sequenceDiagram
+    actor U as User
+    participant MM as other tabs
+    participant M as Memory DB<br>active tab
+    participant P as Persisted DB<br>worker
+    participant S as Remote DB<br>server
+
+    U->>M: Open tab
+    M->>+P: Create worker DB
+    P->>P: Init DB From VFS
+    P->>P: Ensure system schema
+    P->>-M: Send ready message
+    M->>+P: Request snapshot
+    P->>-M: Send snapshot
+    M->>M: Load snapshot and init crdt
+    

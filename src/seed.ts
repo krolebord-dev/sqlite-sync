@@ -20,7 +20,7 @@ interface Database {
 type SeedDb = {
   sql: (
     queryTemplate: TemplateStringsArray | string,
-    ...params: unknown[]
+    ...parameters: unknown[]
   ) => Promise<unknown[]>;
 };
 

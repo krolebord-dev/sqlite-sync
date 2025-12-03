@@ -1,12 +1,11 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.worker.tsbuildinfo",
     "target": "ES2022",
     "useDefineForClassFields": true,
     "lib": [
       "ES2022",
-      "DOM",
-      "DOM.Iterable"
+      "WebWorker"
     ],
     "module": "ESNext",
     "skipLibCheck": true,
@@ -26,9 +25,6 @@
     "noUncheckedSideEffectImports": true
   },
   "include": [
-    "src"
-  ],
-  "exclude": [
     "src/lib/worker.ts"
   ]
 }

@@ -7,7 +7,7 @@ type UseDbQueryOptions<
   TResult,
   Database
 > = {
-  params?: TParams;
+  parameters?: TParams;
   queryFn: (kysely: Kysely<Database>, keys: TParams) => CompiledQuery<TResult>;
 };
 
@@ -36,15 +36,15 @@ export function createDbContext<Database>() {
     TResult,
     TParams extends readonly unknown[] | undefined = undefined
   >({
-    params,
+    parameters,
     queryFn,
   }: UseDbQueryOptions<TParams, TResult, Database>) => {
     const db = useDb();
 
     const compiledQuery = useMemo(() => {
-      return queryFn(db.memoryDb.kysely, params as TParams);
+      return queryFn(db.memoryDb.kysely, parameters as TParams);
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [db, ...(params ?? [])]);
+    }, [db, ...(parameters ?? [])]);
 
     const liveQuery = useMemo(() => {
       return db.memoryDb.createLiveQuery<TResult>({

@@ -7,7 +7,7 @@ export function App() {
 
   const [search, setSearch] = useState("");
   const { rows: users } = useDbQuery({
-    params: [search],
+    parameters: [search],
     queryFn: (db, [search]) => {
       let query = db
         .selectFrom("users")

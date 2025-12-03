@@ -1,234 +1,74 @@
 import sqlite3InitModule, {
-  type BindableValue,
-  type Database as SQLiteDatabase,
+  type FunctionOptions,
   type SqlValue,
   type Sqlite3Static,
 } from "@sqlite.org/sqlite-wasm";
 import type { Kysely } from "kysely";
-import { createSQLiteMemoryKysely } from "./sqlite-memory-kysely-driver";
+import { createSQLiteKysely } from "./sqlite-kysely";
+import { startPerformanceLogger, type Logger } from "./logger";
+import type { MemoryDbSchema } from "./migrations/system-schema";
+import { SQLiteDbWrapper, type PreparedStatement } from "./sqlite-db-wrapper";
 
 let sqliteModule: Sqlite3Static | null = null;
-
-type ExecuteParams = {
-  sql: string;
-  params: readonly unknown[];
-};
-
-type ExecuteResult<T> = {
-  rows: T[];
-};
-
-type PreparedStatement<TParams extends SqlValue[], TResult> = {
-  execute: (params: TParams) => TResult[];
-  finalize: () => void;
-  isFinalized: boolean;
-};
-
-type Logger = (type: "info" | "warning" | "error", message: string) => void;
 
 type SQLiteMemoryDbOptions = {
   logger?: Logger;
 };
 
-type ChangeType = "insert" | "update" | "delete";
-
 type TableName<Database> = keyof Database extends string
   ? keyof Database
   : never;
 
-class PerformanceLogger {
-  private readonly logger: Logger;
-  private startTime: number = performance.now();
-
-  constructor(logger: Logger) {
-    this.logger = logger;
-  }
-
-  logStart() {
-    this.startTime = performance.now();
-  }
-
-  logEnd(
-    type: string,
-    message: string,
-    level: "info" | "warning" | "error" = "info"
-  ) {
-    const elapsed = performance.now() - this.startTime;
-    this.startTime = performance.now();
-
-    this.logger(level, `${type} - ${elapsed.toFixed(2)}ms - ${message}`);
-  }
-}
+type ScalarFunctionOptions<
+  TArgs extends readonly SqlValue[],
+  TResult extends SqlValue
+> = {
+  name: string;
+  callback: (...args: TArgs) => TResult;
+} & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
 
 export class SQLiteMemoryDb<Database> {
-  kysely: Kysely<Database>;
+  readonly kysely: Kysely<Database & MemoryDbSchema>;
 
-  private db: SQLiteDatabase | null = null;
+  readonly db: SQLiteDbWrapper;
   private sqlite3: Sqlite3Static;
 
-  private readonly performanceLogger: PerformanceLogger;
+  private readonly logger: Logger;
 
-  private tableSubscribers: Map<string, Set<(type: ChangeType) => void>> =
-    new Map();
+  private readonly tableSubscribers: Map<string, Set<() => void>> = new Map();
 
-  private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
+  private readonly dataPointers = [] as number[];
+
   private tablesUsedStatement: PreparedStatement<
     [string],
     { name: string; isWrite: boolean }
   > | null = null;
 
-  private dataPointers = [] as number[];
-
   private constructor(sqlite3: Sqlite3Static, opts?: SQLiteMemoryDbOptions) {
     this.sqlite3 = sqlite3;
-    this.db = new sqlite3.oo1.DB({ filename: ":memory:" });
-    this.performanceLogger = new PerformanceLogger(opts?.logger ?? (() => {}));
+    this.logger = opts?.logger ?? (() => {});
 
-    this.kysely = createSQLiteMemoryKysely<Database>(this);
+    this.db = new SQLiteDbWrapper({
+      db: new sqlite3.oo1.DB({ filename: ":memory:" }),
+      logger: this.logger,
+      loggerPrefix: "memory",
+    });
+    this.kysely = createSQLiteKysely<Database & MemoryDbSchema>(this.db);
   }
 
   static async create<Database>(opts?: SQLiteMemoryDbOptions) {
+    const perf = startPerformanceLogger(opts?.logger ?? (() => {}));
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
     }
 
     const db = new SQLiteMemoryDb<Database>(sqliteModule, opts);
 
-    db.registerOnUpdateHook();
+    db.registerDbHooks();
+
+    perf.logEnd("createSQLiteMemoryDb", "success", "info");
 
     return db;
-  }
-
-  get ensureDb() {
-    if (!this.db) {
-      throw new Error("Database is already closed");
-    }
-    return this.db;
-  }
-
-  execute<T = unknown>(params: ExecuteParams | string): ExecuteResult<T> {
-    const sql = typeof params === "string" ? params : params.sql;
-    const bind = typeof params === "string" ? undefined : params.params;
-
-    this.performanceLogger.logStart();
-    const rows = this.ensureDb.exec({
-      sql,
-      bind: bind as BindableValue[],
-      returnValue: "resultRows",
-      rowMode: "object",
-    });
-    this.performanceLogger.logEnd("query", sql, "info");
-
-    return { rows: rows as T[] };
-  }
-
-  executeTransaction<T>(callback: (db: SQLiteDatabase) => T): T {
-    return this.ensureDb.transaction(callback);
-  }
-
-  // recordChanges() {
-  //   const wasm = this.sqlite3.wasm;
-  //   const capi = this.sqlite3.capi;
-
-  //   const ptrStart = wasm.pstack.pointer;
-  //   try {
-  //     const ppOut = wasm.pstack.allocPtr();
-  //     capi.sqlite3session_create(this.ensureDb, "main", ppOut);
-
-  //     const pSession = wasm.peekPtr(ppOut);
-  //     capi.sqlite3session_attach(pSession, null);
-
-  //     for (let i = 0; i < 16000; i++) {
-  //       this.execute({
-  //         sql: 'insert into "users" ("name", "email") values (?, ?)',
-  //         params: ["test" + i, "test" + i + "@test.com"],
-  //       });
-  //     }
-
-  //     const pnChanges = wasm.pstack.alloc("i32");
-
-  //     const result = capi.sqlite3session_changeset(pSession, pnChanges, ppOut);
-
-  //     const size = wasm.peek32(pnChanges);
-  //     const changesetPtr = wasm.peekPtr(ppOut);
-
-  //     if (!changesetPtr || (!wasm.isPtr(changesetPtr) && changesetPtr < 1)) {
-  //       throw new Error("Failed to get changeset");
-  //     }
-
-  //     capi.sqlite3changeset_invert(size, changesetPtr, pnChanges, ppOut);
-  //     capi.sqlite3changeset_apply(
-  //       this.ensureDb,
-  //       wasm.peek32(pnChanges),
-  //       wasm.peekPtr(ppOut),
-  //       (...args) => {
-  //         console.log("apply", ...args);
-  //         return 1;
-  //       },
-  //       (...args) => {
-  //         console.log("apply", ...args);
-  //         return capi.SQLITE_CHANGESET_OMIT;
-  //       },
-  //       0
-  //     );
-
-  //     capi.sqlite3_free(changesetPtr);
-
-  //     console.log("changeset", result, pnChanges, size);
-  //   } finally {
-  //     wasm.pstack.restore(ptrStart);
-  //   }
-  // }
-
-  prepare<TParams extends SqlValue[], TResult>(sql: string) {
-    const stmt = this.ensureDb.prepare(sql);
-    let isFinalized = false;
-
-    const execute = (params: TParams) => {
-      if (isFinalized) {
-        throw new Error("Statement is finalized");
-      }
-
-      stmt.bind(params);
-      const results = [] as TResult[];
-      while (stmt.step()) {
-        results.push(stmt.get({}) as TResult);
-      }
-      stmt.reset(true);
-      return results;
-    };
-
-    const finalize = () => {
-      isFinalized = true;
-      stmt.finalize();
-    };
-
-    const preparedStatement: PreparedStatement<TParams, TResult> = {
-      execute,
-      finalize,
-      get isFinalized() {
-        return isFinalized;
-      },
-    };
-
-    this.preparedStatements.push(
-      preparedStatement as PreparedStatement<SqlValue[], unknown>
-    );
-
-    return preparedStatement;
-  }
-
-  sql(templateOrString: TemplateStringsArray | string, ...params: unknown[]) {
-    if (typeof templateOrString === "string") {
-      return this.execute({
-        sql: templateOrString,
-        params: params as BindableValue[],
-      });
-    }
-    return this.execute({
-      sql: templateOrString.join("?"),
-      params: params as BindableValue[],
-    });
   }
 
   createLiveQuery<TResult>(query: {
@@ -236,9 +76,9 @@ export class SQLiteMemoryDb<Database> {
     parameters: readonly unknown[];
   }) {
     const fetchRows = () =>
-      this.execute<TResult>({
+      this.db.execute<TResult>({
         sql: query.sql,
-        params: query.parameters ?? [],
+        parameters: query.parameters ?? [],
       }).rows;
 
     let rows: TResult[] | null = null;
@@ -314,9 +154,24 @@ export class SQLiteMemoryDb<Database> {
     };
   }
 
+  subscribeToTableChanges(table: string, onChanges: () => void) {
+    let subscribers = this.tableSubscribers.get(table);
+    if (!subscribers) {
+      subscribers = new Set();
+      this.tableSubscribers.set(table, subscribers);
+    }
+    subscribers.add(onChanges);
+
+    return {
+      unsubscribe: () => {
+        subscribers.delete(onChanges);
+      },
+    };
+  }
+
   getTablesUsed(query: string) {
     if (!this.tablesUsedStatement) {
-      this.tablesUsedStatement = this.prepare<
+      this.tablesUsedStatement = this.db.prepare<
         [string],
         { name: string; isWrite: boolean }
       >(
@@ -335,7 +190,7 @@ export class SQLiteMemoryDb<Database> {
   }
 
   private getClearedTables(query: string) {
-    const operations = this.execute<{
+    const operations = this.db.execute<{
       opcode: string;
       p1: number;
       p2: number;
@@ -352,7 +207,7 @@ export class SQLiteMemoryDb<Database> {
       return [];
     }
 
-    const tableNames = this.execute<{ name: string; isWrite: boolean }>(
+    const tableNames = this.db.execute<{ name: string; isWrite: boolean }>(
       `select t.tbl_name as name, true as isWrite from sqlite_master as t where t.rootpage in (${Array.from(
         clearedTablesRootPages
       ).join(",")})`
@@ -365,56 +220,96 @@ export class SQLiteMemoryDb<Database> {
     TArgs extends SqlValue[],
     TResult extends SqlValue | void = void
   >(name: string, callback: (...args: TArgs) => TResult) {
-    return this.ensureDb.createFunction({
+    return this.db.ensureDb.createFunction({
+      name,
+      arity: callback.length,
+      xFunc: (_, ...args) => {
+        const result = callback(...(args as TArgs)) as SqlValue;
+        return result;
+      },
+    });
+  }
+
+  createScalarFunction<TArgs extends SqlValue[], TResult extends SqlValue>({
+    name,
+    callback,
+    deterministic,
+    directOnly,
+    innocuous,
+  }: ScalarFunctionOptions<TArgs, TResult>) {
+    return this.db.ensureDb.createFunction({
       name,
       xFunc: (_, ...args) => {
         const result = callback(...(args as TArgs)) as SqlValue;
         return result;
       },
-      arity: -1,
-    });
-  }
-
-  private onUpdateHook(table: string, type: ChangeType) {
-    this.tableSubscribers.get(table)?.forEach((subscriber) => {
-      try {
-        subscriber(type);
-      } catch (error) {
-        console.error(`Error calling table [${table}] subscriber`, error);
-      }
+      arity: callback.length,
+      deterministic,
+      directOnly,
+      innocuous,
     });
   }
 
   notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] = []) {
-    this.tableSubscribers.forEach((subscribers, table) => {
-      if (tables.length > 0 && !tables.includes(table)) {
-        return;
-      }
+    if (tables.length === 0) {
+      this.tableSubscribers.forEach((subscribers) => {
+        subscribers.forEach((subscriber) => subscriber());
+      });
+      return;
+    }
 
-      subscribers.forEach((subscriber) => subscriber("update"));
-    });
+    for (const table of tables) {
+      this.tableSubscribers.get(table)?.forEach((subscriber) => subscriber());
+    }
   }
 
-  private registerOnUpdateHook() {
-    const opMap: Record<number, ChangeType> = {
-      [this.sqlite3.capi.SQLITE_INSERT]: "insert",
-      [this.sqlite3.capi.SQLITE_UPDATE]: "update",
-      [this.sqlite3.capi.SQLITE_DELETE]: "delete",
-    };
+  private registerDbHooks() {
+    const updateQueue = new Set<string>();
 
     this.sqlite3.capi.sqlite3_update_hook(
-      this.ensureDb,
-      (_ctx, opId, _db, table) => {
-        this.onUpdateHook(table, opMap[opId]);
+      this.db.ensureDb,
+      (_ctx, _opId, _db, table) => {
+        updateQueue.add(table);
+      },
+      0
+    );
+
+    this.sqlite3.capi.sqlite3_rollback_hook(
+      this.db.ensureDb,
+      () => {
+        if (updateQueue.size === 0) {
+          return 0;
+        }
+
+        updateQueue.clear();
+        return 0;
+      },
+      0
+    );
+
+    this.sqlite3.capi.sqlite3_commit_hook(
+      this.db.ensureDb,
+      () => {
+        if (updateQueue.size === 0) {
+          return 0;
+        }
+
+        const tables = Array.from(updateQueue);
+        updateQueue.clear();
+
+        queueMicrotask(() => {
+          this.notifyTableSubscribers(tables);
+        });
+        return 0;
       },
       0
     );
   }
 
   createSnapshot() {
-    this.performanceLogger.logStart();
-    const snapshot = this.sqlite3.capi.sqlite3_js_db_export(this.ensureDb);
-    this.performanceLogger.logEnd(
+    const perf = startPerformanceLogger(this.logger);
+    const snapshot = this.sqlite3.capi.sqlite3_js_db_export(this.db.ensureDb);
+    perf.logEnd(
       "createSnapshot",
       `snapshot size: ${snapshot.byteLength}`,
       "info"
@@ -423,13 +318,13 @@ export class SQLiteMemoryDb<Database> {
     return snapshot;
   }
 
-  useSnapshot(snapshot: Uint8Array<ArrayBuffer>) {
-    this.performanceLogger.logStart();
+  useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
+    const perf = startPerformanceLogger(this.logger);
     const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
     this.dataPointers.push(dataPointer);
 
     const resultCode = this.sqlite3.capi.sqlite3_deserialize(
-      this.ensureDb,
+      this.db.ensureDb,
       "main",
       dataPointer,
       snapshot.byteLength,
@@ -437,19 +332,10 @@ export class SQLiteMemoryDb<Database> {
       this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
     );
 
-    this.ensureDb.checkRc(resultCode);
-    this.performanceLogger.logEnd("useSnapshot", "success", "info");
+    this.db.ensureDb.checkRc(resultCode);
+    perf.logEnd("useSnapshot", "success", "info");
 
     this.notifyTableSubscribers();
-  }
-
-  close() {
-    this.preparedStatements.forEach((stmt) => stmt.finalize());
-    this.tablesUsedStatement = null;
-    this.preparedStatements = [];
-
-    this.db?.close();
-    this.db = null;
   }
 }
 

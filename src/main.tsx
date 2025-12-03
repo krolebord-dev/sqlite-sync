@@ -1,7 +1,7 @@
 import { scan } from "react-scan";
 import { StrictMode, Suspense, use } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
+import { ShellApp } from "./ShellApp.tsx";
 import { DbProvider, initDb } from "./db.ts";
 
 scan({
@@ -14,7 +14,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Suspense fallback={<Loading />}>
       <Root>
-        <App />
+        <ShellApp />
       </Root>
     </Suspense>
   </StrictMode>
@@ -28,6 +28,5 @@ function Root({ children }: { children: React.ReactNode }) {
 
 // eslint-disable-next-line react-refresh/only-export-components
 function Loading() {
-  console.log("Loading");
   return <div>Loading...</div>;
 }
