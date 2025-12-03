@@ -1,5 +1,5 @@
 import { SQLiteMemoryDb } from "./sqlite-memory-db";
-import { HLCCounter, serializeHLC } from "./hlc";
+import { deserializeHLC, HLCCounter, serializeHLC } from "./hlc";
 import { introspectDb, type TableMetadata } from "./introspection";
 import { startPerformanceLogger, type Logger } from "./logger";
 import { SQLiteWorkerDb } from "./sqlite-worker-db";
@@ -235,6 +235,7 @@ where tombstone = 0;`);
   private handleWorkerNotification(notification: WorkerNotificationMessage) {
     switch (notification.notificationType) {
       case "new-event-applied": {
+        this.hlcCounter.mergeHLC(deserializeHLC(notification.event.timestamp));
         if (notification.event.sync_id <= this.memoryDbSyncId) {
           return;
         }
