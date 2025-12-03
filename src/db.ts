@@ -5,7 +5,14 @@ import { generateId } from "./lib/utils";
 import { logger } from "./logger";
 import { type Database } from "./seed";
 
-export const { useDb, DbProvider, useDbQuery } = createDbContext<Database>();
+export const { useDb, DbProvider, useDbQuery } = createDbContext<{
+  todo: {
+    id: string;
+    title: string;
+    completed: boolean;
+    tombstone: boolean;
+  };
+}>();
 
 export async function initDb() {
   const perf = startPerformanceLogger(logger);
