@@ -82,14 +82,20 @@ export class WorkerProcessor implements WorkerRpc {
     nodeId: string,
     events: Omit<PendingCrdtEvent, "node_id">[]
   ): void {
-    this.db.executeKysely((db) =>
-      db.insertInto("worker.pending_crdt_events").values(
-        events.map((x) => ({
-          ...x,
-          node_id: nodeId,
-        }))
-      )
-    );
+    this.db.executeTransaction((db) => {
+      const chunkSize = 100;
+      for (let i = 0; i < events.length; i += chunkSize) {
+        const chunk = events.slice(i, i + chunkSize);
+        db.executeKysely((db) =>
+          db.insertInto("worker.pending_crdt_events").values(
+            chunk.map((x) => ({
+              ...x,
+              node_id: nodeId,
+            }))
+          )
+        );
+      }
+    });
 
     this.startPendingEventsProcessing();
   }
