@@ -34,6 +34,7 @@ import type {
   PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
 import { applyCrdtEventMutations } from "./sqlite-crdt/apply-crdt-event";
+import { ensureSingletonExecution } from "./utils";
 
 type WorkerProcessorOptions = {
   clientId: string;
@@ -210,17 +211,9 @@ export class WorkerProcessor implements WorkerRpc {
     return method.apply(this, message.args as []);
   }
 
-  private pendingEventsProcessingPromise: Promise<void> | undefined;
-  private startPendingEventsProcessing() {
-    if (this.pendingEventsProcessingPromise) {
-      return;
-    }
-    this.pendingEventsProcessingPromise = this.processPendingCrdtEvents()
-      .catch(console.error)
-      .finally(() => {
-        this.pendingEventsProcessingPromise = undefined;
-      });
-  }
+  private readonly startPendingEventsProcessing = ensureSingletonExecution(
+    this.processPendingCrdtEvents.bind(this)
+  );
 
   private async processPendingCrdtEvents() {
     while (true) {

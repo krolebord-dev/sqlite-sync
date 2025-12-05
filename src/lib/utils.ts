@@ -18,7 +18,32 @@ export const generateId = () => {
   return crypto.randomUUID();
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type DistributiveOmit<T, K extends keyof T> = T extends any
   ? Omit<T, K>
   : never;
+
+export function ensureSingletonExecution(fn: () => Promise<void>) {
+  let isExecuting = false;
+  let shouldReExecute = false;
+
+  const wrappedFn = () => {
+    if (isExecuting) {
+      shouldReExecute = true;
+      return;
+    }
+
+    isExecuting = true;
+    fn().finally(() => {
+      isExecuting = false;
+
+      if (shouldReExecute) {
+        shouldReExecute = false;
+        wrappedFn();
+      }
+    });
+  };
+
+  wrappedFn.isExecuting = () => isExecuting;
+
+  return wrappedFn;
+}

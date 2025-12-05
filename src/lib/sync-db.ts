@@ -2,7 +2,7 @@ import { SQLiteMemoryDb } from "./sqlite-memory-db";
 import { deserializeHLC, HLCCounter, serializeHLC } from "./hlc";
 import { startPerformanceLogger, type Logger } from "./logger";
 import { SQLiteWorkerDb } from "./sqlite-worker-db";
-import { generateId } from "./utils";
+import { ensureSingletonExecution, generateId } from "./utils";
 import type { WorkerNotificationMessage } from "./worker-common";
 import {
   applyCrdtEventMutations,
@@ -12,7 +12,10 @@ import {
   applyMemoryDbSchema,
   type MemoryDbSchema,
 } from "./migrations/system-schema";
-import { registerCrdtFunctions } from "./sqlite-crdt/crdt-table-schema";
+import {
+  registerCrdtFunctions,
+  type AppliedCrdtEvent,
+} from "./sqlite-crdt/crdt-table-schema";
 import type { SQLiteDbWrapper } from "./sqlite-db-wrapper";
 
 type SyncedDbOptions = {
@@ -32,7 +35,7 @@ export class SyncedDb<Database> {
   public readonly logger: Logger;
   public memoryDbSyncId: number;
 
-  private isTabSyncEnabled: boolean = true;
+  private isLocalSyncEnabled: boolean = true;
 
   private constructor(
     tabId: string,
@@ -103,20 +106,23 @@ export class SyncedDb<Database> {
     });
 
     syncedDb.memoryDb.subscribeToTableChanges("pending_crdt_events", () => {
-      syncedDb.startFlushingPendingEvents();
+      if (syncedDb.isLocalSyncEnabled) {
+        syncedDb.startFlushingPendingEvents();
+      }
     });
 
     return syncedDb;
   }
 
   get tabSyncEnabled() {
-    return this.isTabSyncEnabled;
+    return this.isLocalSyncEnabled;
   }
 
   set tabSyncEnabled(value: boolean) {
-    this.isTabSyncEnabled = !!value;
-    if (this.isTabSyncEnabled) {
+    this.isLocalSyncEnabled = !!value;
+    if (this.isLocalSyncEnabled) {
       this.startFlushingPendingEvents();
+      this.pullEventsFromWorkerDb();
     }
   }
 
@@ -126,55 +132,61 @@ export class SyncedDb<Database> {
     this.memoryDbSyncId = snapshot.syncId;
   }
 
-  // private enqueueLocalCrdtEvent(event: LocalCrdtEvent) {
-  //   this.localCrdtEventsQueue.push(event);
-  //   this.startFlushingPendingEvents();
-  // }
+  private readonly startFlushingPendingEvents = ensureSingletonExecution(
+    this.flushPendingCrdtEvents.bind(this)
+  );
 
-  private flushPendingEventsPromise: Promise<void> | null = null;
-  private startFlushingPendingEvents() {
-    if (this.flushPendingEventsPromise || !this.isTabSyncEnabled) {
+  private async flushPendingCrdtEvents() {
+    await Promise.resolve();
+
+    const perf = startPerformanceLogger(this.logger);
+    const pendingCrdtEvents = (
+      this.memoryDb.db as unknown as SQLiteDbWrapper<MemoryDbSchema>
+    ).executePrepared("flush-pending-crdt-events", {}, (db) =>
+      db.deleteFrom("pending_crdt_events").returningAll()
+    );
+
+    if (pendingCrdtEvents.length === 0) {
       return;
     }
 
-    this.flushPendingEventsPromise = this._flushPendingCrdtEventsToWorkerDb()
-      .catch((error) => {
-        console.error("error flushing pending crdt events to worker db", error);
-      })
-      .finally(() => {
-        this.flushPendingEventsPromise = null;
-      });
-  }
+    await this.workerDb.pushLocalEvents(this.tabId, pendingCrdtEvents);
 
-  private async _flushPendingCrdtEventsToWorkerDb() {
-    await Promise.resolve();
-    while (true) {
-      const perf = startPerformanceLogger(this.logger);
-      const pendingCrdtEvents = (
-        this.memoryDb.db as unknown as SQLiteDbWrapper<MemoryDbSchema>
-      ).executePrepared("flush-pending-crdt-events", {}, (db) =>
-        db.deleteFrom("pending_crdt_events").returningAll()
-      );
-
-      if (pendingCrdtEvents.length === 0) {
-        return;
-      }
-
-      await this.workerDb.pushLocalEvents(this.tabId, pendingCrdtEvents);
-
-      perf.logEnd(
-        "flushPendingCrdtEvents",
-        `flushed ${pendingCrdtEvents.length} events`,
-        "info"
-      );
-    }
+    perf.logEnd(
+      "flushPendingCrdtEvents",
+      `flushed ${pendingCrdtEvents.length} events`,
+      "info"
+    );
 
     // TODO: handle errors and retries. Currently events are lost if the worker db is not available which may lead to desync
   }
 
+  private readonly pullEventsFromWorkerDb = ensureSingletonExecution(
+    async () => {
+      if (!this.isLocalSyncEnabled) {
+        return;
+      }
+
+      const events = await this.workerDb.pullEvents({
+        startFromSyncId: this.memoryDbSyncId,
+        excludeNodeId: this.tabId,
+      });
+
+      for (const event of events.events) {
+        this.applyRemoteEvent(event);
+      }
+
+      this.memoryDbSyncId = events.newSyncId;
+    }
+  );
+
   private handleWorkerNotification(notification: WorkerNotificationMessage) {
     switch (notification.notificationType) {
       case "new-event-applied": {
+        if (!this.isLocalSyncEnabled) {
+          return;
+        }
+
         if (notification.event.sync_id <= this.memoryDbSyncId) {
           console.error(
             "sync id is not greater than memory db sync id",
@@ -186,28 +198,13 @@ export class SyncedDb<Database> {
         }
 
         if (notification.event.sync_id - this.memoryDbSyncId > 1) {
-          console.error(
-            "sync gap detected",
-            notification.event.sync_id,
-            this.memoryDbSyncId,
-            notification.event
-          );
+          this.pullEventsFromWorkerDb();
           return;
         }
 
         this.memoryDbSyncId = notification.event.sync_id;
         if (notification.event.node_id !== this.tabId) {
-          this.hlcCounter.mergeHLC(
-            deserializeHLC(notification.event.timestamp)
-          );
-          applyCrdtEventMutations({
-            db: this.memoryDb.db,
-            updateLogTableName: "crdt_update_log",
-            event: {
-              ...notification.event,
-              payload: JSON.parse(notification.event.payload),
-            },
-          });
+          this.applyRemoteEvent(notification.event);
         }
         return;
       }
@@ -215,5 +212,17 @@ export class SyncedDb<Database> {
         notification.notificationType satisfies never;
       }
     }
+  }
+
+  private applyRemoteEvent(event: AppliedCrdtEvent) {
+    this.hlcCounter.mergeHLC(deserializeHLC(event.timestamp));
+    applyCrdtEventMutations({
+      db: this.memoryDb.db,
+      updateLogTableName: "crdt_update_log",
+      event: {
+        ...event,
+        payload: JSON.parse(event.payload),
+      },
+    });
   }
 }
