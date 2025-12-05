@@ -5,6 +5,12 @@ import { generateId } from "./lib/utils";
 
 export function App() {
   const db = useDb();
+  const [isTabSyncEnabled, setIsTabSyncEnabled] = useState(true);
+  const toggleTabSync = () => {
+    setIsTabSyncEnabled(!isTabSyncEnabled);
+    db.tabSyncEnabled = !isTabSyncEnabled;
+  };
+
   const [newTodoTitle, setNewTodoTitle] = useState("");
 
   // Query all active todos (not tombstoned)
@@ -38,7 +44,6 @@ export function App() {
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     db.memoryDb.db.executeKysely((db: any) =>
       db.insertInto("todo").values({
         id: generateId(),
@@ -53,7 +58,6 @@ export function App() {
 
   // Toggle todo completion
   const toggleTodo = (id: string, currentCompleted: boolean) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     db.memoryDb.db.executeKysely((db: any) =>
       db
         .updateTable("todo")
@@ -65,7 +69,6 @@ export function App() {
 
   // Delete a todo (set tombstone to true)
   const deleteTodo = (id: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     db.memoryDb.db.executeKysely((db: any) =>
       db.updateTable("todo").set({ tombstone: true }).where("id", "=", id)
     );
@@ -76,7 +79,6 @@ export function App() {
   const updateTodoTitle = (id: string, newTitle: string) => {
     if (!newTitle.trim()) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     db.memoryDb.db.executeKysely((db: any) =>
       db
         .updateTable("todo")
@@ -93,6 +95,12 @@ export function App() {
         A todo list powered by SQLite Sync with live queries and optimistic
         updates.
       </p>
+      <button
+        className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+        onClick={toggleTabSync}
+      >
+        {isTabSyncEnabled ? "Disable Tab Sync" : "Enable Tab Sync"}
+      </button>
 
       <BlockingIndicator />
 

@@ -1,7 +1,7 @@
 import type { Kysely } from "kysely";
 import type { QueryCreator } from "kysely";
-import type { SQLiteMemoryDb } from "./sqlite-memory-db";
 import { sql } from "kysely";
+import type { SQLiteDbWrapper } from "./sqlite-db-wrapper";
 
 interface SqliteSystemDatabase {
   // https://www.sqlite.org/schematab.html#alternative_names
@@ -44,6 +44,8 @@ export type TableMetadata = {
   columns: ColumnMetadata[];
 };
 
+export type DatabaseIntrospection = Record<string, TableMetadata>;
+
 type ColumnMetadata = {
   name: string;
   dataType: string;
@@ -54,14 +56,14 @@ type ColumnMetadata = {
 };
 
 export function introspectDb<BaseDatabase>(
-  _db: SQLiteMemoryDb<BaseDatabase>
-): Record<string, TableMetadata> {
-  const db = _db as unknown as SQLiteMemoryDb<SqliteSystemDatabase>;
-  const tables = db.db.executeKysely((db) =>
+  _db: SQLiteDbWrapper<BaseDatabase>
+): DatabaseIntrospection {
+  const db = _db as unknown as SQLiteDbWrapper<SqliteSystemDatabase>;
+  const tables = db.executeKysely((db) =>
     tablesQuery(db as unknown as Kysely<SqliteSystemDatabase>)
   ).rows;
 
-  const tablesMetadata = db.db.executeKysely((db) =>
+  const tablesMetadata = db.executeKysely((db) =>
     db
       .with("table_list", (qb) =>
         tablesQuery(qb as unknown as Kysely<SqliteSystemDatabase>)

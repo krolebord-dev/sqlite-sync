@@ -9,7 +9,6 @@ import {
 import type {
   AsyncRpc,
   GetSnapshotResponse,
-  PendingCrdtEvent,
   PullEventsResponse,
   WorkerInitMessage,
   WorkerNotificationMessage,
@@ -19,6 +18,7 @@ import type {
   WorkerRpc,
 } from "./worker-common";
 import type { ExecuteParams, ExecuteResult } from "./sqlite-db-wrapper";
+import type { PersistedCrdtEvent } from "./sqlite-crdt/crdt-table-schema";
 
 type SQLiteWorkerDbOptions = {
   dbPath: string;
@@ -30,7 +30,6 @@ type SQLiteWorkerDbOptions = {
 };
 
 export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
-  private readonly logger: Logger;
   private readonly tabId: string;
   private readonly clientId: string;
   private readonly dbPath: string;
@@ -49,7 +48,6 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
   >();
 
   private constructor(opts: SQLiteWorkerDbOptions) {
-    this.logger = opts.logger;
     this.worker = opts.worker;
     this.tabId = opts.tabId;
     this.clientId = opts.clientId;
@@ -65,10 +63,7 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
     return this.queryWorker("getSnapshot", []);
   }
 
-  pushLocalEvents(
-    nodeId: string,
-    events: Omit<PendingCrdtEvent, "node_id">[]
-  ): Promise<void> {
+  pushLocalEvents(nodeId: string, events: PersistedCrdtEvent[]): Promise<void> {
     return this.queryWorker("pushLocalEvents", [nodeId, events]);
   }
 
@@ -104,7 +99,6 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
 
   private async initialize() {
     await this.waitWorkerInit();
-    console.log("worker initialized");
 
     this.responsesChannel.onmessage = (event: MessageEvent<unknown>) => {
       const message = event.data;

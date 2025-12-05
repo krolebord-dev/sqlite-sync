@@ -1,12 +1,13 @@
 import { startPerformanceLogger } from "./lib/logger";
 import { createDbContext } from "./lib/react";
+import { makeCrdtTable } from "./lib/sqlite-crdt/make-crdt-table";
 import { SyncedDb } from "./lib/sync-db";
 import { generateId } from "./lib/utils";
 import { logger } from "./logger";
 import { type Database } from "./seed";
 
 export const { useDb, DbProvider, useDbQuery } = createDbContext<{
-  todo: {
+  _todo: {
     id: string;
     title: string;
     completed: boolean;
@@ -28,7 +29,11 @@ export async function initDb() {
     logger,
   });
 
-  db.crdtifyTable("todo");
+  makeCrdtTable({
+    db: db.memoryDb.db,
+    baseTableName: "_todo",
+    crdtTableName: "todo",
+  });
 
   perf.logEnd("initDb", "success");
 

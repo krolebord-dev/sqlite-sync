@@ -1,23 +1,12 @@
-import type { CrdtEventType } from "./migrations/system-schema";
+import type {
+  AppliedCrdtEvent,
+  PersistedCrdtEvent,
+} from "./sqlite-crdt/crdt-table-schema";
 import type { ExecuteParams, ExecuteResult } from "./sqlite-db-wrapper";
 
 export const syncDbWorkerLockName = "sync-db-worker-lock";
 
 export const syncDbWorkerSharedLockName = "sync-db-worker-shared-lock";
-
-export type PendingCrdtEvent = {
-  id: string;
-  timestamp: string;
-  type: CrdtEventType;
-  dataset: string;
-  item_id: string;
-  payload: string;
-  node_id: string;
-};
-
-export type AppliedCrdtEvent = PendingCrdtEvent & {
-  sync_id: number;
-};
 
 export type WorkerNotificationMessage = {
   notificationType: "new-event-applied";
@@ -41,10 +30,7 @@ export type GetSnapshotResponse = {
 
 export interface WorkerRpc {
   getSnapshot: () => GetSnapshotResponse;
-  pushLocalEvents: (
-    nodeId: string,
-    events: Omit<PendingCrdtEvent, "node_id">[]
-  ) => void;
+  pushLocalEvents: (nodeId: string, events: PersistedCrdtEvent[]) => void;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
   pullEvents: (params: PullEventsParams) => PullEventsResponse;
 }

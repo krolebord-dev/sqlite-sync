@@ -2,49 +2,31 @@ import {
   isWorkerInitMessage,
   syncDbWorkerLockName,
   type WorkerConfig,
-  type WorkerInitResponse,
 } from "./worker-common";
 import { createDeferredPromise } from "./utils";
 import { WorkerProcessor } from "./worker-processor";
 import { createSyncDbMigrations } from "./migrations/migrator";
-import { systemMigration } from "./migrations/system-schema";
 import { seedMigration } from "./migrations/seed-migration";
 
 const config = await getConfig();
 
 const migrations = createSyncDbMigrations({
-  0: systemMigration,
   1: seedMigration,
 });
 
-let awaitingReady = true;
-while (true) {
-  console.log("requesting lock", awaitingReady);
-  await navigator.locks.request(
-    syncDbWorkerLockName,
-    { mode: "exclusive", ifAvailable: awaitingReady },
-    async (lock) => {
-      if (!lock) {
-        const response: WorkerInitResponse = {
-          type: "init-ready",
-        };
-        self.postMessage(response);
-
-        awaitingReady = false;
-        return;
-      }
-
-      await WorkerProcessor.create(config, migrations);
-
-      const response: WorkerInitResponse = {
-        type: "init-ready",
-      };
-      self.postMessage(response);
-
-      await new Promise<void>(() => {});
+await navigator.locks.request(
+  syncDbWorkerLockName,
+  { mode: "exclusive" },
+  async (lock) => {
+    if (!lock) {
+      return;
     }
-  );
-}
+
+    await WorkerProcessor.create(config, migrations);
+
+    await new Promise<void>(() => {});
+  }
+);
 
 console.error("Failed to acquire lock");
 

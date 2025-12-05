@@ -26,6 +26,8 @@ export function createSyncDbMigrator(options: SyncDbMigratorOptions) {
     db: options.db,
     provider: new SyncMigrationsProvider(options.migrations),
     allowUnorderedMigrations: false,
+    migrationLockTableName: "worker.migration_lock",
+    migrationTableName: "worker.migration",
   });
 }
 

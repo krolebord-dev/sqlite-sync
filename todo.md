@@ -1,0 +1,2 @@
+- pull on de-sync gap
+- proper leader election

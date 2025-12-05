@@ -1,8 +1,4 @@
-import sqlite3InitModule, {
-  type FunctionOptions,
-  type SqlValue,
-  type Sqlite3Static,
-} from "@sqlite.org/sqlite-wasm";
+import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
 import { startPerformanceLogger, type Logger } from "./logger";
 import { SQLiteDbWrapper, type PreparedStatement } from "./sqlite-db-wrapper";
 
@@ -16,23 +12,13 @@ type TableName<Database> = keyof Database extends string
   ? keyof Database
   : never;
 
-type ScalarFunctionOptions<
-  TArgs extends readonly SqlValue[],
-  TResult extends SqlValue
-> = {
-  name: string;
-  callback: (...args: TArgs) => TResult;
-} & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
-
 export class SQLiteMemoryDb<Database> {
-  readonly db: SQLiteDbWrapper;
+  readonly db: SQLiteDbWrapper<Database>;
   private sqlite3: Sqlite3Static;
 
   private readonly logger: Logger;
 
   private readonly tableSubscribers: Map<string, Set<() => void>> = new Map();
-
-  private readonly dataPointers = [] as number[];
 
   private tablesUsedStatement: PreparedStatement<
     [string],
@@ -47,6 +33,7 @@ export class SQLiteMemoryDb<Database> {
       db: new sqlite3.oo1.DB({ filename: ":memory:" }),
       logger: this.logger,
       loggerPrefix: "memory",
+      sqlite3,
     });
   }
 
@@ -210,40 +197,6 @@ export class SQLiteMemoryDb<Database> {
     return tableNames;
   }
 
-  createCallbackFunction<
-    TArgs extends SqlValue[],
-    TResult extends SqlValue | void = void
-  >(name: string, callback: (...args: TArgs) => TResult) {
-    return this.db.ensureDb.createFunction({
-      name,
-      arity: callback.length,
-      xFunc: (_, ...args) => {
-        const result = callback(...(args as TArgs)) as SqlValue;
-        return result;
-      },
-    });
-  }
-
-  createScalarFunction<TArgs extends SqlValue[], TResult extends SqlValue>({
-    name,
-    callback,
-    deterministic,
-    directOnly,
-    innocuous,
-  }: ScalarFunctionOptions<TArgs, TResult>) {
-    return this.db.ensureDb.createFunction({
-      name,
-      xFunc: (_, ...args) => {
-        const result = callback(...(args as TArgs)) as SqlValue;
-        return result;
-      },
-      arity: callback.length,
-      deterministic,
-      directOnly,
-      innocuous,
-    });
-  }
-
   notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] = []) {
     if (tables.length === 0) {
       this.tableSubscribers.forEach((subscribers) => {
@@ -313,22 +266,7 @@ export class SQLiteMemoryDb<Database> {
   }
 
   useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
-    const perf = startPerformanceLogger(this.logger);
-    const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
-    this.dataPointers.push(dataPointer);
-
-    const resultCode = this.sqlite3.capi.sqlite3_deserialize(
-      this.db.ensureDb,
-      "main",
-      dataPointer,
-      snapshot.byteLength,
-      snapshot.byteLength,
-      this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
-    );
-
-    this.db.ensureDb.checkRc(resultCode);
-    perf.logEnd("useSnapshot", "success", "info");
-
+    this.db.useSnapshot(snapshot);
     this.notifyTableSubscribers();
   }
 }

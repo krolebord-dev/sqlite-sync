@@ -6,10 +6,10 @@ import {
   createBroadcastChannels,
   isWorkerRequestMessage,
   type GetSnapshotResponse,
-  type PendingCrdtEvent,
   type PullEventsResponse,
   type WorkerBroadcastChannels,
   type WorkerConfig,
+  type WorkerInitResponse,
   type WorkerNotificationMessage,
   type WorkerRequestMessage,
   type WorkerRequestMethod,
@@ -19,9 +19,9 @@ import {
 import { sql, type Kysely, type Migration } from "kysely";
 import { createSQLiteKysely } from "./sqlite-kysely";
 import { createSyncDbMigrator } from "./migrations/migrator";
-import type {
-  CrdtEventStatus,
-  WorkerDbSchema,
+import {
+  applyWorkerDbSchema,
+  type WorkerDbSchema,
 } from "./migrations/system-schema";
 import {
   SQLiteDbWrapper,
@@ -29,7 +29,11 @@ import {
   type ExecuteResult,
 } from "./sqlite-db-wrapper";
 import { logger } from "../logger";
-import { applyCrdtEvent } from "./apply-crdt-event";
+import type {
+  AppliedCrdtEvent,
+  PersistedCrdtEvent,
+} from "./sqlite-crdt/crdt-table-schema";
+import { applyCrdtEventMutations } from "./sqlite-crdt/apply-crdt-event";
 
 type WorkerProcessorOptions = {
   clientId: string;
@@ -38,7 +42,6 @@ type WorkerProcessorOptions = {
   sqlite3: Sqlite3Static;
   pool: SAHPoolUtil;
   db: SQLiteDbWrapper<WorkerDbSchema>;
-  kysely: Kysely<WorkerDbSchema>;
 };
 
 export class WorkerProcessor implements WorkerRpc {
@@ -48,7 +51,6 @@ export class WorkerProcessor implements WorkerRpc {
   private readonly sqlite3: Sqlite3Static;
   private readonly pool: SAHPoolUtil;
   private readonly db: SQLiteDbWrapper<WorkerDbSchema>;
-  private readonly kysely: Kysely<WorkerDbSchema>;
 
   private syncId: number;
 
@@ -59,7 +61,6 @@ export class WorkerProcessor implements WorkerRpc {
     this.sqlite3 = opts.sqlite3;
     this.pool = opts.pool;
     this.db = opts.db;
-    this.kysely = opts.kysely;
 
     this.syncId = this.getLatestSyncId();
   }
@@ -69,7 +70,7 @@ export class WorkerProcessor implements WorkerRpc {
   }
 
   getSnapshot(): GetSnapshotResponse {
-    this.db.execute("PRAGMA journal_mode=memory");
+    this.db.execute("PRAGMA journal_mode=off");
     const file = this.sqlite3.capi.sqlite3_js_db_export(this.db.ensureDb);
     this.db.execute("PRAGMA journal_mode=WAL");
     return {
@@ -78,10 +79,7 @@ export class WorkerProcessor implements WorkerRpc {
     };
   }
 
-  pushLocalEvents(
-    nodeId: string,
-    events: Omit<PendingCrdtEvent, "node_id">[]
-  ): void {
+  pushLocalEvents(nodeId: string, events: PersistedCrdtEvent[]): void {
     this.db.executeTransaction((db) => {
       const chunkSize = 100;
       for (let i = 0; i < events.length; i += chunkSize) {
@@ -147,24 +145,31 @@ export class WorkerProcessor implements WorkerRpc {
       clearOnInit: config.clearOnInit,
     });
 
+    if (config.clearOnInit) {
+      await pool.wipeFiles();
+    }
+
     const db = new SQLiteDbWrapper<WorkerDbSchema>({
       db: new pool.OpfsSAHPoolDb(config.dbPath),
       logger: logger,
       loggerPrefix: "worker",
+      sqlite3,
     });
 
     db.execute("PRAGMA locking_mode=exclusive");
     db.execute("PRAGMA journal_mode=WAL");
     db.execute(`ATTACH DATABASE '${config.dbPath}-worker' as worker`);
 
-    const kysely = createSQLiteKysely<WorkerDbSchema>(db);
+    applyWorkerDbSchema(db);
 
+    const kysely = createSQLiteKysely<WorkerDbSchema>(db);
     const migrator = createSyncDbMigrator({
       db: kysely as Kysely<unknown>,
       migrations,
     });
-
     await migrator.migrateToLatest();
+
+    db.invalidateDbSchema();
 
     const processor = new WorkerProcessor({
       clientId: config.clientId,
@@ -173,7 +178,6 @@ export class WorkerProcessor implements WorkerRpc {
       sqlite3,
       pool,
       db,
-      kysely,
     });
 
     broadcastChannels.requests.onmessage = (
@@ -249,26 +253,39 @@ export class WorkerProcessor implements WorkerRpc {
       }
 
       for (const event of events) {
-        let status: CrdtEventStatus = "pending";
+        const eventPayload = JSON.parse(event.payload);
+        const appliedEvent: AppliedCrdtEvent = {
+          type: event.type,
+          sync_id: this.syncId + 1,
+          status: "applied",
+          timestamp: event.timestamp,
+          node_id: event.node_id,
+          dataset: event.dataset,
+          item_id: event.item_id,
+          payload: JSON.stringify(eventPayload),
+        };
         try {
-          applyCrdtEvent(this.db, event);
-
-          status = "applied";
+          applyCrdtEventMutations({
+            db: this.db,
+            updateLogTableName: "crdt_update_log",
+            event: {
+              type: event.type,
+              dataset: event.dataset,
+              item_id: event.item_id,
+              payload: eventPayload,
+              timestamp: event.timestamp,
+            },
+          });
         } catch (error) {
           console.error("Error applying pending CRDT event", error);
-          status = "failed";
+          appliedEvent.status = "failed";
         } finally {
-          this.syncId++;
+          this.syncId = appliedEvent.sync_id;
           this.db.executePrepared(
             "insert-crdt-event",
-            {
-              ...event,
-              status,
-              sync_id: this.syncId,
-            },
+            appliedEvent,
             (db, params) =>
               db.insertInto("worker.crdt_events").values({
-                id: params("id"),
                 status: params("status"),
                 type: params("type"),
                 dataset: params("dataset"),
@@ -280,13 +297,10 @@ export class WorkerProcessor implements WorkerRpc {
               })
           );
 
-          if (status === "applied") {
+          if (appliedEvent.status === "applied") {
             this.postNotification({
               notificationType: "new-event-applied",
-              event: {
-                ...event,
-                sync_id: this.syncId,
-              },
+              event: appliedEvent,
             });
           }
         }
@@ -305,5 +319,13 @@ export class WorkerProcessor implements WorkerRpc {
 
   private postNotification(notification: WorkerNotificationMessage) {
     this.broadcastChannels.responses.postMessage(notification);
+  }
+
+  postInitReady() {
+    const response: WorkerInitResponse = {
+      type: "init-ready",
+    };
+
+    this.broadcastChannels.responses.postMessage(response);
   }
 }

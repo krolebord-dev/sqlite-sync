@@ -1,11 +1,14 @@
 import type {
   BindableValue,
+  FunctionOptions,
+  Sqlite3Static,
   Database as SQLiteDatabase,
   SqlValue,
 } from "@sqlite.org/sqlite-wasm";
 import { startPerformanceLogger, type Logger } from "./logger";
 import { Kysely, type Compilable, type CompiledQuery } from "kysely";
 import { dummyKysely } from "./dummy-kysely";
+import { introspectDb, type DatabaseIntrospection } from "./introspection";
 
 export type ExecuteParams = {
   sql: string;
@@ -22,23 +25,50 @@ export type PreparedStatement<TParams extends SqlValue[], TResult> = {
   isFinalized: boolean;
 };
 
+type ScalarFunctionOptions<
+  TArgs extends readonly SqlValue[],
+  TResult extends SqlValue | void
+> = {
+  name: string;
+  callback: (...args: TArgs) => TResult;
+} & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
+
 type SqliteWrapperOptions = {
   logger?: Logger;
   loggerPrefix?: string;
+  sqlite3: Sqlite3Static;
   db: SQLiteDatabase;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
+  SQLiteDbWrapper<TDatabase>,
+  | "execute"
+  | "sql"
+  | "executeKysely"
+  | "prepare"
+  | "executePrepared"
+  | "prepareKysely"
+>;
 
 export class SQLiteDbWrapper<TDatabase = unknown> {
   private db: SQLiteDatabase | null = null;
+  private sqlite3: Sqlite3Static;
   private logger?: Logger;
   private loggerPrefix?: string;
 
+  private loadedDbSchema: DatabaseIntrospection | null = null;
+
+  private readonly dataPointers = [] as number[];
+
   private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
+  private preparedStatementsMap = new Map<
+    string,
+    TypedStatement<Record<string, unknown>, unknown>
+  >();
 
   constructor(opts: SqliteWrapperOptions) {
     this.db = opts.db;
+    this.sqlite3 = opts.sqlite3;
     this.logger = opts.logger;
     this.loggerPrefix = opts.loggerPrefix;
   }
@@ -48,6 +78,13 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       throw new Error("Database is already closed");
     }
     return this.db;
+  }
+
+  get dbSchema() {
+    if (!this.loadedDbSchema) {
+      this.loadedDbSchema = introspectDb(this);
+    }
+    return this.loadedDbSchema;
   }
 
   execute<T = unknown>(
@@ -69,9 +106,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   executeTransaction<T>(
-    callback: (
-      db: Pick<SQLiteDbWrapper<TDatabase>, "execute" | "sql" | "executeKysely">
-    ) => T
+    callback: (db: SQLiteTransactionWrapper<TDatabase>) => T
   ): T {
     return this.ensureDb.transaction(() => callback(this));
   }
@@ -130,7 +165,6 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     >(
       factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>
     ): TypedStatement<TParams, TResult> => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const query = factory(dummyKysely, (key) => key as any).compile();
       const statement = this.prepare<SqlValue[], TResult>(query.sql);
 
@@ -154,10 +188,6 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return this.execute(query);
   }
 
-  private preparedStatementsMap = new Map<
-    string,
-    TypedStatement<Record<string, unknown>, unknown>
-  >();
   executePrepared<
     TParams extends Record<string, unknown>,
     TQuery extends Compilable<TResult>,
@@ -197,9 +227,63 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     });
   }
 
-  close() {
+  createScalarFunction<
+    TArgs extends SqlValue[],
+    TResult extends SqlValue | void
+  >({
+    name,
+    callback,
+    deterministic,
+    directOnly,
+    innocuous,
+  }: ScalarFunctionOptions<TArgs, TResult>) {
+    return this.ensureDb.createFunction({
+      name,
+      xFunc: (_, ...args) => {
+        const result = callback(...(args as TArgs)) as SqlValue;
+        return result;
+      },
+      arity: callback.length,
+      deterministic,
+      directOnly,
+      innocuous,
+    });
+  }
+
+  useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
+    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
+    this.dataPointers.push(dataPointer);
+
+    const resultCode = this.sqlite3.capi.sqlite3_deserialize(
+      this.ensureDb,
+      "main",
+      dataPointer,
+      snapshot.byteLength,
+      snapshot.byteLength,
+      this.sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+    );
+
+    this.ensureDb.checkRc(resultCode);
+
+    this.invalidateDbSchema();
+
+    perf?.logEnd("useSnapshot", "success", "info");
+  }
+
+  invalidateDbSchema() {
+    this.loadedDbSchema = null;
+  }
+
+  cleanup() {
     this.preparedStatements.forEach((stmt) => stmt.finalize());
-    this.preparedStatements = [];
+    this.preparedStatements.splice(0);
+    this.preparedStatementsMap.clear();
+  }
+
+  close() {
+    this.cleanup();
 
     this.db?.close();
     this.db = null;

@@ -18,7 +18,7 @@ export class HLCCounter {
     this.getTimestamp = getTimestamp;
   }
 
-  private getCurrentHLC(): HLC {
+  getCurrentHLC(): HLC {
     return {
       timestamp: this.timestamp,
       counter: this.counter,
