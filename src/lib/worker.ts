@@ -22,7 +22,8 @@ await navigator.locks.request(
       return;
     }
 
-    await WorkerProcessor.create(config, migrations);
+    const processor = await WorkerProcessor.create(config, migrations);
+    processor.postInitReady();
 
     await new Promise<void>(() => {});
   }

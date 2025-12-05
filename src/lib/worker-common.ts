@@ -3,6 +3,7 @@ import type {
   PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
 import type { ExecuteParams, ExecuteResult } from "./sqlite-db-wrapper";
+import { TypedBroadcastChannel } from "./typed-broadcast-channel";
 
 export const syncDbWorkerLockName = "sync-db-worker-lock";
 
@@ -33,6 +34,7 @@ export interface WorkerRpc {
   pushLocalEvents: (nodeId: string, events: PersistedCrdtEvent[]) => void;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
   pullEvents: (params: PullEventsParams) => PullEventsResponse;
+  postInitReady: () => void;
 }
 
 export type WorkerRequestMethod = keyof WorkerRpc;
@@ -66,14 +68,16 @@ export const broadcastChannelNames = {
 } as const;
 
 export type WorkerBroadcastChannels = {
-  requests: BroadcastChannel;
-  responses: BroadcastChannel;
+  requests: TypedBroadcastChannel<WorkerRequestMessage>;
+  responses: TypedBroadcastChannel<
+    WorkerResponseMessage | WorkerNotificationMessage | WorkerInitResponse
+  >;
 };
 
 export const createBroadcastChannels = (): WorkerBroadcastChannels => {
   return {
-    requests: new BroadcastChannel(broadcastChannelNames.requests),
-    responses: new BroadcastChannel(broadcastChannelNames.responses),
+    requests: new TypedBroadcastChannel(broadcastChannelNames.requests),
+    responses: new TypedBroadcastChannel(broadcastChannelNames.responses),
   };
 };
 

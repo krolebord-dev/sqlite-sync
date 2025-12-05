@@ -1,7 +1,7 @@
 import { startPerformanceLogger, type Logger } from "./logger";
 import { createDeferredPromise, type DeferredPromise } from "./utils";
 import {
-  broadcastChannelNames,
+  createBroadcastChannels,
   isWorkerInitResponse,
   isWorkerNotificationMessage,
   isWorkerResponseMessage,
@@ -10,6 +10,7 @@ import type {
   AsyncRpc,
   GetSnapshotResponse,
   PullEventsResponse,
+  WorkerBroadcastChannels,
   WorkerInitMessage,
   WorkerNotificationMessage,
   WorkerRequestMessage,
@@ -34,9 +35,9 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
   private readonly clientId: string;
   private readonly dbPath: string;
 
+  private readonly broadcastChannels: WorkerBroadcastChannels;
+
   private readonly worker: Worker;
-  private readonly requestsChannel: BroadcastChannel;
-  private readonly responsesChannel: BroadcastChannel;
 
   private readonly onNotification?: (
     notification: WorkerNotificationMessage
@@ -53,10 +54,7 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
     this.clientId = opts.clientId;
     this.dbPath = opts.dbPath;
     this.onNotification = opts.onNotification;
-    this.requestsChannel = new BroadcastChannel(broadcastChannelNames.requests);
-    this.responsesChannel = new BroadcastChannel(
-      broadcastChannelNames.responses
-    );
+    this.broadcastChannels = createBroadcastChannels();
   }
 
   getSnapshot(): Promise<GetSnapshotResponse> {
@@ -76,6 +74,10 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
     excludeNodeId: string;
   }): Promise<PullEventsResponse> {
     return this.queryWorker("pullEvents", [params]);
+  }
+
+  postInitReady(): Promise<void> {
+    return this.queryWorker("postInitReady", []);
   }
 
   public static async create(opts: Omit<SQLiteWorkerDbOptions, "worker">) {
@@ -100,7 +102,7 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
   private async initialize() {
     await this.waitWorkerInit();
 
-    this.responsesChannel.onmessage = (event: MessageEvent<unknown>) => {
+    this.broadcastChannels.responses.onmessage = (event) => {
       const message = event.data;
 
       if (isWorkerResponseMessage(message)) {
@@ -126,7 +128,7 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
       args,
     };
 
-    this.requestsChannel.postMessage(request);
+    this.broadcastChannels.requests.postMessage(request);
 
     return promise.promise as Promise<ReturnType<WorkerRpc[TMethod]>>;
   }
@@ -147,7 +149,7 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
 
   private async waitWorkerInit() {
     const promise = createDeferredPromise<void>();
-    this.worker.onmessage = (event: MessageEvent<unknown>) => {
+    this.broadcastChannels.responses.onmessage = (event) => {
       const message = event.data;
       if (!isWorkerInitResponse(message)) {
         return;
@@ -166,6 +168,12 @@ export class SQLiteWorkerDb implements AsyncRpc<WorkerRpc> {
       },
     };
     this.worker.postMessage(config);
+    this.broadcastChannels.requests.postMessage({
+      type: "request",
+      requestId: crypto.randomUUID(),
+      method: "postInitReady",
+      args: [],
+    });
 
     return promise.promise;
   }

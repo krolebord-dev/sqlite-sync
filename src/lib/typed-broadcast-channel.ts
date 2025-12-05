@@ -9,7 +9,7 @@ export class TypedBroadcastChannel<TMessage> {
     this.channel.postMessage(message);
   }
 
-  onmessage(callback: (event: MessageEvent<TMessage>) => void) {
+  set onmessage(callback: (event: MessageEvent<TMessage>) => void) {
     this.channel.onmessage = callback;
   }
 }

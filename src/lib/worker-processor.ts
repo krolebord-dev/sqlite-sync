@@ -180,9 +180,7 @@ export class WorkerProcessor implements WorkerRpc {
       db,
     });
 
-    broadcastChannels.requests.onmessage = (
-      event: MessageEvent<Omit<WorkerRequestMessage, "responseType">>
-    ) => {
+    broadcastChannels.requests.onmessage = (event) => {
       const message = event.data;
 
       if (!isWorkerRequestMessage(message)) {
