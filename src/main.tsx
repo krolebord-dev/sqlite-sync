@@ -22,7 +22,7 @@ createRoot(document.getElementById("root")!).render(
 
 // eslint-disable-next-line react-refresh/only-export-components
 function Root({ children }: { children: React.ReactNode }) {
-  const _db = use(db);
+  const _db = use(db) as any;
   return <DbProvider db={_db}>{children}</DbProvider>;
 }
 

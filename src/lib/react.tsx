@@ -48,7 +48,7 @@ export function createDbContext<Database>() {
     }, [db, ...(parameters ?? [])]);
 
     const liveQuery = useMemo(() => {
-      return db.memoryDb.createLiveQuery<TResult>({
+      return db.reactiveDb.createLiveQuery<TResult>({
         sql: compiledQuery.sql,
         parameters: compiledQuery.parameters,
       });

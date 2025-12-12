@@ -13,5 +13,8 @@ export const logger: Logger = (type, message, level = "info") => {
     case "error":
       console.error(logMessage);
       break;
+    case "trace":
+      console.trace(logMessage);
+      break;
   }
 };

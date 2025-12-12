@@ -2,10 +2,11 @@
 
 - [x] reactive sqlite queries
 - [x] react integration
-- [x] persisted db using workers and web locks
-- [x] local tabs sync using auto crdt events
+- [x] persisted SQLite OPFS using workers and web locks
+- [x] create crdt events automatically using sql triggers
 - [x] pull on de-sync (tab <-> worker)
-- [ ] pull on de-sync (worker <-> remote server)
+- [x] simple remote server
+- [x] pull on de-sync (worker <-> remote server)
 - [ ] event log compaction
 - [ ] events payload validation
 - [ ] offline support using service worker

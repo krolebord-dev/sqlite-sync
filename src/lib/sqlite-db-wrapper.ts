@@ -272,6 +272,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     perf?.logEnd("useSnapshot", "success", "info");
   }
 
+  createSnapshot() {
+    return this.sqlite3.capi.sqlite3_js_db_export(this.ensureDb);
+  }
+
   invalidateDbSchema() {
     this.loadedDbSchema = null;
   }
@@ -290,7 +294,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 }
 
-type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
+export type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
 type ParamsGetter<TParams> = <TKey extends keyof TParams>(
   key: TKey
 ) => TParams[TKey];
@@ -304,7 +308,7 @@ type KyselyStatementFactory<
   TQuery extends Compilable<TResult>,
   TResult = QueryBuilderOutput<TQuery>
 > = (kysely: Kysely<TDatabase>, params: ParamsGetter<TParams>) => TQuery;
-type KyselyQueryFactory<
+export type KyselyQueryFactory<
   TDatabase,
   TQuery extends Compilable<TResult>,
   TResult = QueryBuilderOutput<TQuery>

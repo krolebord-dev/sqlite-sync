@@ -1,13 +1,9 @@
-import type { Kysely } from "kysely";
-import type {
-  SQLiteDbWrapper,
-  SQLiteTransactionWrapper,
-} from "../sqlite-db-wrapper";
+import { type Kysely } from "kysely";
+import type { SQLiteTransactionWrapper } from "../sqlite-db-wrapper";
 import type {
   CrdtEventType,
   CrdtUpdateLogItem,
   CrdtUpdateLogPayload,
-  PersistedCrdtEvent,
 } from "./crdt-table-schema";
 
 export type PendingCrdtEvent = {
@@ -15,7 +11,7 @@ export type PendingCrdtEvent = {
   dataset: string;
   item_id: string;
   timestamp: string;
-  payload: Record<string, unknown>;
+  payload: string;
 };
 
 type ApplyCrdtParams = {
@@ -32,35 +28,12 @@ type ApplyCrdtContext = {
   meta: CrdtUpdateLogPayload | null;
 };
 
-export function persistCrdtEvent(
-  db: SQLiteDbWrapper<any>,
-  tableName: string,
-  event: PersistedCrdtEvent
-) {
-  db.executePrepared("insert-pending-crdt-event", event, (db, params) =>
-    (db as Kysely<{ table: PersistedCrdtEvent }>)
-      .insertInto(tableName as "table")
-      .values({
-        id: params("id"),
-        type: params("type"),
-        timestamp: params("timestamp"),
-        node_id: params("node_id"),
-        dataset: params("dataset"),
-        item_id: params("item_id"),
-        payload: params("payload"),
-      })
-  );
-}
-
 export function applyCrdtEventMutations({
   db,
   event,
   updateLogTableName,
 }: ApplyCrdtParams) {
-  const eventPayload =
-    typeof event.payload === "string"
-      ? JSON.parse(event.payload)
-      : event.payload;
+  const eventPayload = JSON.parse(event.payload);
 
   const [metaRow] = db.executePrepared(
     "get-item-crdt-meta",
@@ -109,7 +82,10 @@ function applyItemCreated(context: ApplyCrdtContext) {
   if (context.meta) {
     // Item already exists
     applyItemUpdated(context);
+    return;
   }
+
+  // TODO SQL sanitization
 
   const keys = Array.from(Object.keys(context.eventPayload));
   context.db.execute({

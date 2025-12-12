@@ -1,228 +1,107 @@
-import { SQLiteMemoryDb } from "./sqlite-memory-db";
-import { deserializeHLC, HLCCounter, serializeHLC } from "./hlc";
-import { startPerformanceLogger, type Logger } from "./logger";
-import { SQLiteWorkerDb } from "./sqlite-worker-db";
-import { ensureSingletonExecution, generateId } from "./utils";
-import type { WorkerNotificationMessage } from "./worker-common";
+import { deserializeHLC, HLCCounter } from "./hlc";
+import { generateId } from "./utils";
+import { createBroadcastChannels } from "./worker-db/worker-common";
 import {
-  applyCrdtEventMutations,
-  persistCrdtEvent,
-} from "./sqlite-crdt/apply-crdt-event";
+  initializeWorkerDb,
+  createWorkerDbClient,
+} from "./worker-db/db-worker-client";
 import {
-  applyMemoryDbSchema,
-  type MemoryDbSchema,
-} from "./migrations/system-schema";
+  createSQLiteReactiveDb,
+  SQLiteReactiveDb,
+} from "./memory-db/sqlite-reactive-db";
 import {
-  registerCrdtFunctions,
-  type AppliedCrdtEvent,
-} from "./sqlite-crdt/crdt-table-schema";
-import type { SQLiteDbWrapper } from "./sqlite-db-wrapper";
+  createMemoryDb,
+  type MemoryDbCrdtTableConfig,
+} from "./memory-db/memory-db";
+import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 
 type SyncedDbOptions = {
   dbPath: string;
-  tabId?: string;
-  clientId: string;
-  logger?: Logger;
+  clearOnInit?: boolean;
+  // tabId?: string;
+  // clientId: string;
+  // logger?: Logger;
+  crdtTables: MemoryDbCrdtTableConfig[];
+
+  worker: Worker;
 };
 
-export class SyncedDb<Database> {
-  public readonly tabId: string;
-  public readonly clientId: string;
-
-  public readonly hlcCounter: HLCCounter;
-  public readonly memoryDb: SQLiteMemoryDb<Database>;
-  public readonly workerDb: SQLiteWorkerDb;
-  public readonly logger: Logger;
-  public memoryDbSyncId: number;
-
-  private isLocalSyncEnabled: boolean = true;
-
-  private constructor(
-    tabId: string,
-    clientId: string,
-    hlcCounter: HLCCounter,
-    memoryDb: SQLiteMemoryDb<Database>,
-    workerDb: SQLiteWorkerDb,
-    logger: Logger
-  ) {
-    this.hlcCounter = hlcCounter;
-    this.memoryDb = memoryDb;
-    this.workerDb = workerDb;
-    this.logger = logger;
-    this.tabId = tabId;
-    this.clientId = clientId;
-    this.memoryDbSyncId = 0;
+export async function createSyncedDb<Database>(options: SyncedDbOptions) {
+  if (!options.dbPath.startsWith("/")) {
+    throw new Error("dbPath must be an absolute path");
   }
 
-  public static async create<Database>(options: SyncedDbOptions) {
-    const logger = options.logger ?? (() => {});
+  const tabId = generateId();
 
-    const clientId = `c-${options.clientId}`;
-    const tabId = `${clientId}:t-${options.tabId ?? generateId()}`;
+  const broadcastChannels = createBroadcastChannels();
 
-    const hlcCounter = new HLCCounter(tabId, () => Date.now());
-
-    const [memoryDb, workerDb] = await Promise.all([
-      SQLiteMemoryDb.create<Database>({ logger }),
-      SQLiteWorkerDb.create({
-        tabId,
-        clientId,
-        dbPath: options.dbPath,
-        logger,
-        onNotification: (notification) => {
-          syncedDb.handleWorkerNotification(notification);
-        },
-      }),
-    ]);
-
-    (window as any).memDb = memoryDb;
-
-    const syncedDb = new SyncedDb<Database>(
-      tabId,
-      clientId,
-      hlcCounter,
-      memoryDb,
-      workerDb,
-      logger
-    );
-
-    await syncedDb.copyWorkerDbToMemoryDb();
-    applyMemoryDbSchema(syncedDb.memoryDb.db);
-    registerCrdtFunctions({
-      db: syncedDb.memoryDb.db,
-      getTableSchema: (dataset: string) => {
-        return syncedDb.memoryDb.db.dbSchema[dataset];
+  await initializeWorkerDb({
+    worker: options.worker,
+    broadcastChannels,
+    config: {
+      clientId: generateId(),
+      dbPath: options.dbPath,
+      clearOnInit: options.clearOnInit,
+      syncServer: {
+        host: "",
+        room: "",
       },
-      getNextTimestamp: () => serializeHLC(syncedDb.hlcCounter.getNextHLC()),
-      updateLogTableName: "crdt_update_log",
-      onEventApplied: (event) => {
-        persistCrdtEvent(syncedDb.memoryDb.db, "pending_crdt_events", {
-          ...event,
-          id: generateId(),
-          node_id: syncedDb.tabId,
-          payload: JSON.stringify(event.payload),
-        });
-      },
-    });
+    },
+  });
 
-    syncedDb.memoryDb.subscribeToTableChanges("pending_crdt_events", () => {
-      if (syncedDb.isLocalSyncEnabled) {
-        syncedDb.startFlushingPendingEvents();
-      }
-    });
+  const workerClient = createWorkerDbClient({
+    broadcastChannels,
+  });
 
-    return syncedDb;
-  }
+  const hlcCounter = new HLCCounter(tabId, () => Date.now());
 
-  get tabSyncEnabled() {
-    return this.isLocalSyncEnabled;
-  }
+  const workerClientSnapshot = await workerClient.getSnapshot();
+  const reactiveDb = await createSQLiteReactiveDb<Database>({
+    snapshot: workerClientSnapshot.file,
+  });
+  const { crdtStorage } = await createMemoryDb({
+    reactiveDb: reactiveDb,
+    hlcCounter,
+    tabId,
+    crdtTables: options.crdtTables,
+  });
 
-  set tabSyncEnabled(value: boolean) {
-    this.isLocalSyncEnabled = !!value;
-    if (this.isLocalSyncEnabled) {
-      this.startFlushingPendingEvents();
-      this.pullEventsFromWorkerDb();
+  const remoteSyncId = createSyncIdCounter({
+    initialSyncId: workerClientSnapshot.syncId,
+  });
+  const remoteSyncSource = createCrdtSyncRemoteSource({
+    bufferSize: 100,
+    syncId: remoteSyncId,
+    storage: crdtStorage,
+    nodeId: tabId,
+    pullEvents: (request) => workerClient.pullEvents(request),
+    pushEvents: (request) => workerClient.pushTabEvents(request),
+  });
+
+  workerClient.addEventListener("new-notification", (event) => {
+    const notification = event.payload;
+    if (
+      notification.notificationType === "new-event-chunk-applied" &&
+      notification.newSyncId > remoteSyncId.current
+    ) {
+      remoteSyncSource.pullEvents();
     }
-  }
+  });
 
-  private async copyWorkerDbToMemoryDb() {
-    const snapshot = await this.workerDb.getSnapshot();
-    this.memoryDb.useSnapshot(snapshot.file);
-    this.memoryDbSyncId = snapshot.syncId;
-  }
-
-  private readonly startFlushingPendingEvents = ensureSingletonExecution(
-    this.flushPendingCrdtEvents.bind(this)
-  );
-
-  private async flushPendingCrdtEvents() {
-    await Promise.resolve();
-
-    const perf = startPerformanceLogger(this.logger);
-    const pendingCrdtEvents = (
-      this.memoryDb.db as unknown as SQLiteDbWrapper<MemoryDbSchema>
-    ).executePrepared("flush-pending-crdt-events", {}, (db) =>
-      db.deleteFrom("pending_crdt_events").returningAll()
-    );
-
-    if (pendingCrdtEvents.length === 0) {
-      return;
+  crdtStorage.addEventListener("event-applied", (event) => {
+    if (event.payload.origin === "remote") {
+      hlcCounter.mergeHLC(deserializeHLC(event.payload.timestamp));
     }
+  });
 
-    await this.workerDb.pushLocalEvents(this.tabId, pendingCrdtEvents);
-
-    perf.logEnd(
-      "flushPendingCrdtEvents",
-      `flushed ${pendingCrdtEvents.length} events`,
-      "info"
-    );
-
-    // TODO: handle errors and retries. Currently events are lost if the worker db is not available which may lead to desync
-  }
-
-  private readonly pullEventsFromWorkerDb = ensureSingletonExecution(
-    async () => {
-      if (!this.isLocalSyncEnabled) {
-        return;
-      }
-
-      const events = await this.workerDb.pullEvents({
-        startFromSyncId: this.memoryDbSyncId,
-        excludeNodeId: this.tabId,
-      });
-
-      for (const event of events.events) {
-        this.applyRemoteEvent(event);
-      }
-
-      this.memoryDbSyncId = events.newSyncId;
-    }
-  );
-
-  private handleWorkerNotification(notification: WorkerNotificationMessage) {
-    switch (notification.notificationType) {
-      case "new-event-applied": {
-        if (!this.isLocalSyncEnabled) {
-          return;
-        }
-
-        if (notification.event.sync_id <= this.memoryDbSyncId) {
-          console.error(
-            "sync id is not greater than memory db sync id",
-            notification.event.sync_id,
-            this.memoryDbSyncId,
-            notification.event
-          );
-          return;
-        }
-
-        if (notification.event.sync_id - this.memoryDbSyncId > 1) {
-          this.pullEventsFromWorkerDb();
-          return;
-        }
-
-        this.memoryDbSyncId = notification.event.sync_id;
-        if (notification.event.node_id !== this.tabId) {
-          this.applyRemoteEvent(notification.event);
-        }
-        return;
-      }
-      default: {
-        notification.notificationType satisfies never;
-      }
-    }
-  }
-
-  private applyRemoteEvent(event: AppliedCrdtEvent) {
-    this.hlcCounter.mergeHLC(deserializeHLC(event.timestamp));
-    applyCrdtEventMutations({
-      db: this.memoryDb.db,
-      updateLogTableName: "crdt_update_log",
-      event: {
-        ...event,
-        payload: JSON.parse(event.payload),
-      },
-    });
-  }
+  return {
+    db: reactiveDb.db,
+    reactiveDb: reactiveDb as Omit<SQLiteReactiveDb<Database>, "db">,
+    workerDb: workerClient,
+  };
 }
+
+export type SyncedDb<Database> = Awaited<
+  ReturnType<typeof createSyncedDb<Database>>
+>;

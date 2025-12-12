@@ -1,27 +1,22 @@
 import type {
-  AppliedCrdtEvent,
-  PersistedCrdtEvent,
-} from "./sqlite-crdt/crdt-table-schema";
-import type { ExecuteParams, ExecuteResult } from "./sqlite-db-wrapper";
-import { TypedBroadcastChannel } from "./typed-broadcast-channel";
+  EventsPullRequest,
+  EventsPullResponse,
+  EventsPushRequest,
+  EventsPushResponse,
+} from "../sqlite-crdt/crdt-sync-remote-source";
+import type { ExecuteParams, ExecuteResult } from "../sqlite-db-wrapper";
+import { TypedBroadcastChannel } from "../utils";
 
 export const syncDbWorkerLockName = "sync-db-worker-lock";
 
-export const syncDbWorkerSharedLockName = "sync-db-worker-shared-lock";
-
 export type WorkerNotificationMessage = {
-  notificationType: "new-event-applied";
-  event: AppliedCrdtEvent;
-};
-
-type PullEventsParams = {
-  startFromSyncId: number;
-  excludeNodeId: string;
-};
-
-export type PullEventsResponse = {
+  notificationType: "new-event-chunk-applied";
   newSyncId: number;
-  events: AppliedCrdtEvent[];
+};
+
+export type PushTabEventsResponse = {
+  firstEventSyncId: number;
+  lastEventSyncId: number;
 };
 
 export type GetSnapshotResponse = {
@@ -31,9 +26,9 @@ export type GetSnapshotResponse = {
 
 export interface WorkerRpc {
   getSnapshot: () => GetSnapshotResponse;
-  pushLocalEvents: (nodeId: string, events: PersistedCrdtEvent[]) => void;
+  pushTabEvents: (request: EventsPushRequest) => EventsPushResponse;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
-  pullEvents: (params: PullEventsParams) => PullEventsResponse;
+  pullEvents: (params: EventsPullRequest) => EventsPullResponse;
   postInitReady: () => void;
 }
 
@@ -83,9 +78,14 @@ export const createBroadcastChannels = (): WorkerBroadcastChannels => {
 
 export type WorkerConfig = {
   dbPath: string;
-  tabId: string;
   clientId: string;
   clearOnInit?: boolean;
+  syncServer: SyncServerConfig;
+};
+
+export type SyncServerConfig = {
+  host: string;
+  room: string;
 };
 
 export type WorkerInitMessage = {

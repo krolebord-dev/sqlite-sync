@@ -8,24 +8,16 @@ import {
 
 export type CrdtEventType = "item-created" | "item-updated";
 
-export type CrdtEventStatus = "applied" | "failed";
+export type CrdtEventStatus = "pending" | "applied" | "failed";
+
+export type CrdtEventOrigin = "remote" | (string & {});
 
 export type PersistedCrdtEvent = {
-  id: string;
-  type: CrdtEventType;
-  timestamp: string;
-  node_id: string;
-  dataset: string;
-  item_id: string;
-  payload: string;
-};
-
-export type AppliedCrdtEvent = {
   sync_id: number;
   status: CrdtEventStatus;
   type: CrdtEventType;
   timestamp: string;
-  node_id: string;
+  origin: CrdtEventOrigin;
   dataset: string;
   item_id: string;
   payload: string;
@@ -39,39 +31,34 @@ export type CrdtUpdateLogItem = {
 
 export type CrdtUpdateLogPayload = Record<string, string>;
 
+export type MetaItem = {
+  key: string;
+  value: string;
+};
+
 export const crdtSchema = {
-  pendingEventsTable: createPendingEventsTableQuery,
-  appliedEventsTable: createAppliedEventsTableQuery,
+  metaTable: createMetaTableQuery,
+  persistedEventsTable: createPersistedEventsTable,
   crdtUpdateLogTable: createCrdtUpdateLogTableQuery,
 };
 
-function createPendingEventsTableQuery(
-  schema: SchemaModule,
-  tableName: string
-) {
-  return createBaseEventsTableQuery(schema, tableName).addColumn(
-    "id",
-    "text",
-    (col) => col.notNull().primaryKey()
-  );
-}
-
-function createAppliedEventsTableQuery(
-  schema: SchemaModule,
-  tableName: string
-) {
-  return createBaseEventsTableQuery(schema, tableName)
-    .addColumn("sync_id", "integer", (col) => col.notNull().primaryKey())
-    .addColumn("status", "text", (col) => col.notNull());
-}
-
-function createBaseEventsTableQuery(schema: SchemaModule, tableName: string) {
+function createMetaTableQuery(schema: SchemaModule, tableName: string) {
   return schema
     .createTable(tableName)
     .ifNotExists()
+    .addColumn("key", "text", (col) => col.notNull().primaryKey())
+    .addColumn("value", "text", (col) => col.notNull());
+}
+
+function createPersistedEventsTable(schema: SchemaModule, tableName: string) {
+  return schema
+    .createTable(tableName)
+    .ifNotExists()
+    .addColumn("sync_id", "integer", (col) => col.notNull().primaryKey())
+    .addColumn("status", "text", (col) => col.notNull())
     .addColumn("type", "text", (col) => col.notNull())
     .addColumn("timestamp", "text", (col) => col.notNull())
-    .addColumn("node_id", "text", (col) => col.notNull())
+    .addColumn("origin", "text", (col) => col.notNull())
     .addColumn("dataset", "text", (col) => col.notNull())
     .addColumn("item_id", "text", (col) => col.notNull())
     .addColumn("payload", "text", (col) => col.notNull());
@@ -87,28 +74,18 @@ function createCrdtUpdateLogTableQuery(
     .addColumn("dataset", "text", (col) => col.notNull())
     .addColumn("item_id", "text", (col) => col.notNull())
     .addColumn("payload", "text", (col) => col.notNull())
-    .addPrimaryKeyConstraint("pk_${tableName}", ["dataset", "item_id"]);
+    .addPrimaryKeyConstraint(`pk_${tableName}`, ["item_id", "dataset"]);
 }
 
 export function registerCrdtFunctions({
   db,
-  onItemCreated,
-  onItemUpdated,
-  onItemDeleted,
   onEventApplied,
   getNextTimestamp,
   getTableSchema,
   updateLogTableName,
 }: {
   db: SQLiteDbWrapper<any>;
-  onItemCreated?: (dataset: string, payload: Record<string, unknown>) => void;
-  onItemUpdated?: (
-    dataset: string,
-    oldPayload: Record<string, unknown>,
-    newPayload: Record<string, unknown>
-  ) => void;
-  onItemDeleted?: (dataset: string, itemId: string) => void;
-  onEventApplied?: (event: PendingCrdtEvent) => void;
+  onEventApplied: (event: PendingCrdtEvent) => void;
   getNextTimestamp: () => string;
   getTableSchema: (dataset: string) => TableMetadata;
   updateLogTableName: string;
@@ -119,14 +96,14 @@ export function registerCrdtFunctions({
     directOnly: false,
     innocuous: false,
     callback: (dataset: string, payloadRaw: string) => {
-      const payload = JSON.parse(payloadRaw);
+      const payload = JSON.parse(payloadRaw) as { id: string };
 
       const event: PendingCrdtEvent = {
         timestamp: getNextTimestamp(),
         type: "item-created",
         dataset,
         item_id: payload.id,
-        payload,
+        payload: payloadRaw,
       };
 
       applyCrdtEventMutations({
@@ -135,8 +112,7 @@ export function registerCrdtFunctions({
         updateLogTableName,
       });
 
-      onItemCreated?.(dataset, payload);
-      onEventApplied?.(event);
+      onEventApplied(event);
     },
   });
 
@@ -174,7 +150,7 @@ export function registerCrdtFunctions({
         type: "item-updated",
         dataset,
         item_id: oldPayload.id,
-        payload,
+        payload: JSON.stringify(payload),
       };
 
       if (!hasDiff) {
@@ -186,8 +162,7 @@ export function registerCrdtFunctions({
         event,
         updateLogTableName,
       });
-      onItemUpdated?.(dataset, oldPayload, newPayload);
-      onEventApplied?.(event);
+      onEventApplied(event);
     },
   });
 
@@ -202,7 +177,7 @@ export function registerCrdtFunctions({
         type: "item-updated",
         dataset,
         item_id: itemId,
-        payload: { tombstone: 1 },
+        payload: JSON.stringify({ tombstone: 1 }),
       };
 
       applyCrdtEventMutations({
@@ -210,8 +185,7 @@ export function registerCrdtFunctions({
         event,
         updateLogTableName,
       });
-      onItemDeleted?.(dataset, itemId);
-      onEventApplied?.(event);
+      onEventApplied(event);
     },
   });
 }

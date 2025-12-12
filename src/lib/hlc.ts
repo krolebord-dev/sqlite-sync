@@ -52,7 +52,6 @@ export class HLCCounter {
 }
 
 export function serializeHLC(hlc: HLC) {
-  // 13 digits is enough for the next 100 years, so this is probably fine
   return (
     hlc.timestamp.toString().padStart(15, "0") +
     ":" +

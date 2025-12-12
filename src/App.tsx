@@ -8,7 +8,7 @@ export function App() {
   const [isTabSyncEnabled, setIsTabSyncEnabled] = useState(true);
   const toggleTabSync = () => {
     setIsTabSyncEnabled(!isTabSyncEnabled);
-    db.tabSyncEnabled = !isTabSyncEnabled;
+    // db.tabSyncEnabled = !isTabSyncEnabled;
   };
 
   const [newTodoTitle, setNewTodoTitle] = useState("");
@@ -44,7 +44,7 @@ export function App() {
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;
 
-    db.memoryDb.db.executeKysely((db: any) =>
+    db.db.executeKysely((db: any) =>
       db.insertInto("todo").values({
         id: generateId(),
         title: newTodoTitle.trim(),
@@ -52,40 +52,40 @@ export function App() {
         tombstone: false,
       })
     );
-    db.memoryDb.notifyTableSubscribers(["todo"]);
+    db.reactiveDb.notifyTableSubscribers(["todo"]);
     setNewTodoTitle("");
   };
 
   // Toggle todo completion
   const toggleTodo = (id: string, currentCompleted: boolean) => {
-    db.memoryDb.db.executeKysely((db: any) =>
+    db.db.executeKysely((db: any) =>
       db
         .updateTable("todo")
         .set({ completed: !currentCompleted })
         .where("id", "=", id)
     );
-    db.memoryDb.notifyTableSubscribers(["todo"]);
+    db.reactiveDb.notifyTableSubscribers(["todo"]);
   };
 
   // Delete a todo (set tombstone to true)
   const deleteTodo = (id: string) => {
-    db.memoryDb.db.executeKysely((db: any) =>
+    db.db.executeKysely((db: any) =>
       db.updateTable("todo").set({ tombstone: true }).where("id", "=", id)
     );
-    db.memoryDb.notifyTableSubscribers(["todo"]);
+    db.reactiveDb.notifyTableSubscribers(["todo"]);
   };
 
   // Update todo title
   const updateTodoTitle = (id: string, newTitle: string) => {
     if (!newTitle.trim()) return;
 
-    db.memoryDb.db.executeKysely((db: any) =>
+    db.db.executeKysely((db: any) =>
       db
         .updateTable("todo")
         .set({ title: newTitle.trim() })
         .where("id", "=", id)
     );
-    db.memoryDb.notifyTableSubscribers(["todo"]);
+    db.reactiveDb.notifyTableSubscribers(["todo"]);
   };
 
   return (

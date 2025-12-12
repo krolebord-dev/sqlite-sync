@@ -1,33 +1,47 @@
 import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
-import { startPerformanceLogger, type Logger } from "./logger";
-import { SQLiteDbWrapper, type PreparedStatement } from "./sqlite-db-wrapper";
+import { startPerformanceLogger, type Logger } from "../logger";
+import { SQLiteDbWrapper, type PreparedStatement } from "../sqlite-db-wrapper";
+import { logger } from "../../logger";
+import { createTypedEventTarget, TypedEvent } from "../utils";
 
 let sqliteModule: Sqlite3Static | null = null;
-
-type SQLiteMemoryDbOptions = {
-  logger?: Logger;
-};
 
 type TableName<Database> = keyof Database extends string
   ? keyof Database
   : never;
 
-export class SQLiteMemoryDb<Database> {
+type SQLiteReactiveDbOptions = {
+  snapshot?: Uint8Array<ArrayBufferLike>;
+};
+
+type EventsMap = {
+  "transaction-committed": void;
+  "transaction-rolled-back": void;
+  "any-table-changed": void;
+} & Record<`table:${string}`, void>;
+
+export function createSQLiteReactiveDb<Database>(
+  opts: SQLiteReactiveDbOptions
+) {
+  return SQLiteReactiveDb.create<Database>(opts);
+}
+
+export class SQLiteReactiveDb<Database> {
   readonly db: SQLiteDbWrapper<Database>;
   private sqlite3: Sqlite3Static;
 
   private readonly logger: Logger;
-
-  private readonly tableSubscribers: Map<string, Set<() => void>> = new Map();
 
   private tablesUsedStatement: PreparedStatement<
     [string],
     { name: string; isWrite: boolean }
   > | null = null;
 
-  private constructor(sqlite3: Sqlite3Static, opts?: SQLiteMemoryDbOptions) {
+  private eventTarget = createTypedEventTarget<EventsMap>();
+
+  private constructor(sqlite3: Sqlite3Static) {
     this.sqlite3 = sqlite3;
-    this.logger = opts?.logger ?? (() => {});
+    this.logger = logger;
 
     this.db = new SQLiteDbWrapper({
       db: new sqlite3.oo1.DB({ filename: ":memory:" }),
@@ -37,14 +51,17 @@ export class SQLiteMemoryDb<Database> {
     });
   }
 
-  static async create<Database>(opts?: SQLiteMemoryDbOptions) {
-    const perf = startPerformanceLogger(opts?.logger ?? (() => {}));
+  static async create<Database>(opts: SQLiteReactiveDbOptions) {
+    const perf = startPerformanceLogger(logger);
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
     }
 
-    const db = new SQLiteMemoryDb<Database>(sqliteModule, opts);
+    const db = new SQLiteReactiveDb<Database>(sqliteModule);
 
+    if (opts.snapshot) {
+      db.useSnapshot(opts.snapshot);
+    }
     db.registerDbHooks();
 
     perf.logEnd("createSQLiteMemoryDb", "success", "info");
@@ -118,34 +135,33 @@ export class SQLiteMemoryDb<Database> {
     }, 30);
 
     for (const table of readTables) {
-      let subscribers = this.tableSubscribers.get(table);
-      if (!subscribers) {
-        subscribers = new Set();
-        this.tableSubscribers.set(table, subscribers);
-      }
-      subscribers.add(notifyDataChange);
+      this.eventTarget.addEventListener(`table:${table}`, notifyDataChange);
     }
+    this.eventTarget.addEventListener("any-table-changed", notifyDataChange);
 
     return {
       unsubscribe: () => {
         for (const table of readTables) {
-          this.tableSubscribers.get(table)?.delete(notifyDataChange);
+          this.eventTarget.removeEventListener(
+            `table:${table}`,
+            notifyDataChange
+          );
+          this.eventTarget.removeEventListener(
+            "any-table-changed",
+            notifyDataChange
+          );
         }
       },
     };
   }
 
   subscribeToTableChanges(table: string, onChanges: () => void) {
-    let subscribers = this.tableSubscribers.get(table);
-    if (!subscribers) {
-      subscribers = new Set();
-      this.tableSubscribers.set(table, subscribers);
-    }
-    subscribers.add(onChanges);
-
+    this.eventTarget.addEventListener(`table:${table}`, onChanges);
+    this.eventTarget.addEventListener("any-table-changed", onChanges);
     return {
       unsubscribe: () => {
-        subscribers.delete(onChanges);
+        this.eventTarget.removeEventListener(`table:${table}`, onChanges);
+        this.eventTarget.removeEventListener("any-table-changed", onChanges);
       },
     };
   }
@@ -197,16 +213,28 @@ export class SQLiteMemoryDb<Database> {
     return tableNames;
   }
 
+  addEventListener<K extends keyof EventsMap>(
+    type: K,
+    listener: (event: TypedEvent<EventsMap[K]>) => void
+  ) {
+    this.eventTarget.addEventListener(type, listener);
+  }
+
+  removeEventListener<K extends keyof EventsMap>(
+    type: K,
+    listener: (event: TypedEvent<EventsMap[K]>) => void
+  ) {
+    this.eventTarget.removeEventListener(type, listener);
+  }
+
   notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] = []) {
     if (tables.length === 0) {
-      this.tableSubscribers.forEach((subscribers) => {
-        subscribers.forEach((subscriber) => subscriber());
-      });
+      this.eventTarget.dispatchEvent("any-table-changed", undefined);
       return;
     }
 
     for (const table of tables) {
-      this.tableSubscribers.get(table)?.forEach((subscriber) => subscriber());
+      this.eventTarget.dispatchEvent(`table:${table}`, undefined);
     }
   }
 
@@ -229,6 +257,8 @@ export class SQLiteMemoryDb<Database> {
         }
 
         updateQueue.clear();
+        this.eventTarget.dispatchEvent("transaction-rolled-back", undefined);
+
         return 0;
       },
       0
@@ -243,6 +273,7 @@ export class SQLiteMemoryDb<Database> {
 
         const tables = Array.from(updateQueue);
         updateQueue.clear();
+        this.eventTarget.dispatchEvent("transaction-committed", undefined);
 
         queueMicrotask(() => {
           this.notifyTableSubscribers(tables);

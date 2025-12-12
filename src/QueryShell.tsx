@@ -89,7 +89,6 @@ export function QueryShell() {
     }
 
     const perf = startPerformanceLogger(logger);
-    db.crdtifyTable(table);
     perf.logEnd("crdtifyTable", table, "info");
   };
 
@@ -128,7 +127,7 @@ export function QueryShell() {
       let rows: unknown[] = [];
 
       if (dbType === "memoryDb") {
-        const result = db.memoryDb.db.execute(query);
+        const result = db.db.execute(query);
         rows = result.rows;
       } else {
         const result = await db.workerDb.execute({
