@@ -7,6 +7,7 @@
 - [x] pull on de-sync (tab <-> worker)
 - [x] simple remote server
 - [x] pull on de-sync (worker <-> remote server)
+- [x] monorepo setup
 - [ ] event log compaction
 - [ ] events payload validation
 - [ ] offline support using service worker

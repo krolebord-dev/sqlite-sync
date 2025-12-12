@@ -1,0 +1,36 @@
+{
+  "name": "@sqlite-sync/example",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "wrangler dev",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sqlite-sync/core": "workspace:*",
+    "@sqlite-sync/react": "workspace:*",
+    "@tailwindcss/vite": "^4.1.17",
+    "jotai": "^2.13.1",
+    "kysely": "^0.28.8",
+    "partyserver": "^0.0.75",
+    "partysocket": "^1.1.6",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-scan": "^0.4.3",
+    "tailwindcss": "^4.1.17"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react-swc": "^4.2.2",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.6",
+    "wrangler": "^4.53.0"
+  }
+}
+

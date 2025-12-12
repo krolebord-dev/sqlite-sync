@@ -1,43 +1,21 @@
 {
-  "name": "sqlite-sync",
+  "name": "sqlite-sync-monorepo",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:server": "wrangler dev",
-    "build": "tsc -b && vite build",
+    "dev": "pnpm --filter @sqlite-sync/example dev",
+    "dev:server": "pnpm --filter @sqlite-sync/example dev:server",
+    "build": "pnpm -r build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "cf-typegen": "wrangler types"
-  },
-  "dependencies": {
-    "@sqlite.org/sqlite-wasm": "3.51.1-build2",
-    "@standard-schema/spec": "^1.0.0",
-    "@tailwindcss/vite": "^4.1.17",
-    "broadcast-channel": "^7.2.0",
-    "jotai": "^2.13.1",
-    "kysely": "^0.28.8",
-    "partyserver": "^0.0.75",
-    "partysocket": "^1.1.6",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1",
-    "react-scan": "^0.4.3",
-    "tailwindcss": "^4.1.17",
-    "zod": "^4.1.13"
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
-    "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react-swc": "^4.2.2",
+    "@types/node": "^22.10.2",
     "eslint": "^9.33.0",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "tsup": "^8.3.5",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.48.1",
-    "vite": "^7.2.6",
-    "wrangler": "^4.53.0"
+    "typescript-eslint": "^8.48.1"
   }
 }
