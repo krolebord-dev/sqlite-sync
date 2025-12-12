@@ -1,7 +1,21 @@
 {
   "name": "@sqlite-sync/core",
   "version": "0.0.1",
+  "description": "SQLite synchronization library with CRDT support",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krolebord/sqlite-sync.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "sqlite",
+    "sync",
+    "crdt",
+    "offline-first",
+    "local-first"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,7 +39,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@sqlite.org/sqlite-wasm": "3.51.1-build2",

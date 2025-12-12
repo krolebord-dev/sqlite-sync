@@ -1,7 +1,22 @@
 {
   "name": "@sqlite-sync/react",
   "version": "0.0.1",
+  "description": "React bindings for @sqlite-sync/core",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krolebord/sqlite-sync.git",
+    "directory": "packages/react"
+  },
+  "keywords": [
+    "sqlite",
+    "sync",
+    "react",
+    "hooks",
+    "offline-first",
+    "local-first"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,7 +32,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@sqlite-sync/core": "workspace:*"
