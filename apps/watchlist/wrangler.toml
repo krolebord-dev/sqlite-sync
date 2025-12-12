@@ -1,0 +1,60 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "watchlist"
+main = "worker/index.ts"
+compatibility_date = "2024-12-30"
+compatibility_flags = ["nodejs_als"]
+
+limits.cpu_ms = 500
+
+[route]
+pattern = "watchlist.krolebord.com"
+custom_domain = true
+
+[observability]
+enabled = true
+
+[placement]
+mode = "smart"
+
+[vars]
+MODE = "production"
+APP_URL = "https://watchlist.krolebord.com"
+
+[version_metadata]
+binding = "METADATA"
+
+[[durable_objects.bindings]]
+name = "LIST_DO"
+class_name = "ListDurableObject"
+
+[[kv_namespaces]]
+id = "d66e3b0d7bb04642b3f33a1f72c9ae79"
+binding = "LIST_KV"
+
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "MAIN_DB"
+database_name = "watchlist-main"
+database_id = "44895836-73cc-4696-a30f-a062b66923f7"
+migrations_dir = "worker/main/db/migrations"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "single-page-application"
+
+[[rules]]
+type = "Text"
+globs = ["worker/main/db/migrations/*.sql"]
+fallthrough = true
+
+[[rules]]
+type = "ESModule"
+globs = []
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ListDurableObject"]

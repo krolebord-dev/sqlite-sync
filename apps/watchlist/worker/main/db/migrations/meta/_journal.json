@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1737833902791,
+      "tag": "0000_add-auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1738692967325,
+      "tag": "0001_add-lists",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1738774361581,
+      "tag": "0002_add-list-items",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1738778767048,
+      "tag": "0003_cool_sentinel",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1739104739951,
+      "tag": "0004_add-priority",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1740739975549,
+      "tag": "0005_add-reindexing",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1747082425948,
+      "tag": "0006_regular_captain_midlands",
+      "breakpoints": true
+    }
+  ]
+}

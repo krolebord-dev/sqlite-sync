@@ -1,0 +1,7 @@
+onlyBuiltDependencies:
+  - '@biomejs/biome'
+  - '@tailwindcss/oxide'
+  - better-sqlite3
+  - esbuild
+  - workerd
+  - sharp

@@ -1,0 +1,1 @@
+ALTER TABLE `list_items` ADD `priority` integer DEFAULT 0 NOT NULL;
