@@ -11,17 +11,15 @@ import {
   MinusIcon,
   PencilIcon,
   PlusIcon,
-  RefreshCwIcon,
   SkullIcon,
   ThumbsUpIcon,
   TrashIcon,
 } from 'lucide-react';
-import type { TrpcOutput } from '@/trpc';
-import { trpc } from '@/trpc';
+import { useListDb } from '@/db';
+import type { UiListItem } from '@/db/use-list-items';
 import { cn } from '@/utils/cn';
 import { formatDuration } from '@/utils/format-duration';
 import { useListStore } from '@/utils/list-store';
-import { useListId } from '@/utils/use-list-id';
 import { VoteAverage } from './movie-card';
 import { Button } from './ui/button';
 import { ContextMenu, ContextMenuTrigger } from './ui/context-menu';
@@ -35,7 +33,8 @@ import {
   DynamicMenuSubTrigger,
 } from './ui/dynamic-menu-content';
 
-type ListItem = TrpcOutput['list']['getItems'][number];
+type ListItem = UiListItem;
+
 export function ListItemCard({ item, listId }: { item: ListItem; listId: string }) {
   const isWatched = !!item.watchedAt;
   const isSelected = useIsItemSelected(item.id);
@@ -43,7 +42,7 @@ export function ListItemCard({ item, listId }: { item: ListItem; listId: string 
 
   const toggleItemSelection = useListStore((state) => state.toggleItemSelection);
 
-  const setWatchedMutation = useSetWatchedMutation(listId);
+  const { setWatched } = useListDb();
 
   return (
     <ContextMenu>
@@ -142,8 +141,7 @@ export function ListItemCard({ item, listId }: { item: ListItem; listId: string 
                 <Button
                   variant="ghost"
                   size="icon"
-                  disabled={setWatchedMutation.isPending}
-                  onClick={() => setWatchedMutation.mutate({ listId, itemId: item.id, watched: true })}
+                  onClick={() => setWatched(item.id, true)}
                 >
                   <CheckIcon />
                 </Button>
@@ -177,7 +175,6 @@ function ListItemMenuContent({ type, item }: ListItemMenuContentProps) {
       <DeleteMenuItem item={item} />
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
-      <ReindexMenuItem item={item} />
     </DynamicMenuContent>
   );
 }
@@ -185,40 +182,6 @@ function ListItemMenuContent({ type, item }: ListItemMenuContentProps) {
 type ItemMenuActioProps = {
   item: ListItem;
 };
-
-type Utils = ReturnType<typeof trpc.useUtils>;
-
-export function optimisticallyUpdateItems(
-  utils: Utils,
-  listId: string,
-  updateItems: (items: ListItem[]) => ListItem[],
-) {
-  const previousItems = utils.list.getItems.getData({ listId });
-  utils.list.getItems.setData({ listId }, (old) => {
-    return updateItems(old ?? []);
-  });
-
-  return { previousItems };
-}
-
-export function optimisticallyUpdateItem(
-  utils: Utils,
-  listId: string,
-  itemId: string,
-  updateItem: (item: ListItem) => Partial<ListItem>,
-) {
-  return optimisticallyUpdateItems(utils, listId, (old) => {
-    const newItems = [...old];
-    const itemIndex = newItems.findIndex((item) => item.id === itemId);
-    if (itemIndex === -1) return newItems;
-
-    newItems[itemIndex] = {
-      ...newItems[itemIndex],
-      ...updateItem(newItems[itemIndex]),
-    };
-    return newItems;
-  });
-}
 
 function ToggleItemSelectionMenuItem({ item }: ItemMenuActioProps) {
   const isSelected = useIsItemSelected(item.id);
@@ -233,128 +196,52 @@ function ToggleItemSelectionMenuItem({ item }: ItemMenuActioProps) {
 }
 
 function DeleteMenuItem({ item }: ItemMenuActioProps) {
-  const listId = useListId();
-  const utils = trpc.useUtils();
-  const removeItemMutation = trpc.list.removeItem.useMutation({
-    onMutate: ({ itemId }) =>
-      optimisticallyUpdateItems(utils, listId, (old) => old.filter((item) => item.id !== itemId)),
-    onError: (_, __, context) => {
-      if (context?.previousItems) {
-        utils.list.getItems.setData({ listId }, context.previousItems);
-      }
-    },
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-    },
-  });
+  const { removeItem } = useListDb();
 
   return (
-    <DynamicMenuItem
-      disabled={removeItemMutation.isPending}
-      onClick={() => removeItemMutation.mutate({ listId, itemId: item.id })}
-    >
+    <DynamicMenuItem onClick={() => removeItem(item.id)}>
       <TrashIcon />
       Delete
     </DynamicMenuItem>
   );
 }
 
-function useSetWatchedMutation(listId: string) {
-  const utils = trpc.useUtils();
-
-  return trpc.list.setWatched.useMutation({
-    onMutate: ({ itemId, watched }) =>
-      optimisticallyUpdateItem(utils, listId, itemId, () => ({ watchedAt: watched ? new Date() : null })),
-    onError: (_, __, context) => {
-      if (context?.previousItems) {
-        utils.list.getItems.setData({ listId }, context.previousItems);
-      }
-    },
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-    },
-  });
-}
-
 function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
   const isWatched = !!item.watchedAt;
-
-  const listId = useListId();
-  const setWatchedMutation = useSetWatchedMutation(listId);
+  const { setWatched } = useListDb();
 
   return isWatched ? (
-    <DynamicMenuItem
-      disabled={setWatchedMutation.isPending}
-      onClick={() => setWatchedMutation.mutate({ listId, itemId: item.id, watched: false })}
-    >
+    <DynamicMenuItem onClick={() => setWatched(item.id, false)}>
       <EyeOffIcon />
       <span>Mark as unwatched</span>
     </DynamicMenuItem>
   ) : (
-    <DynamicMenuItem
-      disabled={setWatchedMutation.isPending}
-      onClick={() => setWatchedMutation.mutate({ listId, itemId: item.id, watched: true })}
-    >
+    <DynamicMenuItem onClick={() => setWatched(item.id, true)}>
       <CheckIcon />
       Mark as watched
     </DynamicMenuItem>
   );
 }
 
-function ReindexMenuItem({ item }: ItemMenuActioProps) {
-  const listId = useListId();
-  const utils = trpc.useUtils();
-
-  const reindexItemMutation = trpc.list.reindexItem.useMutation({
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-    },
-  });
-
-  return (
-    <DynamicMenuItem
-      disabled={reindexItemMutation.isPending}
-      onClick={() => reindexItemMutation.mutate({ listId, itemId: item.id })}
-    >
-      <RefreshCwIcon />
-      Reindex
-    </DynamicMenuItem>
-  );
-}
-
 function SetPriorityMenuItem({ item }: ItemMenuActioProps) {
-  const listId = useListId();
-  const utils = trpc.useUtils();
-
-  const setPriorityMutation = trpc.list.setPriority.useMutation({
-    onMutate: ({ itemId, priority }) =>
-      optimisticallyUpdateItem(utils, listId, itemId, () => ({ priority: getPriorityValue(priority) })),
-    onError: (_, __, context) => {
-      if (context?.previousItems) {
-        utils.list.getItems.setData({ listId }, context.previousItems);
-      }
-    },
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-    },
-  });
+  const { setPriority } = useListDb();
 
   return (
     <DynamicMenuSub>
-      <DynamicMenuSubTrigger disabled={setPriorityMutation.isPending}>
+      <DynamicMenuSubTrigger>
         <HashIcon />
         Set priority
       </DynamicMenuSubTrigger>
       <DynamicMenuSubContent>
-        <DynamicMenuItem onClick={() => setPriorityMutation.mutate({ listId, itemId: item.id, priority: 'high' })}>
+        <DynamicMenuItem onClick={() => setPriority(item.id, 1)}>
           {priorityColors.high.icon}
           High
         </DynamicMenuItem>
-        <DynamicMenuItem onClick={() => setPriorityMutation.mutate({ listId, itemId: item.id, priority: 'normal' })}>
+        <DynamicMenuItem onClick={() => setPriority(item.id, 0)}>
           {priorityColors.normal.icon}
           Normal
         </DynamicMenuItem>
-        <DynamicMenuItem onClick={() => setPriorityMutation.mutate({ listId, itemId: item.id, priority: 'low' })}>
+        <DynamicMenuItem onClick={() => setPriority(item.id, -1)}>
           {priorityColors.low.icon}
           Low
         </DynamicMenuItem>
@@ -367,12 +254,6 @@ export function getPriorityLabel(priority: number) {
   if (priority === 0) return 'normal' as const;
   if (priority > 0) return 'high' as const;
   return 'low' as const;
-}
-
-function getPriorityValue(priority: string) {
-  if (priority === 'high') return 1;
-  if (priority === 'low') return -1;
-  return 0;
 }
 
 export const priorityColors = {

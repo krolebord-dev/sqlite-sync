@@ -4,8 +4,8 @@ import { CalendarIcon, FilmIcon, TvIcon } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { type ControllerRenderProps, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import type { TrpcOutput } from '@/trpc';
-import { trpc } from '@/trpc';
+import { useListDb, toTimestamp } from '@/db';
+import type { UiListItem } from '@/db/use-list-items';
 import { cn } from '@/utils/cn';
 import { useListStore } from '@/utils/list-store';
 import { Button } from './ui/button';
@@ -17,7 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Textarea } from './ui/textarea';
 
-type ListItem = TrpcOutput['list']['getItems'][number];
+type ListItem = UiListItem;
 
 const editItemSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -35,64 +35,10 @@ type EditItemDialogProps = {
   listId: string;
 };
 
-type ItemTagsProps = {
-  listId: string;
-  itemId: string;
-};
-
-function ItemTags({ listId, itemId }: ItemTagsProps) {
-  const utils = trpc.useUtils();
-  const tags = trpc.list.getTags.useQuery({ listId });
-  const itemTags = trpc.list.getItemTags.useQuery({ listId, itemId });
-  const setItemTagsMutation = trpc.list.setItemTags.useMutation({
-    onSuccess: () => {
-      utils.list.getItemTags.invalidate({ listId, itemId });
-    },
-  });
-
-  const selectedTagIds = new Set(itemTags.data?.map((tag) => tag.id));
-
-  const toggleTag = (tagId: string) => {
-    const newTagIds = new Set(selectedTagIds);
-    if (newTagIds.has(tagId)) {
-      newTagIds.delete(tagId);
-    } else {
-      newTagIds.add(tagId);
-    }
-    setItemTagsMutation.mutate({ listId, itemId, tagIds: Array.from(newTagIds) });
-  };
-
-  return (
-    <div>
-      <p className="mb-2 font-medium">Tags</p>
-      <div className="flex flex-wrap gap-2">
-        {tags.data?.map((tag) => {
-          const isSelected = selectedTagIds.has(tag.id);
-          return (
-            <button
-              key={tag.id}
-              type="button"
-              onClick={() => toggleTag(tag.id)}
-              className={cn(
-                'flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors',
-                isSelected
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border bg-card hover:bg-accent',
-              )}
-            >
-              {tag.name}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function EditItemDialog({ items, listId }: EditItemDialogProps) {
   const editItemId = useListStore((state) => state.editItemId);
   const setEditItemId = useListStore((state) => state.setEditItemId);
-  const utils = trpc.useUtils();
+  const { updateItem } = useListDb();
 
   const item = useMemo(() => items.find((item) => item.id === editItemId), [items, editItemId]);
 
@@ -121,26 +67,20 @@ export function EditItemDialog({ items, listId }: EditItemDialogProps) {
     }
   }, [form, item]);
 
-  const updateItemMutation = trpc.list.updateItem.useMutation({
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-      setEditItemId(null);
-    },
-  });
-
   const onSubmit = (values: EditItemFormValues) => {
     if (!editItemId) return;
 
-    updateItemMutation.mutate({
-      listId,
-      itemId: editItemId,
+    // Update item in local SQLite
+    updateItem(editItemId, {
       title: values.title,
-      overview: values.overview,
-      duration: values.duration,
+      overview: values.overview ?? null,
+      duration: values.duration ?? null,
       type: values.type,
-      episodeCount: values.episodeCount,
-      watchedAt: values.watchedAt,
+      episode_count: values.episodeCount ?? null,
+      watched_at: toTimestamp(values.watchedAt ?? null),
     });
+
+    setEditItemId(null);
   };
 
   const type = form.watch('type');
@@ -298,17 +238,17 @@ export function EditItemDialog({ items, listId }: EditItemDialogProps) {
                   </FormItem>
                 )}
               />
-              <ItemTags listId={listId} itemId={item.id} />
+              {/* Tags are temporarily disabled until we implement local tag storage */}
+              {/* <ItemTags listId={listId} itemId={item.id} /> */}
               <DialogFooter>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setEditItemId(null)}
-                  disabled={updateItemMutation.isPending}
                 >
                   Cancel
                 </Button>
-                <Button type="submit" disabled={updateItemMutation.isPending}>
+                <Button type="submit">
                   Save
                 </Button>
               </DialogFooter>

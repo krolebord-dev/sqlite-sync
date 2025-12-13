@@ -1,10 +1,11 @@
 packages:
-  - 'packages/*'
-  - 'apps/*'
+  - packages/*
+  - apps/*
 
 onlyBuiltDependencies:
   - '@swc/core'
   - '@tailwindcss/oxide'
+  - better-sqlite3
   - esbuild
   - sharp
   - workerd

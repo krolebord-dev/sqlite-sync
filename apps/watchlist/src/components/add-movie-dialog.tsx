@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { CheckIcon, XIcon } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { type TrpcOutput, trpc } from '@/trpc';
+import { useListDb } from '@/db';
 import { cn } from '@/utils/cn';
 import { useThrottle } from '@/utils/use-throttle';
 import { VoteAverage } from './movie-card';
@@ -17,6 +18,7 @@ type AddMovieDialogProps = {
   children: React.ReactNode;
   alreadyAddedItems?: number[];
 };
+
 export function AddMovieDialog({ listId, asChild, children, alreadyAddedItems }: AddMovieDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
   const close = () => setIsOpen(false);
@@ -28,6 +30,7 @@ export function AddMovieDialog({ listId, asChild, children, alreadyAddedItems }:
   const searchQuery = useThrottle(search, 200);
 
   const [addedItems, setAddedItems] = useState<number[]>(alreadyAddedItems ?? []);
+  const [loadingItems, setLoadingItems] = useState<number[]>([]);
 
   const { data } = trpc.search.findMovie.useQuery(
     { q: searchQuery },
@@ -39,20 +42,41 @@ export function AddMovieDialog({ listId, asChild, children, alreadyAddedItems }:
 
   const searchItems = searchQuery ? data : [];
 
+  const { addItem } = useListDb();
   const utils = trpc.useUtils();
-  const addItem = trpc.list.addTMDBItem.useMutation({
-    onSuccess: () => {
-      utils.list.getItems.invalidate({ listId });
-    },
-  });
 
-  const handleAddMovie = (movie: Exclude<typeof searchItems, undefined>[number], isKeyboard: boolean) => {
-    if (movie.type === 'movie') {
-      addItem.mutate({ listId, tmdbId: movie.tmdbId, type: 'movie' });
-      setAddedItems([...addedItems, movie.tmdbId]);
-    } else {
-      addItem.mutate({ listId, tmdbId: movie.tmdbId, type: 'tv' });
-      setAddedItems([...addedItems, movie.tmdbId]);
+  const handleAddMovie = async (movie: Exclude<typeof searchItems, undefined>[number], isKeyboard: boolean) => {
+    const { tmdbId, type } = movie;
+
+    // Mark as loading
+    setLoadingItems((prev) => [...prev, tmdbId]);
+
+    try {
+      // Fetch full metadata from TMDB
+      const metadata = await utils.search.getTmdbMetadata.fetch({ tmdbId, type });
+
+      if (metadata) {
+        // Add item to local SQLite database
+        addItem({
+          type: metadata.type,
+          tmdb_id: metadata.tmdbId,
+          title: metadata.title,
+          poster_url: metadata.posterUrl,
+          overview: metadata.overview,
+          duration: metadata.duration,
+          episode_count: metadata.episodeCount,
+          rating: metadata.rating,
+          release_date: metadata.releaseDate,
+          watched_at: null,
+          priority: 0,
+        });
+
+        setAddedItems((prev) => [...prev, tmdbId]);
+      }
+    } catch (error) {
+      console.error('Failed to add item:', error);
+    } finally {
+      setLoadingItems((prev) => prev.filter((id) => id !== tmdbId));
     }
 
     if (isKeyboard) {
@@ -93,6 +117,7 @@ export function AddMovieDialog({ listId, asChild, children, alreadyAddedItems }:
               movie={result}
               onClick={({ isKeyboard }) => handleAddMovie(result, isKeyboard)}
               isAdded={addedItems.includes(result.tmdbId)}
+              isLoading={loadingItems.includes(result.tmdbId)}
             />
           ))}
         </div>
@@ -107,11 +132,13 @@ function SearchCard({
   movie,
   onClick,
   isAdded = false,
+  isLoading = false,
   className,
 }: {
   movie: Movie;
   onClick?: (event: { isKeyboard: boolean }) => void;
   isAdded?: boolean;
+  isLoading?: boolean;
   className?: string;
 }) {
   return (
@@ -123,8 +150,8 @@ function SearchCard({
         className,
         onClick && 'cursor-pointer',
       )}
-      disabled={isAdded}
-      tabIndex={isAdded ? -1 : 0}
+      disabled={isAdded || isLoading}
+      tabIndex={isAdded || isLoading ? -1 : 0}
       onClick={(e) => {
         if (!onClick) return;
 
@@ -140,10 +167,13 @@ function SearchCard({
       <div
         className={cn(
           'absolute top-0 right-0 bottom-0 left-0 flex items-center justify-center bg-black/20 opacity-0 transition-all duration-300 group-hover:opacity-100',
-          isAdded && 'bg-black/50 opacity-100',
+          (isAdded || isLoading) && 'bg-black/50 opacity-100',
         )}
       >
-        {isAdded && <CheckIcon className="size-10 text-primary text-purple-500" />}
+        {isLoading && (
+          <div className="size-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        )}
+        {isAdded && !isLoading && <CheckIcon className="size-10 text-primary text-purple-500" />}
       </div>
       {!!movie.releaseDate && (
         <p className="absolute top-1 left-1 select-none rounded-full bg-black px-3 py-1 text-white">

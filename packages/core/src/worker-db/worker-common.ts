@@ -79,13 +79,6 @@ export const createBroadcastChannels = (): WorkerBroadcastChannels => {
 export type WorkerConfig = {
   dbPath: string;
   clientId: string;
-  clearOnInit?: boolean;
-  syncServer: SyncServerConfig;
-};
-
-export type SyncServerConfig = {
-  host: string;
-  room: string;
 };
 
 export type WorkerInitMessage = {
@@ -152,4 +145,3 @@ export function isWorkerNotificationMessage(
     !!message.notificationType
   );
 }
-

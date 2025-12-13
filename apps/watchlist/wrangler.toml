@@ -27,6 +27,10 @@ binding = "METADATA"
 name = "LIST_DO"
 class_name = "ListDurableObject"
 
+[[durable_objects.bindings]]
+name = "LIST_SYNC_DO"
+class_name = "ListSyncServer"
+
 [[kv_namespaces]]
 id = "d66e3b0d7bb04642b3f33a1f72c9ae79"
 binding = "LIST_KV"
@@ -58,3 +62,7 @@ globs = []
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ListDurableObject"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ListSyncServer"]

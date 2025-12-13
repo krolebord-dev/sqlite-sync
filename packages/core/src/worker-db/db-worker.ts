@@ -62,7 +62,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     name: "sync-db-storage",
-    clearOnInit: config.clearOnInit,
+    clearOnInit: opts.clearOnInit,
   });
 
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
@@ -237,6 +237,7 @@ type WorkerOptions = {
   migrations: Record<number, Migration>;
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
+  clearOnInit?: boolean;
 };
 
 type CreateRemoteSourceFactory = (opts: {
@@ -351,4 +352,3 @@ function setMetaValue(
       .onConflict((oc) => oc.doUpdateSet({ value: params("value") }))
   );
 }
-

@@ -1,6 +1,6 @@
-import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { createFileRoute, Link, useSearch } from '@tanstack/react-router';
-import { zodValidator } from '@tanstack/zod-adapter';
+import { useAutoAnimate } from "@formkit/auto-animate/react";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
+import { zodValidator } from "@tanstack/zod-adapter";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -15,40 +15,49 @@ import {
   SquareDashed,
   SquareDashedMousePointerIcon,
   StarIcon,
-} from 'lucide-react';
-import { useMemo, useState } from 'react';
-import type { z } from 'zod';
-import { AddMovieDialog } from '@/components/add-movie-dialog';
-import { AppHeader, ProjectSelector, UserAvatarDropdown } from '@/components/app-layout';
-import { EditItemDialog } from '@/components/edit-item-dialog';
+} from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import type { z } from "zod";
+import { AddMovieDialog } from "@/components/add-movie-dialog";
+import {
+  AppHeader,
+  ProjectSelector,
+  UserAvatarDropdown,
+} from "@/components/app-layout";
+import { EditItemDialog } from "@/components/edit-item-dialog";
 import {
   ListItemCard,
-  optimisticallyUpdateItem,
-  optimisticallyUpdateItems,
   priorityColors,
   useIsSelectionMode,
-} from '@/components/list-item';
-import { ListSettingsSheet } from '@/components/list-settings-sheet';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+} from "@/components/list-item";
+import { ListSettingsSheet } from "@/components/list-settings-sheet";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
-import { trpc } from '@/trpc';
-import { cn } from '@/utils/cn';
-import { lastOpenedList } from '@/utils/last-opened-list';
-import { ListEventsProvider, useListEvent } from '@/utils/list-events';
-import { ListStoreProvider, useListStore } from '@/utils/list-store';
-import { useListId } from '@/utils/use-list-id';
-import { itemsFilterSchema, useSortedAndFilteredListItemsSelector } from '@/utils/use-list-items';
-import { useUser } from '@/utils/use-user';
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { trpc } from "@/trpc";
+import { cn } from "@/utils/cn";
+import { lastOpenedList } from "@/utils/last-opened-list";
+import { ListStoreProvider, useListStore } from "@/utils/list-store";
+import { useListId } from "@/utils/use-list-id";
+import { useUser } from "@/utils/use-user";
 
-export const Route = createFileRoute('/_app/list/$id')({
+// sqlite-sync imports
+import { ListDbProvider } from "@/db";
+import {
+  itemsFilterSchema,
+  useSortedAndFilteredListItems,
+  useListItems,
+  useAlreadyAddedTmdbIds,
+} from "@/db/use-list-items";
+
+export const Route = createFileRoute("/_app/list/$id")({
   component: RouteComponent,
   validateSearch: zodValidator(itemsFilterSchema),
   loaderDeps: () => ({}),
@@ -56,10 +65,8 @@ export const Route = createFileRoute('/_app/list/$id')({
   loader: async ({ params, context }) => {
     lastOpenedList.set(params.id);
 
-    await Promise.all([
-      context.trpc.list.getItems.prefetch({ listId: params.id }),
-      context.trpc.list.getLists.prefetch(),
-    ]);
+    // Only prefetch list metadata, items come from local SQLite
+    await context.trpc.list.getLists.prefetch();
 
     return {
       listId: params.id,
@@ -85,7 +92,11 @@ function RouteComponent() {
   const user = useUser();
 
   return (
-    <ListEventsProvider listId={listId} sessionId={user.sessionId}>
+    <ListDbProvider
+      listId={listId}
+      sessionId={user.sessionId}
+      fallback={<LoadingFallback />}
+    >
       <ListStoreProvider listId={listId}>
         <AppHeader>
           <div className="flex items-center gap-2">
@@ -106,50 +117,65 @@ function RouteComponent() {
           <ItemsList />
         </div>
       </ListStoreProvider>
-    </ListEventsProvider>
+    </ListDbProvider>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <div className="animate-pulse text-muted-foreground">
+        Loading database...
+      </div>
+    </div>
   );
 }
 
 function ListUsers() {
   const user = useUser();
-  const [connectedUsers, setConnectedUsers] = useState<{ id: string; name: string }[]>([]);
-  useListEvent('users-updated', ({ users }) => {
-    setConnectedUsers(users.filter((x) => x.id !== user.id));
-  });
+  const [connectedUsers, setConnectedUsers] = useState<
+    { id: string; name: string }[]
+  >([]);
+
+  // TODO: Integrate with sync server for user presence
+  // For now, we only show the current user
+
   return (
     <div className="flex items-center gap-2">
-      {connectedUsers.map((user) => (
-        <Avatar key={user.id}>
-          <AvatarFallback>{user.name.slice(0, 2)}</AvatarFallback>
+      {connectedUsers.map((connectedUser) => (
+        <Avatar key={connectedUser.id}>
+          <AvatarFallback>{connectedUser.name.slice(0, 2)}</AvatarFallback>
         </Avatar>
       ))}
-      {connectedUsers.length > 0 && <Separator orientation="vertical" className="h-8" />}
+      {connectedUsers.length > 0 && (
+        <Separator orientation="vertical" className="h-8" />
+      )}
       <UserAvatarDropdown />
     </div>
   );
 }
 
-const sortOrderIcon: Record<SortingOptions['sortOrder'], React.ReactNode> = {
+const sortOrderIcon: Record<SortingOptions["sortOrder"], React.ReactNode> = {
   asc: <ArrowUpIcon />,
   desc: <ArrowDownIcon />,
 };
 
-const sortByIcon: Record<SortingOptions['sortBy'], React.ReactNode> = {
+const sortByIcon: Record<SortingOptions["sortBy"], React.ReactNode> = {
   duration: <Clock4Icon />,
   rating: <StarIcon />,
   dateAdded: <CalendarIcon />,
   priority: <HashIcon />,
 };
 
-const sortByLabel: Record<SortingOptions['sortBy'], string> = {
-  duration: 'Duration',
-  rating: 'Rating',
-  dateAdded: 'Date Added',
-  priority: 'Priority',
+const sortByLabel: Record<SortingOptions["sortBy"], string> = {
+  duration: "Duration",
+  rating: "Rating",
+  dateAdded: "Date Added",
+  priority: "Priority",
 };
 
 type SortingByOptionProps = {
-  sortBy: SortingOptions['sortBy'];
+  sortBy: SortingOptions["sortBy"];
 };
 function SortingOption({ sortBy }: SortingByOptionProps) {
   return (
@@ -170,16 +196,20 @@ function HeaderMenu({ className }: { className?: string }) {
   const isSelectionMode = useIsSelectionMode();
   const isRandomizedItem = useListStore((state) => !!state.randomizedItem);
 
-  const selectRandomFromSelectedItems = useListStore((state) => state.selectRandomFromSelectedItems);
-  const clearRandomizedItem = useListStore((state) => state.clearRandomizedItem);
+  const selectRandomFromSelectedItems = useListStore(
+    (state) => state.selectRandomFromSelectedItems
+  );
+  const clearRandomizedItem = useListStore(
+    (state) => state.clearRandomizedItem
+  );
 
-  const listId = useListId();
-  const { data: listItems = [] } = trpc.list.getItems.useQuery({ listId });
+  // Get items from local SQLite
+  const listItems = useListItems();
   const allItems = useMemo(() => listItems.map((x) => x.id), [listItems]);
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild className={cn('shrink-0', className)}>
+      <DropdownMenuTrigger asChild className={cn("shrink-0", className)}>
         <Button variant="outline" size="icon">
           <EllipsisVertical />
         </Button>
@@ -230,10 +260,10 @@ function HeaderMenu({ className }: { className?: string }) {
 }
 
 function SortingHeader({ className }: { className?: string }) {
-  const { sortBy, sortOrder } = useSearch({ from: '/_app/list/$id' });
+  const { sortBy, sortOrder } = useSearch({ from: "/_app/list/$id" });
 
   return (
-    <div className={cn('flex items-center gap-1', className)}>
+    <div className={cn("flex items-center gap-1", className)}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline">
@@ -249,7 +279,13 @@ function SortingHeader({ className }: { className?: string }) {
         </DropdownMenuContent>
       </DropdownMenu>
       <Button variant="outline" size="icon" asChild>
-        <Link to="." search={(prev) => ({ ...prev, sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' })}>
+        <Link
+          to="."
+          search={(prev) => ({
+            ...prev,
+            sortOrder: sortOrder === "asc" ? "desc" : "asc",
+          })}
+        >
           {sortOrderIcon[sortOrder]}
         </Link>
       </Button>
@@ -259,7 +295,7 @@ function SortingHeader({ className }: { className?: string }) {
 }
 
 function FilterButton() {
-  const { priority } = useSearch({ from: '/_app/list/$id' });
+  const { priority } = useSearch({ from: "/_app/list/$id" });
 
   return (
     <DropdownMenu>
@@ -267,32 +303,46 @@ function FilterButton() {
         <Button
           variant="outline"
           size="icon"
-          className={priority === 'any' ? undefined : priorityColors[priority].text}
+          className={
+            priority === "any" ? undefined : priorityColors[priority].text
+          }
         >
-          {priority === 'any' ? <HashIcon /> : priorityColors[priority].icon}
+          {priority === "any" ? <HashIcon /> : priorityColors[priority].icon}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
         <DropdownMenuItem asChild>
-          <Link to="." search={(prev) => ({ ...prev, priority: 'high' })} className={priorityColors.high.text}>
+          <Link
+            to="."
+            search={(prev) => ({ ...prev, priority: "high" })}
+            className={priorityColors.high.text}
+          >
             {priorityColors.high.icon}
             High
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="." search={(prev) => ({ ...prev, priority: 'normal' })} className={priorityColors.normal.text}>
+          <Link
+            to="."
+            search={(prev) => ({ ...prev, priority: "normal" })}
+            className={priorityColors.normal.text}
+          >
             {priorityColors.normal.icon}
             Normal
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="." search={(prev) => ({ ...prev, priority: 'low' })} className={priorityColors.low.text}>
+          <Link
+            to="."
+            search={(prev) => ({ ...prev, priority: "low" })}
+            className={priorityColors.low.text}
+          >
             {priorityColors.low.icon}
             Low
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="." search={(prev) => ({ ...prev, priority: 'any' })}>
+          <Link to="." search={(prev) => ({ ...prev, priority: "any" })}>
             <HashIcon /> Any
           </Link>
         </DropdownMenuItem>
@@ -318,12 +368,20 @@ function SearchInput({ className }: { className?: string }) {
 function AddItemButton() {
   const listId = useListId();
 
-  const { data: listItems = [] } = trpc.list.getItems.useQuery({ listId });
-  const alreadyAddedItems = useMemo(() => listItems.map((x) => x.tmdbId).filter((id) => id !== null), [listItems]);
+  // Get already added items from local SQLite
+  const alreadyAddedItems = useAlreadyAddedTmdbIds();
 
   return (
-    <AddMovieDialog listId={listId} alreadyAddedItems={alreadyAddedItems} asChild>
-      <Button variant="default" size="icon" className="fixed right-4 bottom-4 z-50 size-10 rounded-full">
+    <AddMovieDialog
+      listId={listId}
+      alreadyAddedItems={alreadyAddedItems}
+      asChild
+    >
+      <Button
+        variant="default"
+        size="icon"
+        className="fixed right-4 bottom-4 z-50 size-10 rounded-full"
+      >
         <PlusIcon className="size-6!" />
       </Button>
     </AddMovieDialog>
@@ -332,17 +390,18 @@ function AddItemButton() {
 
 function ItemsList() {
   const listId = useListId();
-  const { data: items } = trpc.list.getItems.useQuery({ listId });
 
-  const orderedItems = useSortedAndFilteredListItemsSelector(items ?? []);
+  // Get items from local SQLite with sorting/filtering
+  const items = useListItems();
+  const orderedItems = useSortedAndFilteredListItems();
 
   const [animateRef] = useAutoAnimate();
 
-  useListEvents({ listId });
-
   return (
     <>
-      {items && <EditItemDialog items={items} listId={listId} />}
+      {items && items.length > 0 && (
+        <EditItemDialog items={items} listId={listId} />
+      )}
       <div
         className="flex w-full max-w-7xl flex-wrap justify-center gap-4 px-4 pt-2 pb-20 md:grid md:grid-cols-2 xl:grid-cols-3"
         ref={animateRef}
@@ -353,29 +412,4 @@ function ItemsList() {
       </div>
     </>
   );
-}
-
-function useListEvents({ listId }: { listId: string }) {
-  const utils = trpc.useUtils();
-
-  useListEvent('item-created', ({ item }) => {
-    optimisticallyUpdateItems(utils, listId, (items) => [
-      {
-        ...item,
-        tags: [],
-      },
-      ...items,
-    ]);
-  });
-
-  useListEvent('item-updated', ({ item }) => {
-    optimisticallyUpdateItem(utils, listId, item.id, (oldItem) => ({
-      ...oldItem,
-      ...item,
-    }));
-  });
-
-  useListEvent('item-removed', ({ itemId }) => {
-    optimisticallyUpdateItems(utils, listId, (items) => items.filter((i) => i.id !== itemId));
-  });
 }

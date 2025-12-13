@@ -1,5 +1,6 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { isListWsRequest, routeListWsRequest } from './list/list-durable-object';
+import { isListSyncWsRequest, routeListSyncWsRequest } from './list/list-sync-server';
 import { mainRouter } from './main/router';
 import { createContext, createServices } from './main/trpc';
 
@@ -30,6 +31,13 @@ export default {
       });
     }
 
+    // Handle sqlite-sync CRDT sync WebSocket requests
+    const syncListId = await isListSyncWsRequest(req);
+    if (syncListId) {
+      return await routeListSyncWsRequest(syncListId, req, env);
+    }
+
+    // Handle legacy list WebSocket requests (for backwards compatibility)
     const listId = await isListWsRequest(req);
     if (listId) {
       return await routeListWsRequest(listId, req, env);
@@ -41,4 +49,5 @@ export default {
 
 export type { ListEvent } from './list/list-durable-object';
 export { ListDurableObject } from './list/list-durable-object';
+export { ListSyncServer } from './list/list-sync-server';
 export type { MainRouter } from './main/router';

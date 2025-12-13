@@ -10,6 +10,53 @@ export const searchRouter = router({
       .filter((result) => result.vote_count > 5)
       .map(adaptSearchResult);
   }),
+
+  // Get full TMDB metadata for a movie or TV show (used when adding items locally)
+  getTmdbMetadata: publicProcedure
+    .input(z.object({ tmdbId: z.number(), type: z.enum(['movie', 'tv']) }))
+    .query(async ({ input, ctx }) => {
+      const { tmdbId, type } = input;
+
+      if (type === 'movie') {
+        const movie = await ctx.tmdb.movies.details(tmdbId);
+        if (!movie) return null;
+
+        return {
+          type: 'movie' as const,
+          tmdbId,
+          title: movie.title,
+          overview: movie.overview,
+          duration: movie.runtime,
+          episodeCount: null,
+          rating: Math.round(movie.vote_average * 10),
+          releaseDate: movie.release_date ? new Date(movie.release_date).getTime() : null,
+          posterUrl: movie.poster_path
+            ? `https://image.tmdb.org/t/p/w300${movie.poster_path}`
+            : movie.backdrop_path
+              ? `https://image.tmdb.org/t/p/w300${movie.backdrop_path}`
+              : null,
+        };
+      }
+
+      const show = await ctx.tmdb.tvShows.details(tmdbId);
+      if (!show) return null;
+
+      return {
+        type: 'tv' as const,
+        tmdbId,
+        title: show.name,
+        overview: show.overview,
+        duration: show.episode_run_time.find((x) => x > 0) ?? null,
+        episodeCount: show.number_of_episodes,
+        rating: Math.round(show.vote_average * 10),
+        releaseDate: show.first_air_date ? new Date(show.first_air_date).getTime() : null,
+        posterUrl: show.poster_path
+          ? `https://image.tmdb.org/t/p/w300${show.poster_path}`
+          : show.backdrop_path
+            ? `https://image.tmdb.org/t/p/w300${show.backdrop_path}`
+            : null,
+      };
+    }),
 });
 
 function adaptSearchResult(result: MovieWithMediaType | TVWithMediaType) {

@@ -1,9 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { CheckIcon, MailIcon, PenIcon, PlusIcon, XIcon } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { type TrpcOutput, trpc } from '@/trpc';
+import { useListItems } from '@/db/use-list-items';
 import { formatDuration } from '@/utils/format-duration';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -53,6 +54,7 @@ export function ListSettingsSheet({ listId, children, asChild }: ListSettingsShe
 type ListSettingsFormProps = {
   list: TrpcOutput['list']['getDetails'];
 };
+
 function ListSettingsForm({ list }: ListSettingsFormProps) {
   return (
     <div className="flex h-full flex-col justify-between gap-12">
@@ -61,17 +63,50 @@ function ListSettingsForm({ list }: ListSettingsFormProps) {
         <ListUsers listId={list.id} users={list.users} />
         <ListTags listId={list.id} tags={[]} />
       </div>
-      {!!list.stats && (
-        <div className="flex flex-col pb-6 text-gray-500">
-          <p>
-            Watched: {list.stats.watchedCount} / {list.stats.count}
-          </p>
-          <p>
-            Duration: {formatDuration(list.stats.watchedDuration)} / {formatDuration(list.stats.totalDuration)}
-          </p>
-          <p>Average rating: {Math.round(list.stats.averageRating)}</p>
-        </div>
-      )}
+      <ListStats />
+    </div>
+  );
+}
+
+/**
+ * Compute stats from local SQLite database
+ */
+function ListStats() {
+  const items = useListItems();
+
+  const stats = useMemo(() => {
+    if (!items || items.length === 0) return null;
+
+    const count = items.length;
+    const watchedCount = items.filter((item) => item.watchedAt).length;
+    const totalDuration = items.reduce((acc, item) => acc + (item.duration ?? 0), 0);
+    const watchedDuration = items
+      .filter((item) => item.watchedAt)
+      .reduce((acc, item) => acc + (item.duration ?? 0), 0);
+    const ratingsSum = items.reduce((acc, item) => acc + (item.rating ?? 0), 0);
+    const ratingsCount = items.filter((item) => item.rating !== null).length;
+    const averageRating = ratingsCount > 0 ? ratingsSum / ratingsCount : 0;
+
+    return {
+      count,
+      watchedCount,
+      totalDuration,
+      watchedDuration,
+      averageRating,
+    };
+  }, [items]);
+
+  if (!stats) return null;
+
+  return (
+    <div className="flex flex-col pb-6 text-gray-500">
+      <p>
+        Watched: {stats.watchedCount} / {stats.count}
+      </p>
+      <p>
+        Duration: {formatDuration(stats.watchedDuration)} / {formatDuration(stats.totalDuration)}
+      </p>
+      <p>Average rating: {Math.round(stats.averageRating)}</p>
     </div>
   );
 }

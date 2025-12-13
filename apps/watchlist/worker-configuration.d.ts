@@ -11,6 +11,7 @@ interface Env {
   ACCOUNT_TOKEN: string;
   APP_URL: string;
   LIST_DO: DurableObjectNamespace<import('./worker/index').ListDurableObject>;
+  LIST_SYNC_DO: DurableObjectNamespace<import('./worker/index').ListSyncServer>;
   MAIN_DB: D1Database;
   AI: Ai;
   METADATA: { id: string; tag: string };
