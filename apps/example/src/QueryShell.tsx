@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { useDb } from "./db";
 import { startPerformanceLogger } from "@sqlite-sync/core";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDb } from "./db";
 import { logger } from "./logger";
 
 type DbType = "memoryDb" | "workerDb";
@@ -13,10 +13,7 @@ function loadHistoryFromStorage(): string[] {
     const stored = localStorage.getItem(HISTORY_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item) => typeof item === "string")
-      ) {
+      if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
         return parsed;
       }
     }
@@ -40,9 +37,7 @@ export function QueryShell() {
   const db = useDb();
   const [dbType, setDbType] = useState<DbType>("memoryDb");
   const [query, setQuery] = useState("");
-  const [history, setHistory] = useState<string[]>(() =>
-    loadHistoryFromStorage()
-  );
+  const [history, setHistory] = useState<string[]>(() => loadHistoryFromStorage());
   const [historyIndex, setHistoryIndex] = useState(-1);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -61,23 +56,13 @@ export function QueryShell() {
     console.table(rows);
 
     // Also log a summary
-    console.log(
-      `\n✓ Query executed successfully. ${rows.length} row${
-        rows.length === 1 ? "" : "s"
-      } returned.`
-    );
+    console.log(`\n✓ Query executed successfully. ${rows.length} row${rows.length === 1 ? "" : "s"} returned.`);
   }, []);
 
   const toggleDb = useCallback(() => {
     setDbType((prev) => {
       const newType = prev === "memoryDb" ? "workerDb" : "memoryDb";
-      console.log(
-        `✓ Switched to ${
-          newType === "memoryDb"
-            ? "Memory DB (In-memory)"
-            : "Worker DB (Persistent)"
-        }`
-      );
+      console.log(`✓ Switched to ${newType === "memoryDb" ? "Memory DB (In-memory)" : "Worker DB (Persistent)"}`);
       return newType;
     });
   }, []);
@@ -152,8 +137,7 @@ export function QueryShell() {
     const cursorPosition = textarea.selectionStart;
     const value = textarea.value;
     const lines = value.split("\n");
-    const currentLineIndex =
-      value.substring(0, cursorPosition).split("\n").length - 1;
+    const currentLineIndex = value.substring(0, cursorPosition).split("\n").length - 1;
     const isAtTopLine = currentLineIndex === 0;
     const isAtBottomLine = currentLineIndex === lines.length - 1;
 
@@ -167,10 +151,7 @@ export function QueryShell() {
     // Up arrow: Navigate history backward
     if (e.key === "ArrowUp" && isAtTopLine && history.length > 0) {
       e.preventDefault();
-      const newIndex =
-        historyIndex === -1
-          ? history.length - 1
-          : Math.max(0, historyIndex - 1);
+      const newIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1);
       setHistoryIndex(newIndex);
       setQuery(history[newIndex]);
       return;
@@ -200,22 +181,20 @@ export function QueryShell() {
 
   return (
     <div className="query-shell">
-      <div className="flex items-center gap-2 mb-2">
-        <label className="text-sm font-medium">Database:</label>
+      <div className="mb-2 flex items-center gap-2">
+        <div className="font-medium text-sm">Database:</div>
         <button
           type="button"
           onClick={toggleDb}
-          className="px-3 py-1 border border-gray-300 rounded hover:bg-gray-100 text-sm"
+          className="rounded border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100"
         >
           {dbType === "memoryDb" ? "Memory DB" : "Worker DB"}
         </button>
-        <span className="text-xs text-gray-500">
-          ({dbType === "memoryDb" ? "In-memory" : "Persistent"})
-        </span>
+        <span className="text-gray-500 text-xs">({dbType === "memoryDb" ? "In-memory" : "Persistent"})</span>
       </div>
       <textarea
         ref={textareaRef}
-        className="border border-gray-300 w-full p-2 font-mono text-sm"
+        className="w-full border border-gray-300 p-2 font-mono text-sm"
         rows={10}
         placeholder="Enter SQL query (Enter to execute, Shift+Enter to add a new line, ↑/↓ for history, .toggle to switch DB)"
         value={query}
@@ -225,4 +204,3 @@ export function QueryShell() {
     </div>
   );
 }
-

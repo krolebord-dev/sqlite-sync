@@ -6,13 +6,8 @@ export const seedMigration: Migration = {
       .createTable("_todo")
       .addColumn("id", "text", (col) => col.primaryKey().notNull())
       .addColumn("title", "text", (col) => col.notNull())
-      .addColumn("completed", "boolean", (col) =>
-        col.notNull().defaultTo(false)
-      )
-      .addColumn("tombstone", "boolean", (col) =>
-        col.notNull().defaultTo(false)
-      )
+      .addColumn("completed", "boolean", (col) => col.notNull().defaultTo(false))
+      .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false))
       .execute();
   },
 };
-

@@ -1,20 +1,4 @@
 import { startDbWorker } from "@sqlite-sync/core/worker";
-import {
-  jsonSafeParse,
-  createDeferredPromise,
-  type DeferredPromise,
-} from "@sqlite-sync/core";
-import type {
-  SyncServerMessage,
-  SyncServerRequest,
-} from "@sqlite-sync/core/server";
-import type {
-  EventsPullRequest,
-  EventsPullResponse,
-  EventsPushRequest,
-  EventsPushResponse,
-} from "@sqlite-sync/core/worker";
-import { PartySocket } from "partysocket";
 import { seedMigration } from "./seed-migration";
 
 await startDbWorker({

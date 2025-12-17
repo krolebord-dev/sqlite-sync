@@ -1,8 +1,5 @@
-import type {
-  EventsPullResponse,
-  EventsPushResponse,
-} from "../sqlite-crdt/crdt-sync-remote-source";
 import { z } from "zod";
+import type { EventsPullResponse, EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
 
 export const syncServerRequestSchema = z.discriminatedUnion("type", [
   z.object({
@@ -22,7 +19,7 @@ export const syncServerRequestSchema = z.discriminatedUnion("type", [
         dataset: z.string(),
         item_id: z.string(),
         payload: z.string(),
-      })
+      }),
     ),
   }),
 ]);
@@ -45,6 +42,4 @@ export type SyncServerMessage =
 
 export type SyncServerRequest = z.infer<typeof syncServerRequestSchema>;
 
-export type ExtractSyncServerRequest<T extends SyncServerRequest["type"]> =
-  Extract<SyncServerRequest, { type: T }>;
-
+export type ExtractSyncServerRequest<T extends SyncServerRequest["type"]> = Extract<SyncServerRequest, { type: T }>;

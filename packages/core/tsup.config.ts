@@ -12,4 +12,3 @@ export default defineConfig({
   sourcemap: true,
   external: ["@sqlite.org/sqlite-wasm"],
 });
-

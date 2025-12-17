@@ -1,14 +1,14 @@
 import type {
   BindableValue,
   FunctionOptions,
-  Sqlite3Static,
   Database as SQLiteDatabase,
+  Sqlite3Static,
   SqlValue,
 } from "@sqlite.org/sqlite-wasm";
-import { startPerformanceLogger, type Logger } from "./logger";
-import { Kysely, type Compilable, type CompiledQuery } from "kysely";
+import type { Compilable, CompiledQuery, Kysely } from "kysely";
 import { dummyKysely } from "./dummy-kysely";
-import { introspectDb, type DatabaseIntrospection } from "./introspection";
+import { type DatabaseIntrospection, introspectDb } from "./introspection";
+import { type Logger, startPerformanceLogger } from "./logger";
 
 export type ExecuteParams = {
   sql: string;
@@ -25,10 +25,7 @@ export type PreparedStatement<TParams extends SqlValue[], TResult> = {
   isFinalized: boolean;
 };
 
-type ScalarFunctionOptions<
-  TArgs extends readonly SqlValue[],
-  TResult extends SqlValue | void
-> = {
+type ScalarFunctionOptions<TArgs extends readonly SqlValue[], TResult extends SqlValue | undefined> = {
   name: string;
   callback: (...args: TArgs) => TResult;
 } & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
@@ -42,12 +39,7 @@ type SqliteWrapperOptions = {
 
 export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
   SQLiteDbWrapper<TDatabase>,
-  | "execute"
-  | "sql"
-  | "executeKysely"
-  | "prepare"
-  | "executePrepared"
-  | "prepareKysely"
+  "execute" | "sql" | "executeKysely" | "prepare" | "executePrepared" | "prepareKysely"
 >;
 
 export class SQLiteDbWrapper<TDatabase = unknown> {
@@ -61,10 +53,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   private readonly dataPointers = [] as number[];
 
   private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
-  private preparedStatementsMap = new Map<
-    string,
-    TypedStatement<Record<string, unknown>, unknown>
-  >();
+  private preparedStatementsMap = new Map<string, TypedStatement<Record<string, unknown>, unknown>>();
 
   constructor(opts: SqliteWrapperOptions) {
     this.db = opts.db;
@@ -87,9 +76,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return this.loadedDbSchema;
   }
 
-  execute<T = unknown>(
-    opts: ExecuteParams | string | CompiledQuery<T>
-  ): ExecuteResult<T> {
+  execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>): ExecuteResult<T> {
     const sql = typeof opts === "string" ? opts : opts.sql;
     const bind = typeof opts === "string" ? undefined : opts.parameters;
 
@@ -105,9 +92,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return { rows: rows as T[] };
   }
 
-  executeTransaction<T>(
-    callback: (db: SQLiteTransactionWrapper<TDatabase>) => T
-  ): T {
+  executeTransaction<T>(callback: (db: SQLiteTransactionWrapper<TDatabase>) => T): T {
     return this.ensureDb.transaction(() => callback(this));
   }
 
@@ -123,9 +108,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         throw new Error("Statement is finalized");
       }
 
-      const perf = this.logger
-        ? startPerformanceLogger(this.logger)
-        : undefined;
+      const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
       if (params.length > 0) {
         stmt.bind(params);
       }
@@ -151,28 +134,21 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       },
     };
 
-    this.preparedStatements.push(
-      preparedStatement as PreparedStatement<SqlValue[], unknown>
-    );
+    this.preparedStatements.push(preparedStatement as PreparedStatement<SqlValue[], unknown>);
 
     return preparedStatement;
   }
 
   prepareKysely<TParams extends Record<string, unknown>>() {
-    return <
-      TQuery extends Compilable<TResult>,
-      TResult = QueryBuilderOutput<TQuery>
-    >(
-      factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>
+    return <TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
+      factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>,
     ): TypedStatement<TParams, TResult> => {
       const query = factory(dummyKysely, (key) => key as any).compile();
       const statement = this.prepare<SqlValue[], TResult>(query.sql);
 
       return {
         execute: (parameters) => {
-          const params = query.parameters.map(
-            (param) => parameters[param as keyof TParams]
-          );
+          const params = query.parameters.map((param) => parameters[param as keyof TParams]);
           const result = statement.execute(params as SqlValue[]);
           return result;
         },
@@ -180,10 +156,9 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     };
   }
 
-  executeKysely<
-    TQuery extends Compilable<TResult>,
-    TResult = QueryBuilderOutput<TQuery>
-  >(factory: KyselyQueryFactory<TDatabase, TQuery, TResult>) {
+  executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
+    factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
+  ) {
     const query = factory(dummyKysely).compile();
     return this.execute(query);
   }
@@ -191,30 +166,18 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   executePrepared<
     TParams extends Record<string, unknown>,
     TQuery extends Compilable<TResult>,
-    TResult = QueryBuilderOutput<TQuery>
-  >(
-    key: string,
-    params: TParams,
-    factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>
-  ) {
-    let statement = this.preparedStatementsMap.get(key) as
-      | TypedStatement<TParams, TResult>
-      | undefined;
+    TResult = QueryBuilderOutput<TQuery>,
+  >(key: string, params: TParams, factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>) {
+    let statement = this.preparedStatementsMap.get(key) as TypedStatement<TParams, TResult> | undefined;
     if (!statement) {
       statement = this.prepareKysely<TParams>()(factory);
-      this.preparedStatementsMap.set(
-        key,
-        statement as TypedStatement<Record<string, unknown>, unknown>
-      );
+      this.preparedStatementsMap.set(key, statement as TypedStatement<Record<string, unknown>, unknown>);
     }
 
     return statement.execute(params);
   }
 
-  sql<T = unknown>(
-    templateOrString: TemplateStringsArray | string,
-    ...parameters: unknown[]
-  ) {
+  sql<T = unknown>(templateOrString: TemplateStringsArray | string, ...parameters: unknown[]) {
     if (typeof templateOrString === "string") {
       return this.execute<T>({
         sql: templateOrString,
@@ -227,10 +190,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     });
   }
 
-  createScalarFunction<
-    TArgs extends SqlValue[],
-    TResult extends SqlValue | void
-  >({
+  createScalarFunction<TArgs extends SqlValue[], TResult extends SqlValue | undefined>({
     name,
     callback,
     deterministic,
@@ -261,8 +221,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       dataPointer,
       snapshot.byteLength,
       snapshot.byteLength,
-      this.sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
-        this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      this.sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE,
     );
 
     this.ensureDb.checkRc(resultCode);
@@ -281,7 +240,9 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   cleanup() {
-    this.preparedStatements.forEach((stmt) => stmt.finalize());
+    this.preparedStatements.forEach((stmt) => {
+      stmt.finalize();
+    });
     this.preparedStatements.splice(0);
     this.preparedStatementsMap.clear();
   }
@@ -295,9 +256,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 }
 
 export type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
-type ParamsGetter<TParams> = <TKey extends keyof TParams>(
-  key: TKey
-) => TParams[TKey];
+type ParamsGetter<TParams> = <TKey extends keyof TParams>(key: TKey) => TParams[TKey];
 
 type TypedStatement<TParams extends Record<string, unknown>, TResult> = {
   execute: (parameters: TParams) => TResult[];
@@ -306,11 +265,8 @@ type KyselyStatementFactory<
   TParams extends Record<string, unknown>,
   TDatabase,
   TQuery extends Compilable<TResult>,
-  TResult = QueryBuilderOutput<TQuery>
+  TResult = QueryBuilderOutput<TQuery>,
 > = (kysely: Kysely<TDatabase>, params: ParamsGetter<TParams>) => TQuery;
-export type KyselyQueryFactory<
-  TDatabase,
-  TQuery extends Compilable<TResult>,
-  TResult = QueryBuilderOutput<TQuery>
-> = (kysely: Kysely<TDatabase>) => TQuery;
-
+export type KyselyQueryFactory<TDatabase, TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>> = (
+  kysely: Kysely<TDatabase>,
+) => TQuery;

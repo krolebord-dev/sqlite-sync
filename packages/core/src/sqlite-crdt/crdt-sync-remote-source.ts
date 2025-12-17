@@ -9,12 +9,8 @@ type CrdtSyncRemoteSourceConfig = {
   storage: CrdtStorage;
   syncId: SyncIdCounter;
   nodeId: string;
-  pullEvents: (
-    request: EventsPullRequest
-  ) => EventsPullResponse | Promise<EventsPullResponse>;
-  pushEvents: (
-    request: EventsPushRequest
-  ) => EventsPushResponse | Promise<EventsPushResponse>;
+  pullEvents: (request: EventsPullRequest) => EventsPullResponse | Promise<EventsPullResponse>;
+  pushEvents: (request: EventsPushRequest) => EventsPushResponse | Promise<EventsPushResponse>;
 };
 
 export type EventsPullRequest = {
@@ -35,9 +31,7 @@ export type EventsPushResponse = {
   ok: boolean;
 };
 
-export type CrdtSyncRemoteSource = ReturnType<
-  typeof createCrdtSyncRemoteSource
->;
+export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
 export const createCrdtSyncRemoteSource = ({
   bufferSize,
@@ -50,10 +44,7 @@ export const createCrdtSyncRemoteSource = ({
   let pullPromise: Promise<void> | null = null;
   let requestedPullSyncId: number | null = null;
 
-  const pullEvents = (request?: {
-    afterSyncId?: number;
-    includeSelf?: boolean;
-  }) => {
+  const pullEvents = (request?: { afterSyncId?: number; includeSelf?: boolean }) => {
     const afterSyncId = request?.afterSyncId ?? syncId.current;
 
     if (pullPromise) {
@@ -93,7 +84,7 @@ export const createCrdtSyncRemoteSource = ({
           response.events.map((x) => ({
             ...x,
             origin: "remote",
-          }))
+          })),
         );
       }
       if (response.newSyncId <= syncId.current) {
@@ -127,4 +118,3 @@ export const createCrdtSyncRemoteSource = ({
     pullEvents,
   };
 };
-

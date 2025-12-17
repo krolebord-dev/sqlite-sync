@@ -1,13 +1,4 @@
-import {
-  createTypedEventTarget,
-  createDeferredPromise,
-  type DeferredPromise,
-} from "../utils";
-import {
-  isWorkerInitResponse,
-  isWorkerNotificationMessage,
-  isWorkerResponseMessage,
-} from "./worker-common";
+import { createDeferredPromise, createTypedEventTarget, type DeferredPromise } from "../utils";
 import type {
   AsyncRpc,
   WorkerBroadcastChannels,
@@ -19,12 +10,9 @@ import type {
   WorkerResponseMessage,
   WorkerRpc,
 } from "./worker-common";
+import { isWorkerInitResponse, isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
 
-export const createWorkerDbClient = ({
-  broadcastChannels,
-}: {
-  broadcastChannels: WorkerBroadcastChannels;
-}) => {
+export const createWorkerDbClient = ({ broadcastChannels }: { broadcastChannels: WorkerBroadcastChannels }) => {
   const eventTarget = createTypedEventTarget<{
     "new-notification": WorkerNotificationMessage;
   }>();
@@ -32,7 +20,7 @@ export const createWorkerDbClient = ({
 
   const queryWorker = <TMethod extends WorkerRequestMethod>(
     method: TMethod,
-    args: Parameters<WorkerRpc[TMethod]>
+    args: Parameters<WorkerRpc[TMethod]>,
   ): Promise<ReturnType<WorkerRpc[TMethod]>> => {
     // TODO Add timeout
     const requestId = crypto.randomUUID();
@@ -120,4 +108,3 @@ export function initializeWorkerDb({
 
   return promise.promise;
 }
-

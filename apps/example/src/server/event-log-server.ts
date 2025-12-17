@@ -1,19 +1,19 @@
-import { routePartykitRequest, Server, type Connection } from "partyserver";
-import type { Compilable, Kysely } from "kysely";
 import {
-  dummyKysely,
+  type CrdtStorage,
   crdtSchema,
-  syncServerRequestSchema,
   createCrdtStorage,
-  createSyncIdCounter,
   createCrdtSyncProducer,
+  createSyncIdCounter,
+  dummyKysely,
+  type ExtractSyncServerRequest,
   jsonSafeParse,
   type PersistedCrdtEvent,
   type SyncServerMessage,
   type SyncServerRequest,
-  type ExtractSyncServerRequest,
-  type CrdtStorage,
+  syncServerRequestSchema,
 } from "@sqlite-sync/core/server";
+import type { Compilable, Kysely } from "kysely";
+import { type Connection, routePartykitRequest, Server } from "partyserver";
 
 type ExecuteParams = {
   sql: string;
@@ -26,11 +26,9 @@ type ExecuteResult<T> = {
 
 type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
 
-type KyselyQueryFactory<
-  TDatabase,
-  TQuery extends Compilable<TResult>,
-  TResult = QueryBuilderOutput<TQuery>
-> = (kysely: Kysely<TDatabase>) => TQuery;
+type KyselyQueryFactory<TDatabase, TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>> = (
+  kysely: Kysely<TDatabase>,
+) => TQuery;
 
 function createKyselyExecutor<TDatabase>(db: SqlStorage) {
   return {
@@ -38,11 +36,8 @@ function createKyselyExecutor<TDatabase>(db: SqlStorage) {
       const rows = db.exec(query.sql, ...query.parameters).toArray();
       return { rows: rows as TResult[] };
     },
-    executeKysely<
-      TQuery extends Compilable<TResult>,
-      TResult = QueryBuilderOutput<TQuery>
-    >(
-      factory: KyselyQueryFactory<TDatabase, TQuery, TResult>
+    executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
+      factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
     ): ExecuteResult<TResult> {
       const query = factory(dummyKysely).compile();
       return this.execute(query);
@@ -50,9 +45,7 @@ function createKyselyExecutor<TDatabase>(db: SqlStorage) {
   };
 }
 
-type SqlExecutor<TDatabase> = ReturnType<
-  typeof createKyselyExecutor<TDatabase>
->;
+type SqlExecutor<TDatabase> = ReturnType<typeof createKyselyExecutor<TDatabase>>;
 
 type EventLogDbSchema = {
   crdt_events: PersistedCrdtEvent;
@@ -65,15 +58,15 @@ export class EventLogServer extends Server<Env> {
     hibernate: true,
   };
 
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private sqlExecutor: SqlExecutor<EventLogDbSchema> = null!;
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private storage: CrdtStorage = null!;
 
   onStart(): void | Promise<void> {
     this.sqlExecutor = createKyselyExecutor(this.ctx.storage.sql);
 
-    this.sqlExecutor.executeKysely((db) =>
-      crdtSchema.persistedEventsTable(db.schema, "crdt_events")
-    );
+    this.sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, "crdt_events"));
 
     const syncId = createSyncIdCounter({
       initialSyncId: this.getLatestSyncId(),
@@ -85,9 +78,7 @@ export class EventLogServer extends Server<Env> {
       persistEvents: (events) => {
         this.ctx.storage.transactionSync(() => {
           for (const event of events) {
-            this.sqlExecutor.executeKysely((db) =>
-              db.insertInto("crdt_events").values(event)
-            );
+            this.sqlExecutor.executeKysely((db) => db.insertInto("crdt_events").values(event));
           }
         });
       },
@@ -98,7 +89,7 @@ export class EventLogServer extends Server<Env> {
             .where("status", "=", "pending")
             .orderBy("sync_id", "asc")
             .limit(batchSize)
-            .selectAll()
+            .selectAll(),
         ).rows;
         return {
           events,
@@ -107,10 +98,7 @@ export class EventLogServer extends Server<Env> {
       },
       updateEventStatus: (syncId, status) =>
         this.sqlExecutor.executeKysely((db) =>
-          db
-            .updateTable("crdt_events")
-            .set({ status })
-            .where("sync_id", "=", syncId)
+          db.updateTable("crdt_events").set({ status }).where("sync_id", "=", syncId),
         ),
     });
 
@@ -122,7 +110,7 @@ export class EventLogServer extends Server<Env> {
           JSON.stringify({
             type: "events-applied",
             newSyncId: chunk.newSyncId,
-          })
+          }),
         );
       },
     });
@@ -158,10 +146,7 @@ export class EventLogServer extends Server<Env> {
     }
   }
 
-  private handlePullEvents(
-    connection: Connection,
-    request: ExtractSyncServerRequest<"pull-events">
-  ) {
+  private handlePullEvents(connection: Connection, request: ExtractSyncServerRequest<"pull-events">) {
     const events = this.sqlExecutor.executeKysely((db) => {
       const query = db
         .selectFrom("crdt_events")
@@ -176,9 +161,7 @@ export class EventLogServer extends Server<Env> {
       type: "events-pull-response",
       requestId: request.requestId,
       data: {
-        events: request.excludeNodeId
-          ? events.filter((x) => x.origin !== request.excludeNodeId)
-          : events,
+        events: request.excludeNodeId ? events.filter((x) => x.origin !== request.excludeNodeId) : events,
         hasMore: events.length === batchSize,
         newSyncId: events[events.length - 1]?.sync_id ?? request.afterSyncId,
       },
@@ -187,13 +170,8 @@ export class EventLogServer extends Server<Env> {
     connection.send(JSON.stringify(eventsPullMessage));
   }
 
-  private handlePushEvents(
-    connection: Connection,
-    request: ExtractSyncServerRequest<"push-events">
-  ) {
-    this.storage.enqueueEvents(
-      request.events.map((x) => ({ ...x, origin: request.nodeId }))
-    );
+  private handlePushEvents(connection: Connection, request: ExtractSyncServerRequest<"push-events">) {
+    this.storage.enqueueEvents(request.events.map((x) => ({ ...x, origin: request.nodeId })));
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,
@@ -207,9 +185,7 @@ export class EventLogServer extends Server<Env> {
 
   private getLatestSyncId() {
     const result = this.sqlExecutor.executeKysely((db) =>
-      db
-        .selectFrom("crdt_events")
-        .select((eb) => eb.fn.max("sync_id").as("sync_id"))
+      db.selectFrom("crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
     );
     return result.rows[0]?.sync_id ?? 0;
   }
@@ -218,10 +194,8 @@ export class EventLogServer extends Server<Env> {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     return (
-      (await routePartykitRequest(
-        request,
-        env as unknown as Record<string, unknown>
-      )) || new Response("Not Found", { status: 404 })
+      (await routePartykitRequest(request, env as unknown as Record<string, unknown>)) ||
+      new Response("Not Found", { status: 404 })
     );
   },
 } satisfies ExportedHandler<Env>;

@@ -52,26 +52,20 @@ export class HLCCounter {
 }
 
 export function serializeHLC(hlc: HLC) {
-  return (
-    hlc.timestamp.toString().padStart(15, "0") +
-    ":" +
-    hlc.counter.toString(36).padStart(5, "0") +
-    ":" +
-    hlc.nodeId
-  );
+  return `${hlc.timestamp.toString().padStart(15, "0")}:${hlc.counter.toString(36).padStart(5, "0")}:${hlc.nodeId}`;
 }
 
 export function deserializeHLC(serialized: string) {
   const [ts, count, ...node] = serialized.split(":");
   return {
-    timestamp: parseInt(ts),
+    timestamp: parseInt(ts, 10),
     counter: parseInt(count, 36),
     nodeId: node.join(":"),
   };
 }
 
 export function compareHLC(one: HLC, two: HLC) {
-  if (one.timestamp == two.timestamp) {
+  if (one.timestamp === two.timestamp) {
     if (one.counter === two.counter) {
       if (one.nodeId === two.nodeId) {
         return 0;
@@ -82,4 +76,3 @@ export function compareHLC(one: HLC, two: HLC) {
   }
   return one.timestamp - two.timestamp;
 }
-

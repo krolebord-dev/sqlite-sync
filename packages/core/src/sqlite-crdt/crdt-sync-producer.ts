@@ -8,11 +8,7 @@ type CrdtSyncProducer = {
   broadcastEvents: (request: { newSyncId: number }) => void;
 };
 
-export const createCrdtSyncProducer = ({
-  bufferSize,
-  storage,
-  broadcastEvents,
-}: CrdtSyncProducer) => {
+export const createCrdtSyncProducer = ({ bufferSize, storage, broadcastEvents }: CrdtSyncProducer) => {
   const eventsBuffer = createAutoFlushBuffer<PersistedCrdtEvent>({
     size: bufferSize,
     flush: (events) => {
@@ -35,4 +31,3 @@ export const createCrdtSyncProducer = ({
     eventsBuffer.flush();
   });
 };
-

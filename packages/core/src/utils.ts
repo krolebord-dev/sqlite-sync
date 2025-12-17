@@ -18,9 +18,7 @@ export const generateId = () => {
   return crypto.randomUUID();
 };
 
-export type DistributiveOmit<T, K extends keyof T> = T extends any
-  ? Omit<T, K>
-  : never;
+export type DistributiveOmit<T, K extends keyof T> = T extends any ? Omit<T, K> : never;
 
 export function ensureSingletonExecution(fn: () => Promise<void>) {
   let isExecuting = false;
@@ -54,7 +52,7 @@ export function orderBy<T>(
   opts?: {
     direction?: "asc" | "desc";
     inPlace?: boolean;
-  }
+  },
 ): T[] {
   const array = opts?.inPlace ? inputArray : [...inputArray];
   const direction = opts?.direction ?? "asc";
@@ -68,13 +66,7 @@ export function orderBy<T>(
   });
 }
 
-export function createAutoFlushBuffer<T>({
-  size,
-  flush,
-}: {
-  size: number;
-  flush: (items: T[]) => void;
-}) {
+export function createAutoFlushBuffer<T>({ size, flush }: { size: number; flush: (items: T[]) => void }) {
   const buffer: T[] = [];
 
   return {
@@ -145,24 +137,15 @@ export class TypedEvent<T = unknown> extends Event {
 export const createTypedEventTarget = <T extends Record<string, unknown>>() => {
   const eventTarget = new EventTarget();
 
-  const addEventListener = <K extends keyof T & string>(
-    type: K,
-    listener: (event: TypedEvent<T[K]>) => void
-  ) => {
+  const addEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
     eventTarget.addEventListener(type, listener as (e: Event) => void);
   };
 
-  const removeEventListener = <K extends keyof T & string>(
-    type: K,
-    listener: (event: TypedEvent<T[K]>) => void
-  ) => {
+  const removeEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
     eventTarget.removeEventListener(type, listener as (e: Event) => void);
   };
 
-  const dispatchEvent = <K extends keyof T & string>(
-    type: K,
-    payload: T[K]
-  ) => {
+  const dispatchEvent = <K extends keyof T & string>(type: K, payload: T[K]) => {
     eventTarget.dispatchEvent(new TypedEvent(type, payload));
   };
 
@@ -194,4 +177,3 @@ export function jsonSafeParse<T>(json: string):
     };
   }
 }
-

@@ -1,7 +1,7 @@
-import { startPerformanceLogger, createSyncedDb } from "@sqlite-sync/core";
+import { createSyncedDb, startPerformanceLogger } from "@sqlite-sync/core";
 import { createDbContext } from "@sqlite-sync/react";
 import { logger } from "./logger";
-import { type Database } from "./seed";
+import type { Database } from "./seed";
 
 export const { useDb, DbProvider, useDbQuery } = createDbContext<{
   _todo: {
@@ -34,4 +34,3 @@ export async function initDb() {
 
   return db;
 }
-

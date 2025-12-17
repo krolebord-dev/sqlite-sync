@@ -1,13 +1,11 @@
 import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
-import { startPerformanceLogger, type Logger } from "../logger";
-import { SQLiteDbWrapper, type PreparedStatement } from "../sqlite-db-wrapper";
-import { createTypedEventTarget, TypedEvent } from "../utils";
+import { type Logger, startPerformanceLogger } from "../logger";
+import { type PreparedStatement, SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { createTypedEventTarget, type TypedEvent } from "../utils";
 
 let sqliteModule: Sqlite3Static | null = null;
 
-type TableName<Database> = keyof Database extends string
-  ? keyof Database
-  : never;
+type TableName<Database> = keyof Database extends string ? keyof Database : never;
 
 type SQLiteReactiveDbOptions = {
   snapshot?: Uint8Array<ArrayBufferLike>;
@@ -15,14 +13,12 @@ type SQLiteReactiveDbOptions = {
 };
 
 type EventsMap = {
-  "transaction-committed": void;
-  "transaction-rolled-back": void;
-  "any-table-changed": void;
+  "transaction-committed": undefined;
+  "transaction-rolled-back": undefined;
+  "any-table-changed": undefined;
 } & Record<`table:${string}`, void>;
 
-export function createSQLiteReactiveDb<Database>(
-  opts: SQLiteReactiveDbOptions
-) {
+export function createSQLiteReactiveDb<Database>(opts: SQLiteReactiveDbOptions) {
   return SQLiteReactiveDb.create<Database>(opts);
 }
 
@@ -50,10 +46,7 @@ export class SQLiteReactiveDb<Database> {
 
   private readonly logger: Logger;
 
-  private tablesUsedStatement: PreparedStatement<
-    [string],
-    { name: string; isWrite: boolean }
-  > | null = null;
+  private tablesUsedStatement: PreparedStatement<[string], { name: string; isWrite: boolean }> | null = null;
 
   private eventTarget = createTypedEventTarget<EventsMap>();
 
@@ -88,10 +81,7 @@ export class SQLiteReactiveDb<Database> {
     return db;
   }
 
-  createLiveQuery<TResult>(query: {
-    sql: string;
-    parameters: readonly unknown[];
-  }) {
+  createLiveQuery<TResult>(query: { sql: string; parameters: readonly unknown[] }) {
     const fetchRows = () =>
       this.db.execute<TResult>({
         sql: query.sql,
@@ -143,9 +133,7 @@ export class SQLiteReactiveDb<Database> {
       if (!readTables.has(table.name)) {
         readTables.add(table.name);
       } else if (table.isWrite) {
-        throw new Error(
-          "This query writes and reads from the same table. This may cause infinite loops."
-        );
+        throw new Error("This query writes and reads from the same table. This may cause infinite loops.");
       }
     }
 
@@ -161,14 +149,8 @@ export class SQLiteReactiveDb<Database> {
     return {
       unsubscribe: () => {
         for (const table of readTables) {
-          this.eventTarget.removeEventListener(
-            `table:${table}`,
-            notifyDataChange
-          );
-          this.eventTarget.removeEventListener(
-            "any-table-changed",
-            notifyDataChange
-          );
+          this.eventTarget.removeEventListener(`table:${table}`, notifyDataChange);
+          this.eventTarget.removeEventListener("any-table-changed", notifyDataChange);
         }
       },
     };
@@ -187,17 +169,14 @@ export class SQLiteReactiveDb<Database> {
 
   getTablesUsed(query: string) {
     if (!this.tablesUsedStatement) {
-      this.tablesUsedStatement = this.db.prepare<
-        [string],
-        { name: string; isWrite: boolean }
-      >(
-        "select t.tbl_name as name, u.wr as isWrite from tables_used(?) as u inner join sqlite_master as t on t.name = u.name where u.schema = 'main'"
+      this.tablesUsedStatement = this.db.prepare<[string], { name: string; isWrite: boolean }>(
+        "select t.tbl_name as name, u.wr as isWrite from tables_used(?) as u inner join sqlite_master as t on t.name = u.name where u.schema = 'main'",
       );
     }
 
     const tables = this.tablesUsedStatement.execute([query]);
 
-    if (tables.length == 0 && query.toLowerCase().includes("delete")) {
+    if (tables.length === 0 && query.toLowerCase().includes("delete")) {
       // tables_used function does not work with delete queries that clear entire tables
       tables.push(...this.getClearedTables(query));
     }
@@ -225,24 +204,18 @@ export class SQLiteReactiveDb<Database> {
 
     const tableNames = this.db.execute<{ name: string; isWrite: boolean }>(
       `select t.tbl_name as name, true as isWrite from sqlite_master as t where t.rootpage in (${Array.from(
-        clearedTablesRootPages
-      ).join(",")})`
+        clearedTablesRootPages,
+      ).join(",")})`,
     ).rows;
 
     return tableNames;
   }
 
-  addEventListener<K extends keyof EventsMap>(
-    type: K,
-    listener: (event: TypedEvent<EventsMap[K]>) => void
-  ) {
+  addEventListener<K extends keyof EventsMap>(type: K, listener: (event: TypedEvent<EventsMap[K]>) => void) {
     this.eventTarget.addEventListener(type, listener);
   }
 
-  removeEventListener<K extends keyof EventsMap>(
-    type: K,
-    listener: (event: TypedEvent<EventsMap[K]>) => void
-  ) {
+  removeEventListener<K extends keyof EventsMap>(type: K, listener: (event: TypedEvent<EventsMap[K]>) => void) {
     this.eventTarget.removeEventListener(type, listener);
   }
 
@@ -265,7 +238,7 @@ export class SQLiteReactiveDb<Database> {
       (_ctx, _opId, _db, table) => {
         updateQueue.add(table);
       },
-      0
+      0,
     );
 
     this.sqlite3.capi.sqlite3_rollback_hook(
@@ -280,7 +253,7 @@ export class SQLiteReactiveDb<Database> {
 
         return 0;
       },
-      0
+      0,
     );
 
     this.sqlite3.capi.sqlite3_commit_hook(
@@ -299,18 +272,14 @@ export class SQLiteReactiveDb<Database> {
         });
         return 0;
       },
-      0
+      0,
     );
   }
 
   createSnapshot() {
     const perf = startPerformanceLogger(this.logger);
     const snapshot = this.sqlite3.capi.sqlite3_js_db_export(this.db.ensureDb);
-    perf.logEnd(
-      "createSnapshot",
-      `snapshot size: ${snapshot.byteLength}`,
-      "info"
-    );
+    perf.logEnd("createSnapshot", `snapshot size: ${snapshot.byteLength}`, "info");
 
     return snapshot;
   }
@@ -321,10 +290,7 @@ export class SQLiteReactiveDb<Database> {
   }
 }
 
-function createDebouncedCallback<TArgs extends unknown[]>(
-  callback: (...args: TArgs) => void,
-  delay: number
-) {
+function createDebouncedCallback<TArgs extends unknown[]>(callback: (...args: TArgs) => void, delay: number) {
   let timeout: unknown | null = null;
   let shouldCallWithoutDelay = true;
 

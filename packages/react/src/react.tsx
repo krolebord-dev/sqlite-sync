@@ -1,19 +1,15 @@
-import { createContext, use, useMemo, useSyncExternalStore } from "react";
 import type { SyncedDb } from "@sqlite-sync/core";
-import type { Compilable, Kysely } from "kysely";
 import { dummyKysely } from "@sqlite-sync/core";
+import type { Compilable, Kysely } from "kysely";
+import { createContext, use, useMemo, useSyncExternalStore } from "react";
 
-type UseDbQueryOptions<
-  TParams extends readonly unknown[] | undefined,
-  TResult,
-  Database
-> = {
+type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, TResult, Database> = {
   parameters?: TParams;
   queryFn: (kysely: Kysely<Database>, keys: TParams) => Compilable<TResult>;
 };
 
 export function createDbContext<Database>() {
-  const dbContext = createContext<SyncedDb<Database>>(null!);
+  const dbContext = createContext<SyncedDb<Database> | null>(null);
 
   const useDb = () => {
     const db = use(dbContext);
@@ -23,20 +19,11 @@ export function createDbContext<Database>() {
     return db;
   };
 
-  const DbProvider = ({
-    children,
-    db,
-  }: {
-    children: React.ReactNode;
-    db: SyncedDb<Database>;
-  }) => {
+  const DbProvider = ({ children, db }: { children: React.ReactNode; db: SyncedDb<Database> }) => {
     return <dbContext.Provider value={db}>{children}</dbContext.Provider>;
   };
 
-  const useDbQuery = <
-    TResult,
-    TParams extends readonly unknown[] | undefined = undefined
-  >({
+  const useDbQuery = <TResult, TParams extends readonly unknown[] | undefined = undefined>({
     parameters,
     queryFn,
   }: UseDbQueryOptions<TParams, TResult, Database>) => {
@@ -44,8 +31,7 @@ export function createDbContext<Database>() {
 
     const compiledQuery = useMemo(() => {
       return queryFn(dummyKysely, parameters as TParams).compile();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [db, ...(parameters ?? [])]);
+    }, [parameters, queryFn]);
 
     const liveQuery = useMemo(() => {
       return db.reactiveDb.createLiveQuery<TResult>({

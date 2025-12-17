@@ -1,10 +1,6 @@
-import { type Kysely } from "kysely";
+import type { Kysely } from "kysely";
 import type { SQLiteTransactionWrapper } from "../sqlite-db-wrapper";
-import type {
-  CrdtEventType,
-  CrdtUpdateLogItem,
-  CrdtUpdateLogPayload,
-} from "./crdt-table-schema";
+import type { CrdtEventType, CrdtUpdateLogItem, CrdtUpdateLogPayload } from "./crdt-table-schema";
 
 export type PendingCrdtEvent = {
   type: CrdtEventType;
@@ -28,11 +24,7 @@ type ApplyCrdtContext = {
   meta: CrdtUpdateLogPayload | null;
 };
 
-export function applyCrdtEventMutations({
-  db,
-  event,
-  updateLogTableName,
-}: ApplyCrdtParams) {
+export function applyCrdtEventMutations({ db, event, updateLogTableName }: ApplyCrdtParams) {
   const eventPayload = JSON.parse(event.payload);
 
   const [metaRow] = db.executePrepared(
@@ -47,12 +39,10 @@ export function applyCrdtEventMutations({
         .select("payload")
         .where("item_id", "=", params("item_id"))
         .where("dataset", "=", params("dataset"));
-    }
+    },
   );
 
-  const meta = metaRow
-    ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload)
-    : null;
+  const meta = metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
 
   // TODO Check primary key / unique constraints
 
@@ -89,22 +79,15 @@ function applyItemCreated(context: ApplyCrdtContext) {
 
   const keys = Array.from(Object.keys(context.eventPayload));
   context.db.execute({
-    sql: `insert into ${context.event.dataset} (${keys.join(
-      ","
-    )}) values (${keys.map(() => "?").join(",")})`,
+    sql: `insert into ${context.event.dataset} (${keys.join(",")}) values (${keys.map(() => "?").join(",")})`,
     parameters: keys.map((key) => context.eventPayload[key]),
   });
 
-  const newUpdateLog = Object.fromEntries(
-    keys.map((key) => [key, context.event.timestamp])
-  );
+  const newUpdateLog = Object.fromEntries(keys.map((key) => [key, context.event.timestamp]));
   insertCrdtUpdateLog(context, newUpdateLog);
 }
 
-function insertCrdtUpdateLog(
-  context: ApplyCrdtContext,
-  log: Record<string, string>
-) {
+function insertCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, string>) {
   context.db.executePrepared(
     "insert-crdt-update-log",
     {
@@ -113,22 +96,18 @@ function insertCrdtUpdateLog(
       payload: JSON.stringify(log),
     },
     (db, params) =>
-      (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
-        .insertInto(context.updateLogTableName as "table")
-        .values({
-          item_id: params("item_id"),
-          dataset: params("dataset"),
-          payload: params("payload"),
-        })
+      (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>).insertInto(context.updateLogTableName as "table").values({
+        item_id: params("item_id"),
+        dataset: params("dataset"),
+        payload: params("payload"),
+      }),
   );
 }
 
 function applyItemUpdated(context: ApplyCrdtContext) {
   const meta = context.meta;
   if (!meta) {
-    throw new Error(
-      `Item ${context.event.item_id} in dataset ${context.event.dataset} not found`
-    );
+    throw new Error(`Item ${context.event.item_id} in dataset ${context.event.dataset} not found`);
   }
 
   const keys = Array.from(Object.keys(context.eventPayload)).filter((key) => {
@@ -143,13 +122,8 @@ function applyItemUpdated(context: ApplyCrdtContext) {
 
   if (keys.length > 0) {
     context.db.execute({
-      sql: `update ${context.event.dataset} set ${keys
-        .map((key) => `${key} = ?`)
-        .join(",")} where id = ?`,
-      parameters: [
-        ...keys.map((key) => context.eventPayload[key]),
-        context.event.item_id,
-      ],
+      sql: `update ${context.event.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+      parameters: [...keys.map((key) => context.eventPayload[key]), context.event.item_id],
     });
 
     keys.forEach((key) => {
@@ -159,10 +133,7 @@ function applyItemUpdated(context: ApplyCrdtContext) {
   }
 }
 
-function updateCrdtUpdateLog(
-  context: ApplyCrdtContext,
-  log: Record<string, string>
-) {
+function updateCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, string>) {
   context.db.executePrepared(
     "update-crdt-update-log",
     {
@@ -177,7 +148,6 @@ function updateCrdtUpdateLog(
           payload: params("payload"),
         })
         .where("item_id", "=", params("item_id"))
-        .where("dataset", "=", params("dataset"))
+        .where("dataset", "=", params("dataset")),
   );
 }
-

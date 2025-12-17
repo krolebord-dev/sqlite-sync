@@ -8,4 +8,3 @@ export default defineConfig({
   sourcemap: true,
   external: ["react", "kysely", "@sqlite-sync/core"],
 });
-

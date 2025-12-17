@@ -1,10 +1,5 @@
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
-import type {
-  CrdtEventOrigin,
-  CrdtEventStatus,
-  CrdtEventType,
-  PersistedCrdtEvent,
-} from "./crdt-table-schema";
+import type { CrdtEventOrigin, CrdtEventStatus, CrdtEventType, PersistedCrdtEvent } from "./crdt-table-schema";
 import type { SyncIdCounter } from "./sync-id-counter";
 
 type LocalCrdtEvent = {
@@ -34,7 +29,7 @@ export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
 export function createCrdtStorage(storage: DbSyncerStorage) {
   const eventTarget = createTypedEventTarget<{
     "event-applied": PersistedCrdtEvent;
-    "event-processing-done": void;
+    "event-processing-done": undefined;
   }>();
 
   const enqueueEvents = (events: LocalCrdtEvent[]) => {
@@ -49,7 +44,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         payload: x.payload,
         sync_id: ++storage.syncId.current,
         status: "pending",
-      }))
+      })),
     );
     const lastEventSyncId = storage.syncId.current;
 
@@ -97,4 +92,3 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     dispatchEvent: eventTarget.dispatchEvent,
   };
 }
-

@@ -1,4 +1,4 @@
-import type { Generated, ColumnType } from "kysely";
+import type { ColumnType, Generated } from "kysely";
 
 // Define table schemas
 interface Database {
@@ -18,10 +18,7 @@ interface Database {
 }
 
 type SeedDb = {
-  sql: (
-    queryTemplate: TemplateStringsArray | string,
-    ...parameters: unknown[]
-  ) => Promise<unknown[]>;
+  sql: (queryTemplate: TemplateStringsArray | string, ...parameters: unknown[]) => Promise<unknown[]>;
 };
 
 // Sample data
@@ -35,26 +32,22 @@ const samplePosts = [
   {
     user_id: 1,
     title: "Getting Started with SQLite",
-    content:
-      "SQLite is a lightweight database engine that's perfect for local applications...",
+    content: "SQLite is a lightweight database engine that's perfect for local applications...",
   },
   {
     user_id: 1,
     title: "Database Synchronization Patterns",
-    content:
-      "When building offline-first applications, synchronization becomes crucial...",
+    content: "When building offline-first applications, synchronization becomes crucial...",
   },
   {
     user_id: 2,
     title: "Modern Web Development",
-    content:
-      "The landscape of web development has evolved significantly in recent years...",
+    content: "The landscape of web development has evolved significantly in recent years...",
   },
   {
     user_id: 3,
     title: "Performance Optimization Tips",
-    content:
-      "Here are some practical tips for optimizing database performance...",
+    content: "Here are some practical tips for optimizing database performance...",
   },
 ];
 
@@ -134,4 +127,3 @@ export function getSampleData() {
 }
 
 export type { Database };
-

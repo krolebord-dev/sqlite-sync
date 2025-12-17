@@ -1,20 +1,11 @@
 import { deserializeHLC, HLCCounter } from "./hlc";
-import { generateId } from "./utils";
-import { createBroadcastChannels } from "./worker-db/worker-common";
-import {
-  initializeWorkerDb,
-  createWorkerDbClient,
-} from "./worker-db/db-worker-client";
-import {
-  createSQLiteReactiveDb,
-  SQLiteReactiveDb,
-} from "./memory-db/sqlite-reactive-db";
-import {
-  createMemoryDb,
-  type MemoryDbCrdtTableConfig,
-} from "./memory-db/memory-db";
-import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
+import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
+import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+import { generateId } from "./utils";
+import { createWorkerDbClient, initializeWorkerDb } from "./worker-db/db-worker-client";
+import { createBroadcastChannels } from "./worker-db/worker-common";
 
 type SyncedDbOptions = {
   dbPath: string;
@@ -81,10 +72,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
 
   workerClient.addEventListener("new-notification", (event) => {
     const notification = event.payload;
-    if (
-      notification.notificationType === "new-event-chunk-applied" &&
-      notification.newSyncId > remoteSyncId.current
-    ) {
+    if (notification.notificationType === "new-event-chunk-applied" && notification.newSyncId > remoteSyncId.current) {
       remoteSyncSource.pullEvents();
     }
   });
@@ -102,7 +90,4 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
   };
 }
 
-export type SyncedDb<Database> = Awaited<
-  ReturnType<typeof createSyncedDb<Database>>
->;
-
+export type SyncedDb<Database> = Awaited<ReturnType<typeof createSyncedDb<Database>>>;

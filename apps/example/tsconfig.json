@@ -1,11 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -14,11 +10,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
   },
-  "include": [
-    "src/**/*",
-    "*.config.ts",
-    "worker-configuration.d.ts"
-  ]
+  "include": ["src/**/*", "*.config.ts", "worker-configuration.d.ts"]
 }

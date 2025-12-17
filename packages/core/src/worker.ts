@@ -1,5 +1,6 @@
 // Worker entry point - for use in Web Workers
-export { startDbWorker } from "./worker-db/db-worker";
+
+export type { Migration } from "kysely";
 
 // Re-export types needed for worker configuration
 export type {
@@ -8,6 +9,4 @@ export type {
   EventsPushRequest,
   EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";
-
-export type { Migration } from "kysely";
-
+export { startDbWorker } from "./worker-db/db-worker";

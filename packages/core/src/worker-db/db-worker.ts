@@ -1,5 +1,23 @@
-/* eslint-disable prefer-spread */
-import { sql, type Kysely, type Migration } from "kysely";
+import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import { type Kysely, type Migration, sql } from "kysely";
+import type { Logger } from "../logger";
+import { createSyncDbMigrator } from "../migrations/migrator";
+import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
+import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
+import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
+import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
+import {
+  type CrdtSyncRemoteSource,
+  createCrdtSyncRemoteSource,
+  type EventsPullRequest,
+  type EventsPullResponse,
+  type EventsPushRequest,
+  type EventsPushResponse,
+} from "../sqlite-crdt/crdt-sync-remote-source";
+import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
+import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
+import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { createSQLiteKysely } from "../sqlite-kysely";
 import { createDeferredPromise } from "../utils";
 import {
   createBroadcastChannels,
@@ -10,31 +28,6 @@ import {
   type WorkerResponseMessage,
   type WorkerRpc,
 } from "./worker-common";
-import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
-import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import {
-  applyWorkerDbSchema,
-  type WorkerDbSchema,
-} from "../migrations/system-schema";
-import { createSQLiteKysely } from "../sqlite-kysely";
-import { createSyncDbMigrator } from "../migrations/migrator";
-import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
-import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
-import type {
-  CrdtEventStatus,
-  PersistedCrdtEvent,
-} from "../sqlite-crdt/crdt-table-schema";
-import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
-import {
-  createCrdtSyncRemoteSource,
-  type CrdtSyncRemoteSource,
-  type EventsPullRequest,
-  type EventsPullResponse,
-  type EventsPushRequest,
-  type EventsPushResponse,
-} from "../sqlite-crdt/crdt-sync-remote-source";
-import type { Logger } from "../logger";
 
 const defaultLogger: Logger = (type, message, level = "info") => {
   const logMessage = `[${type}] ${message}`;
@@ -98,8 +91,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       }),
     persistEvents: (events) => persistEvents(db, events),
     popPendingEventsBatch: () => popPendingEventsBatch(db, 50),
-    updateEventStatus: (syncId, status) =>
-      updateEventStatus(db, syncId, status),
+    updateEventStatus: (syncId, status) => updateEventStatus(db, syncId, status),
   });
 
   createCrdtSyncProducer({
@@ -121,13 +113,10 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       },
     });
 
-    const storedRemoteSyncId = Number.parseInt(
-      getMetaValue(db, "remote-sync-id")
-    );
+    const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "remote-sync-id"), 10);
     const remoteSyncId = createSyncIdCounter({
       initialSyncId: Number.isNaN(storedRemoteSyncId) ? -1 : storedRemoteSyncId,
-      saveToStorage: (syncId) =>
-        setMetaValue(db, "remote-sync-id", syncId.toString()),
+      saveToStorage: (syncId) => setMetaValue(db, "remote-sync-id", syncId.toString()),
     });
     crdtSyncRemoteSource = createCrdtSyncRemoteSource({
       bufferSize: 50,
@@ -161,7 +150,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         request.events.map((event) => ({
           ...event,
           origin: request.nodeId,
-        }))
+        })),
       );
       return {
         ok: true,
@@ -196,9 +185,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return;
     }
 
-    const method = rpcTarget[message.method] as () => ReturnType<
-      WorkerRpc[keyof WorkerRpc]
-    >;
+    const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
     const data = method.apply(null, message.args as []);
     const response: WorkerResponseMessage = {
       type: "response",
@@ -240,9 +227,7 @@ type WorkerOptions = {
   clearOnInit?: boolean;
 };
 
-type CreateRemoteSourceFactory = (opts: {
-  onEventsAvailable: (newSyncId: number) => void;
-}) => {
+type CreateRemoteSourceFactory = (opts: { onEventsAvailable: (newSyncId: number) => void }) => {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
 };
@@ -250,51 +235,37 @@ type CreateRemoteSourceFactory = (opts: {
 export async function startDbWorker(opts: WorkerOptions) {
   const config = await getConfig();
 
-  await navigator.locks.request(
-    syncDbWorkerLockName,
-    { mode: "exclusive" },
-    async (lock) => {
-      if (!lock) {
-        return;
-      }
-
-      await createDbWorker(config, opts);
-
-      await new Promise<void>(() => {});
+  await navigator.locks.request(syncDbWorkerLockName, { mode: "exclusive" }, async (lock) => {
+    if (!lock) {
+      return;
     }
-  );
+
+    await createDbWorker(config, opts);
+
+    await new Promise<void>(() => {});
+  });
 
   console.error("Failed to acquire lock");
 }
 
 function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {
   const result = db.executePrepared("get-latest-sync-id", {}, (db) =>
-    db
-      .selectFrom("worker.crdt_events")
-      .select((eb) => eb.fn.max("sync_id").as("sync_id"))
+    db.selectFrom("worker.crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
   );
   return result[0]?.sync_id ?? 0;
 }
 
-function persistEvents(
-  db: SQLiteDbWrapper<WorkerDbSchema>,
-  events: PersistedCrdtEvent[]
-) {
+function persistEvents(db: SQLiteDbWrapper<WorkerDbSchema>, events: PersistedCrdtEvent[]) {
   db.executeTransaction((db) => {
     const chunkSize = 100;
     for (let i = 0; i < events.length; i += chunkSize) {
       const chunk = events.slice(i, i + chunkSize);
-      db.executeKysely((db) =>
-        db.insertInto("worker.crdt_events").values(chunk)
-      );
+      db.executeKysely((db) => db.insertInto("worker.crdt_events").values(chunk));
     }
   });
 }
 
-function popPendingEventsBatch(
-  db: SQLiteDbWrapper<WorkerDbSchema>,
-  limit: number
-) {
+function popPendingEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, limit: number) {
   const events = db.executePrepared(
     "pop-enqueued-crdt-events",
     {
@@ -306,7 +277,7 @@ function popPendingEventsBatch(
         .where("status", "=", sql.lit("pending"))
         .limit(param("limit"))
         .orderBy("sync_id", "asc")
-        .selectAll()
+        .selectAll(),
   );
   return {
     events,
@@ -314,41 +285,27 @@ function popPendingEventsBatch(
   };
 }
 
-function updateEventStatus(
-  db: SQLiteDbWrapper<WorkerDbSchema>,
-  syncId: number,
-  status: CrdtEventStatus
-) {
-  db.executePrepared(
-    "update-crdt-event-status",
-    { syncId, status },
-    (db, params) =>
-      db
-        .updateTable("worker.crdt_events")
-        .set({ status: params("status") })
-        .where("sync_id", "=", params("syncId"))
+function updateEventStatus(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, status: CrdtEventStatus) {
+  db.executePrepared("update-crdt-event-status", { syncId, status }, (db, params) =>
+    db
+      .updateTable("worker.crdt_events")
+      .set({ status: params("status") })
+      .where("sync_id", "=", params("syncId")),
   );
 }
 
 function getMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string) {
   const [result] = db.executePrepared("get-meta-value", { key }, (db, params) =>
-    db
-      .selectFrom("worker.meta")
-      .where("key", "=", params("key"))
-      .select("value")
+    db.selectFrom("worker.meta").where("key", "=", params("key")).select("value"),
   );
   return result?.value ?? null;
 }
 
-function setMetaValue(
-  db: SQLiteDbWrapper<WorkerDbSchema>,
-  key: string,
-  value: string
-) {
+function setMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string, value: string) {
   db.executePrepared("set-meta-value", { key, value }, (db, params) =>
     db
       .insertInto("worker.meta")
       .values({ key: params("key"), value: params("value") })
-      .onConflict((oc) => oc.doUpdateSet({ value: params("value") }))
+      .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
   );
 }

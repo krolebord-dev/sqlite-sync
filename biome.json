@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.2.5/schema.json",
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": {
     "enabled": false,
     "clientKind": "git",
@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!**/.wrangler", "!**/dist", "!**/node_modules", "!**/src/routeTree.gen.ts"]
+    "includes": ["**", "!**/dist", "!**/node_modules", "!**/build", "!apps/watchlist", "!**/worker-configuration.d.ts"]
   },
   "formatter": {
     "enabled": true,
@@ -15,16 +15,8 @@
     "indentWidth": 2,
     "lineWidth": 120
   },
-  "assist": {
-    "actions": {
-      "source": {
-        "organizeImports": "on"
-      }
-    }
-  },
   "linter": {
     "enabled": true,
-    "includes": ["**", "!**/tsconfig.json", "!**/tsconfig.*.json"],
     "rules": {
       "recommended": true,
       "a11y": {
@@ -39,13 +31,22 @@
         "useSortedClasses": "warn"
       },
       "suspicious": {
-        "noUnknownAtRules": "off"
+        "noUnknownAtRules": "off",
+        "noExplicitAny": "off"
       }
     }
   },
   "javascript": {
     "formatter": {
-      "quoteStyle": "single"
+      "quoteStyle": "double"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
     }
   }
 }

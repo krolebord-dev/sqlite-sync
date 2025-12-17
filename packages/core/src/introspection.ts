@@ -1,5 +1,4 @@
-import type { Kysely } from "kysely";
-import type { QueryCreator } from "kysely";
+import type { Kysely, QueryCreator } from "kysely";
 import { sql } from "kysely";
 import type { SQLiteDbWrapper } from "./sqlite-db-wrapper";
 
@@ -27,9 +26,7 @@ interface PragmaTableInfo {
   type: string;
 }
 
-function tablesQuery(
-  qb: QueryCreator<SqliteSystemDatabase> | Kysely<SqliteSystemDatabase>
-) {
+function tablesQuery(qb: QueryCreator<SqliteSystemDatabase> | Kysely<SqliteSystemDatabase>) {
   return qb
     .selectFrom("sqlite_master")
     .where("type", "in", ["table", "view"])
@@ -55,34 +52,17 @@ type ColumnMetadata = {
   comment: undefined;
 };
 
-export function introspectDb<BaseDatabase>(
-  _db: SQLiteDbWrapper<BaseDatabase>
-): DatabaseIntrospection {
+export function introspectDb<BaseDatabase>(_db: SQLiteDbWrapper<BaseDatabase>): DatabaseIntrospection {
   const db = _db as unknown as SQLiteDbWrapper<SqliteSystemDatabase>;
-  const tables = db.executeKysely((db) =>
-    tablesQuery(db as unknown as Kysely<SqliteSystemDatabase>)
-  ).rows;
+  const tables = db.executeKysely((db) => tablesQuery(db as unknown as Kysely<SqliteSystemDatabase>)).rows;
 
   const tablesMetadata = db.executeKysely((db) =>
     db
-      .with("table_list", (qb) =>
-        tablesQuery(qb as unknown as Kysely<SqliteSystemDatabase>)
-      )
-      .selectFrom([
-        "table_list as tl",
-        sql<PragmaTableInfo>`pragma_table_info(tl.name)`.as("p"),
-      ])
-      .select([
-        "tl.name as table",
-        "p.cid",
-        "p.name",
-        "p.type",
-        "p.notnull",
-        "p.dflt_value",
-        "p.pk",
-      ])
+      .with("table_list", (qb) => tablesQuery(qb as unknown as Kysely<SqliteSystemDatabase>))
+      .selectFrom(["table_list as tl", sql<PragmaTableInfo>`pragma_table_info(tl.name)`.as("p")])
+      .select(["tl.name as table", "p.cid", "p.name", "p.type", "p.notnull", "p.dflt_value", "p.pk"])
       .orderBy("tl.name")
-      .orderBy("p.cid")
+      .orderBy("p.cid"),
   ).rows;
 
   const columnsByTable: Record<string, typeof tablesMetadata> = {};
@@ -127,7 +107,6 @@ export function introspectDb<BaseDatabase>(
           })),
         },
       ];
-    })
+    }),
   );
 }
-

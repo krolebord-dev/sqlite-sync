@@ -1,9 +1,4 @@
-import {
-  Migrator,
-  type MigrationProvider,
-  type Migration,
-  Kysely,
-} from "kysely";
+import { type Kysely, type Migration, type MigrationProvider, Migrator } from "kysely";
 
 class SyncMigrationsProvider implements MigrationProvider {
   private migrations: Record<string, Migration>;
@@ -31,14 +26,6 @@ export function createSyncDbMigrator(options: SyncDbMigratorOptions) {
   });
 }
 
-export function createSyncDbMigrations(
-  migrations: Record<number, Migration>
-): Record<number, Migration> {
-  return Object.fromEntries(
-    Object.entries(migrations).map(([key, value]) => [
-      key.toString().padStart(6, "0"),
-      value,
-    ])
-  );
+export function createSyncDbMigrations(migrations: Record<number, Migration>): Record<number, Migration> {
+  return Object.fromEntries(Object.entries(migrations).map(([key, value]) => [key.toString().padStart(6, "0"), value]));
 }
-

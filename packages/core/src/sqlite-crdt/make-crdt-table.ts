@@ -23,11 +23,7 @@ where tombstone = 0;`);
   const allColumnNames = tableSchema.columns.map((column) => column.name);
 
   const jsonPayload = (from: "new" | "old") =>
-    "'{'||" +
-    allColumnNames
-      .map((col) => `'"${col}":'||json_quote(${from}.${col})`)
-      .join("||','||") +
-    "||'}'";
+    `'{'||${allColumnNames.map((col) => `'"${col}":'||json_quote(${from}.${col})`).join("||','||")}||'}'`;
 
   db.execute(`
 create trigger ${crdtTableName}_created
@@ -61,4 +57,3 @@ select handle_item_deleted('${baseTableName}', old.id);
 end;
 `);
 }
-

@@ -1,14 +1,14 @@
+import type {} from "@sqlite.org/sqlite-wasm";
 import {
   CompiledQuery,
+  type DatabaseConnection,
+  type Driver,
   Kysely,
+  type QueryResult,
   SqliteAdapter,
   SqliteIntrospector,
   SqliteQueryCompiler,
-  type DatabaseConnection,
-  type Driver,
-  type QueryResult,
 } from "kysely";
-import type {} from "@sqlite.org/sqlite-wasm";
 
 type SqliteDatabase = {
   execute: (opts: { sql: string; parameters: readonly unknown[] }) => {
@@ -73,7 +73,7 @@ class SqliteConnection implements DatabaseConnection {
     });
   }
 
-  // eslint-disable-next-line require-yield
+  // biome-ignore lint/correctness/useYield: SQLite does not support streaming
   async *streamQuery(): AsyncGenerator<never, void, unknown> {
     throw new Error("SQLite3 does not support streaming.");
   }
@@ -113,4 +113,3 @@ export function createSQLiteKysely<Database>(sqliteDb: SqliteDatabase) {
     },
   });
 }
-

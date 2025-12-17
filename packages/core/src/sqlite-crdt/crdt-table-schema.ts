@@ -1,10 +1,7 @@
 import type { SchemaModule } from "kysely";
-import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { TableMetadata } from "../introspection";
-import {
-  applyCrdtEventMutations,
-  type PendingCrdtEvent,
-} from "./apply-crdt-event";
+import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { applyCrdtEventMutations, type PendingCrdtEvent } from "./apply-crdt-event";
 
 export type CrdtEventType = "item-created" | "item-updated";
 
@@ -64,10 +61,7 @@ function createPersistedEventsTable(schema: SchemaModule, tableName: string) {
     .addColumn("payload", "text", (col) => col.notNull());
 }
 
-function createCrdtUpdateLogTableQuery(
-  schema: SchemaModule,
-  tableName: string
-) {
+function createCrdtUpdateLogTableQuery(schema: SchemaModule, tableName: string) {
   return schema
     .createTable(tableName)
     .ifNotExists()
@@ -121,11 +115,7 @@ export function registerCrdtFunctions({
     deterministic: false,
     directOnly: false,
     innocuous: false,
-    callback: (
-      dataset: string,
-      oldPayloadRaw: string,
-      newPayloadRaw: string
-    ) => {
+    callback: (dataset: string, oldPayloadRaw: string, newPayloadRaw: string) => {
       const tableSchema = getTableSchema(dataset);
       const oldPayload = JSON.parse(oldPayloadRaw);
       const newPayload = JSON.parse(newPayloadRaw);
@@ -142,7 +132,7 @@ export function registerCrdtFunctions({
             hasDiff = true;
             return [column.name, newValue] as const;
           })
-          .filter(Boolean)
+          .filter(Boolean),
       );
 
       const event: PendingCrdtEvent = {
@@ -189,4 +179,3 @@ export function registerCrdtFunctions({
     },
   });
 }
-
