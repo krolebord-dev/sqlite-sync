@@ -14,7 +14,8 @@
     "rootDir": "./src",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "customConditions": ["@sqlite-sync/source"]
   },
   "include": ["src/**/*"]
 }

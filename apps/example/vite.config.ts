@@ -9,4 +9,7 @@ export default defineConfig({
     exclude: ["@sqlite.org/sqlite-wasm"],
   },
   worker: { format: "es" },
+  resolve: {
+    conditions: ["@sqlite-sync/source"],
+  },
 });

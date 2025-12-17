@@ -33,11 +33,6 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
     config: {
       clientId: generateId(),
       dbPath: options.dbPath,
-      clearOnInit: options.clearOnInit,
-      syncServer: {
-        host: "",
-        room: "",
-      },
     },
   });
 

@@ -107,6 +107,7 @@ export function registerCrdtFunctions({
       });
 
       onEventApplied(event);
+      return undefined;
     },
   });
 
@@ -153,6 +154,7 @@ export function registerCrdtFunctions({
         updateLogTableName,
       });
       onEventApplied(event);
+      return undefined;
     },
   });
 
@@ -176,6 +178,7 @@ export function registerCrdtFunctions({
         updateLogTableName,
       });
       onEventApplied(event);
+      return undefined;
     },
   });
 }
