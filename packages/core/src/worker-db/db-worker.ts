@@ -1,4 +1,4 @@
-import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import sqlite3InitModule, { type SAHPoolUtil } from "@sqlite.org/sqlite-wasm";
 import { type Kysely, type Migration, sql } from "kysely";
 import type { Logger } from "../logger";
 import { createSyncDbMigrator } from "../migrations/migrator";
@@ -57,6 +57,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     name: "sync-db-storage",
     clearOnInit: opts.clearOnInit,
   });
+
+  await normalizePoolCapacity(pool);
 
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
     db: new pool.OpfsSAHPoolDb(config.dbPath),
@@ -218,6 +220,18 @@ async function getConfig(): Promise<WorkerConfig> {
   };
 
   return responsePromise.promise;
+}
+
+async function normalizePoolCapacity(pool: SAHPoolUtil) {
+  const capacity = pool.getCapacity();
+  const fileCount = pool.getFileCount();
+  const capacityDiff = capacity - fileCount;
+
+  if (capacityDiff < 6) {
+    await pool.addCapacity(6 - capacityDiff);
+  } else {
+    await pool.reduceCapacity(capacityDiff - 6);
+  }
 }
 
 type WorkerOptions = {
