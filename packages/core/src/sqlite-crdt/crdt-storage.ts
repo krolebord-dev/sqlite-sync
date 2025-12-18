@@ -11,15 +11,23 @@ type LocalCrdtEvent = {
   origin: CrdtEventOrigin;
 };
 
-type PendingEventsBatch = {
+export type GetEventsOptions = {
+  afterSyncId?: number;
+  status?: CrdtEventStatus;
+  excludeOrigin?: string;
+  limit?: number;
+};
+
+export type GetEventsBatch = {
   events: PersistedCrdtEvent[];
   hasMore: boolean;
+  nextSyncId: number;
 };
 
 type DbSyncerStorage = {
   syncId: SyncIdCounter;
   persistEvents: (events: PersistedCrdtEvent[]) => void;
-  popPendingEventsBatch: () => PendingEventsBatch;
+  getEventsBatch: (options: GetEventsOptions) => PersistedCrdtEvent[];
   updateEventStatus: (syncId: number, status: CrdtEventStatus) => void;
   applyCrdtEventMutations: (event: PersistedCrdtEvent) => void;
 };
@@ -56,12 +64,24 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     };
   };
 
+  const getEventsBatch = (options: GetEventsOptions): GetEventsBatch => {
+    const events = storage.getEventsBatch({
+      ...options,
+      limit: options.limit ?? 50,
+    });
+    return {
+      events,
+      hasMore: events.length === options.limit,
+      nextSyncId: events[events.length - 1]?.sync_id ?? options.afterSyncId ?? 0,
+    };
+  };
+
   const processEnqueuedEvents = ensureSingletonExecution(async () => {
     await Promise.resolve();
 
     let hasMore = true;
     while (hasMore) {
-      const batch = storage.popPendingEventsBatch();
+      const batch = getEventsBatch({ status: "pending", limit: 50 });
       const events = batch.events;
       hasMore = batch.hasMore;
 
@@ -90,5 +110,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
     dispatchEvent: eventTarget.dispatchEvent,
+    getEventsBatch,
   };
 }

@@ -1,26 +1,21 @@
-import { createAsyncAutoFlushBuffer } from "../utils";
+import { ensureSingletonExecution } from "../utils";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
-import type { CrdtStorage } from "./crdt-storage";
-import type { PersistedCrdtEvent } from "./crdt-table-schema";
+import type { CrdtStorage, GetEventsBatch } from "./crdt-storage";
 import type { SyncIdCounter } from "./sync-id-counter";
 
 type CrdtSyncRemoteSourceConfig = {
   bufferSize: number;
   storage: CrdtStorage;
-  syncId: SyncIdCounter;
+  pullSyncId: SyncIdCounter;
+  pushSyncId: SyncIdCounter;
   nodeId: string;
-  pullEvents: (request: EventsPullRequest) => EventsPullResponse | Promise<EventsPullResponse>;
+  pullEvents: (request: EventsPullRequest) => GetEventsBatch | Promise<GetEventsBatch>;
   pushEvents: (request: EventsPushRequest) => EventsPushResponse | Promise<EventsPushResponse>;
 };
 
 export type EventsPullRequest = {
   afterSyncId: number;
   excludeNodeId?: string;
-};
-export type EventsPullResponse = {
-  events: PersistedCrdtEvent[];
-  newSyncId: number;
-  hasMore: boolean;
 };
 
 export type EventsPushRequest = {
@@ -36,16 +31,16 @@ export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>
 export const createCrdtSyncRemoteSource = ({
   bufferSize,
   storage,
-  syncId,
+  pullSyncId,
+  pushSyncId,
   nodeId,
   pullEvents: pullEventsChunk,
   pushEvents,
 }: CrdtSyncRemoteSourceConfig) => {
-  let pullPromise: Promise<void> | null = null;
   let requestedPullSyncId: number | null = null;
-
+  let pullPromise: Promise<void> | null = null;
   const pullEvents = (request?: { afterSyncId?: number; includeSelf?: boolean }) => {
-    const afterSyncId = request?.afterSyncId ?? syncId.current;
+    const afterSyncId = request?.afterSyncId ?? pullSyncId.current;
 
     if (pullPromise) {
       if (!requestedPullSyncId || requestedPullSyncId < afterSyncId) {
@@ -60,7 +55,7 @@ export const createCrdtSyncRemoteSource = ({
     }).finally(() => {
       pullPromise = null;
 
-      if (requestedPullSyncId && requestedPullSyncId > syncId.current) {
+      if (requestedPullSyncId && requestedPullSyncId > pullSyncId.current) {
         pullEvents({ afterSyncId: requestedPullSyncId });
         requestedPullSyncId = null;
       }
@@ -77,7 +72,7 @@ export const createCrdtSyncRemoteSource = ({
         afterSyncId,
       });
       hasMore = response.hasMore;
-      afterSyncId = response.newSyncId;
+      afterSyncId = response.nextSyncId;
 
       if (response.events) {
         storage.enqueueEvents(
@@ -87,31 +82,53 @@ export const createCrdtSyncRemoteSource = ({
           })),
         );
       }
-      if (response.newSyncId <= syncId.current) {
+      if (response.nextSyncId <= pullSyncId.current) {
         break;
       }
-      if (response.newSyncId > syncId.current) {
-        syncId.current = response.newSyncId;
+      if (response.nextSyncId > pullSyncId.current) {
+        pullSyncId.current = response.nextSyncId;
       }
     }
   };
 
-  const pushEventsBuffer = createAsyncAutoFlushBuffer<PendingCrdtEvent>({
-    size: bufferSize,
-    flush: async (events) => {
-      await pushEvents({ nodeId, events });
-    },
+  const startPushingEvents = ensureSingletonExecution(async () => {
+    while (true) {
+      const eventsBatch = storage.getEventsBatch({
+        status: "applied",
+        afterSyncId: pushSyncId.current,
+        excludeOrigin: "remote",
+        limit: bufferSize,
+      });
+      if (eventsBatch.events.length === 0) {
+        break;
+      }
+
+      await pushEvents({
+        nodeId,
+        events: eventsBatch.events,
+      });
+
+      pushSyncId.current = eventsBatch.nextSyncId;
+      pendingEventsCount -= eventsBatch.events.length;
+      if (!eventsBatch.hasMore) {
+        break;
+      }
+    }
   });
 
+  let pendingEventsCount = 0;
   storage.addEventListener("event-applied", (event) => {
     if (event.payload.origin === "remote") {
       return;
     }
-    pushEventsBuffer.add(event.payload);
+    pendingEventsCount++;
+    if (pendingEventsCount >= bufferSize) {
+      startPushingEvents();
+    }
   });
 
   storage.addEventListener("event-processing-done", () => {
-    pushEventsBuffer.flush();
+    startPushingEvents();
   });
 
   return {

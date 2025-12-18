@@ -1,20 +1,20 @@
 import sqlite3InitModule, { type SAHPoolUtil } from "@sqlite.org/sqlite-wasm";
-import { type Kysely, type Migration, sql } from "kysely";
+import type { Kysely, Migration } from "kysely";
 import type { Logger } from "../logger";
 import { createSyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
 import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
+import { createCrdtStorage, type GetEventsBatch, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import {
   type CrdtSyncRemoteSource,
   createCrdtSyncRemoteSource,
   type EventsPullRequest,
-  type EventsPullResponse,
   type EventsPushRequest,
   type EventsPushResponse,
 } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
+import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createSQLiteKysely } from "../sqlite-kysely";
@@ -92,7 +92,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         updateLogTableName: "crdt_update_log",
       }),
     persistEvents: (events) => persistEvents(db, events),
-    popPendingEventsBatch: () => popPendingEventsBatch(db, 50),
+    getEventsBatch: (opts) => getEventsBatch(db, opts),
     updateEventStatus: (syncId, status) => updateEventStatus(db, syncId, status),
   });
 
@@ -115,14 +115,21 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       },
     });
 
-    const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "remote-sync-id"), 10);
-    const remoteSyncId = createSyncIdCounter({
+    const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "pull-sync-id"), 10);
+    const pullIdCounter = createSyncIdCounter({
       initialSyncId: Number.isNaN(storedRemoteSyncId) ? -1 : storedRemoteSyncId,
-      saveToStorage: (syncId) => setMetaValue(db, "remote-sync-id", syncId.toString()),
+      saveToStorage: (syncId) => setMetaValue(db, "pull-sync-id", syncId.toString()),
+    });
+
+    const storedPushSyncId = Number.parseInt(getMetaValue(db, "push-sync-id"), 10);
+    const pushIdCounter = createSyncIdCounter({
+      initialSyncId: Number.isNaN(storedPushSyncId) ? -1 : storedPushSyncId,
+      saveToStorage: (syncId) => setMetaValue(db, "push-sync-id", syncId.toString()),
     });
     crdtSyncRemoteSource = createCrdtSyncRemoteSource({
       bufferSize: 50,
-      syncId: remoteSyncId,
+      pullSyncId: pullIdCounter,
+      pushSyncId: pushIdCounter,
       nodeId: config.clientId,
       storage: crdtStorage,
       pullEvents: remoteSource.pullEvents,
@@ -159,24 +166,12 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       };
     },
     pullEvents: (request) => {
-      const events = db.executeKysely((db) => {
-        const query = db
-          .selectFrom("worker.crdt_events")
-          .where("sync_id", ">", request.afterSyncId)
-          .where("status", "=", "applied")
-          .orderBy("sync_id", "asc")
-          .selectAll();
-        if (request.excludeNodeId) {
-          query.where("origin", "!=", request.excludeNodeId);
-        }
-        return query;
-      }).rows;
-
-      return {
-        events,
-        hasMore: false,
-        newSyncId: events[events.length - 1]?.sync_id ?? request.afterSyncId,
-      };
+      return crdtStorage.getEventsBatch({
+        afterSyncId: request.afterSyncId,
+        status: "applied",
+        excludeOrigin: request.excludeNodeId,
+        limit: 100,
+      });
     },
   };
 
@@ -242,7 +237,7 @@ type WorkerOptions = {
 };
 
 type CreateRemoteSourceFactory = (opts: { onEventsAvailable: (newSyncId: number) => void }) => {
-  pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
+  pullEvents: (request: EventsPullRequest) => Promise<GetEventsBatch>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
 };
 
@@ -279,24 +274,9 @@ function persistEvents(db: SQLiteDbWrapper<WorkerDbSchema>, events: PersistedCrd
   });
 }
 
-function popPendingEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, limit: number) {
-  const events = db.executePrepared(
-    "pop-enqueued-crdt-events",
-    {
-      limit: limit,
-    },
-    (db, param) =>
-      db
-        .selectFrom("worker.crdt_events")
-        .where("status", "=", sql.lit("pending"))
-        .limit(param("limit"))
-        .orderBy("sync_id", "asc")
-        .selectAll(),
-  );
-  return {
-    events,
-    hasMore: events.length === limit,
-  };
+function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOptions) {
+  return db.executeKysely((db) => applyKyselyEventsBatchFilters(db.selectFrom("worker.crdt_events").selectAll(), opts))
+    .rows;
 }
 
 function updateEventStatus(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, status: CrdtEventStatus) {

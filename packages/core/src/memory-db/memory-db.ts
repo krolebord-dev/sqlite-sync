@@ -1,9 +1,10 @@
-import { type Kysely, sql } from "kysely";
+import type { Kysely } from "kysely";
 import { type HLCCounter, serializeHLC } from "../hlc";
 import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
 import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
+import { createCrdtStorage, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
 import { type CrdtEventStatus, type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
+import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { makeCrdtTable } from "../sqlite-crdt/make-crdt-table";
 import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
@@ -85,7 +86,7 @@ export async function createMemoryDb<Database>({
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
     persistEvents: (events) => persistEvents(db, events),
-    popPendingEventsBatch: () => popPendingEventsBatch(db, 50),
+    getEventsBatch: (opts) => getEventsBatch(db, opts),
     applyCrdtEventMutations: (event) =>
       applyCrdtEventMutations({
         db,
@@ -125,24 +126,13 @@ function persistEvents(db: SQLiteDbWrapper<MemoryDbSchema>, events: PersistedCrd
   });
 }
 
-function popPendingEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, limit: number) {
-  const events = db.executePrepared(
-    "pop-enqueued-crdt-events",
-    {
-      limit: limit,
-    },
-    (db, param) =>
-      db
-        .selectFrom("persisted_crdt_events")
-        .where("status", "=", sql.lit("pending"))
-        .limit(param("limit"))
-        .orderBy("sync_id", "asc")
-        .selectAll(),
-  );
-  return {
-    events,
-    hasMore: events.length === limit,
-  };
+function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOptions) {
+  return db.executeKysely((db) =>
+    applyKyselyEventsBatchFilters(db.selectFrom("persisted_crdt_events").selectAll(), {
+      limit: 50,
+      ...opts,
+    }),
+  ).rows;
 }
 
 function updateEventStatus(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, status: CrdtEventStatus) {

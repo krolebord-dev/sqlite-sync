@@ -1,9 +1,5 @@
-import type {
-  EventsPullRequest,
-  EventsPullResponse,
-  EventsPushRequest,
-  EventsPushResponse,
-} from "../sqlite-crdt/crdt-sync-remote-source";
+import type { GetEventsBatch } from "../sqlite-crdt/crdt-storage";
+import type { EventsPullRequest, EventsPushRequest, EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { ExecuteParams, ExecuteResult } from "../sqlite-db-wrapper";
 import { TypedBroadcastChannel } from "../utils";
 
@@ -28,7 +24,7 @@ export interface WorkerRpc {
   getSnapshot: () => GetSnapshotResponse;
   pushTabEvents: (request: EventsPushRequest) => EventsPushResponse;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
-  pullEvents: (params: EventsPullRequest) => EventsPullResponse;
+  pullEvents: (params: EventsPullRequest) => GetEventsBatch;
   postInitReady: () => void;
 }
 

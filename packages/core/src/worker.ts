@@ -1,11 +1,7 @@
-// Worker entry point - for use in Web Workers
-
 export type { Migration } from "kysely";
-
-// Re-export types needed for worker configuration
+export type { GetEventsBatch } from "./sqlite-crdt/crdt-storage";
 export type {
   EventsPullRequest,
-  EventsPullResponse,
   EventsPushRequest,
   EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";

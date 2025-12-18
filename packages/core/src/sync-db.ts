@@ -53,12 +53,16 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
     crdtTables: options.crdtTables,
   });
 
-  const remoteSyncId = createSyncIdCounter({
+  const pullSyncId = createSyncIdCounter({
     initialSyncId: workerClientSnapshot.syncId,
+  });
+  const pushSyncId = createSyncIdCounter({
+    initialSyncId: 0,
   });
   const remoteSyncSource = createCrdtSyncRemoteSource({
     bufferSize: 100,
-    syncId: remoteSyncId,
+    pullSyncId,
+    pushSyncId,
     storage: crdtStorage,
     nodeId: tabId,
     pullEvents: (request) => workerClient.pullEvents(request),
@@ -67,7 +71,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
 
   workerClient.addEventListener("new-notification", (event) => {
     const notification = event.payload;
-    if (notification.notificationType === "new-event-chunk-applied" && notification.newSyncId > remoteSyncId.current) {
+    if (notification.notificationType === "new-event-chunk-applied") {
       remoteSyncSource.pullEvents();
     }
   });

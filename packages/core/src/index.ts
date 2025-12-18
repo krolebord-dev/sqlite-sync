@@ -36,7 +36,6 @@ export {
   type CrdtSyncRemoteSource,
   createCrdtSyncRemoteSource,
   type EventsPullRequest,
-  type EventsPullResponse,
   type EventsPushRequest,
   type EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";

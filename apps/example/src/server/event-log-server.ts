@@ -1,4 +1,5 @@
 import {
+  applyKyselyEventsBatchFilters,
   type CrdtStorage,
   crdtSchema,
   createCrdtStorage,
@@ -82,19 +83,13 @@ export class EventLogServer extends Server<Env> {
           }
         });
       },
-      popPendingEventsBatch: () => {
-        const events = this.sqlExecutor.executeKysely((db) =>
-          db
-            .selectFrom("crdt_events")
-            .where("status", "=", "pending")
-            .orderBy("sync_id", "asc")
-            .limit(batchSize)
-            .selectAll(),
+      getEventsBatch: (opts) => {
+        return this.sqlExecutor.executeKysely((db) =>
+          applyKyselyEventsBatchFilters(db.selectFrom("crdt_events").selectAll(), {
+            ...opts,
+            limit: opts.limit ?? batchSize,
+          }),
         ).rows;
-        return {
-          events,
-          hasMore: events.length === batchSize,
-        };
       },
       updateEventStatus: (syncId, status) =>
         this.sqlExecutor.executeKysely((db) =>
@@ -147,24 +142,17 @@ export class EventLogServer extends Server<Env> {
   }
 
   private handlePullEvents(connection: Connection, request: ExtractSyncServerRequest<"pull-events">) {
-    const events = this.sqlExecutor.executeKysely((db) => {
-      const query = db
-        .selectFrom("crdt_events")
-        .where("sync_id", ">", request.afterSyncId)
-        .where("status", "=", "applied")
-        .orderBy("sync_id", "asc")
-        .limit(batchSize)
-        .selectAll();
-      return query;
-    }).rows;
+    const batch = this.storage.getEventsBatch({
+      limit: batchSize,
+      status: "applied",
+      afterSyncId: request.afterSyncId,
+      excludeOrigin: request.excludeNodeId,
+    });
+
     const eventsPullMessage: SyncServerMessage = {
       type: "events-pull-response",
       requestId: request.requestId,
-      data: {
-        events: request.excludeNodeId ? events.filter((x) => x.origin !== request.excludeNodeId) : events,
-        hasMore: events.length === batchSize,
-        newSyncId: events[events.length - 1]?.sync_id ?? request.afterSyncId,
-      },
+      data: batch,
     };
 
     connection.send(JSON.stringify(eventsPullMessage));
