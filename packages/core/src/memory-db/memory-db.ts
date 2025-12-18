@@ -102,17 +102,21 @@ export async function createMemoryDb<Database>({
 }
 
 function enqueueCrdtEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {
-  db.executePrepared("enqueue-crdt-events", event, (db, params) =>
-    (db as unknown as Kysely<MemoryDbSchema>).insertInto("persisted_crdt_events").values({
-      status: params("status"),
-      sync_id: params("sync_id"),
-      type: params("type"),
-      timestamp: params("timestamp"),
-      dataset: params("dataset"),
-      item_id: params("item_id"),
-      payload: params("payload"),
-      origin: params("origin"),
-    }),
+  db.executePrepared(
+    "enqueue-crdt-events",
+    event,
+    (db, params) =>
+      (db as unknown as Kysely<MemoryDbSchema>).insertInto("persisted_crdt_events").values({
+        status: params("status"),
+        sync_id: params("sync_id"),
+        type: params("type"),
+        timestamp: params("timestamp"),
+        dataset: params("dataset"),
+        item_id: params("item_id"),
+        payload: params("payload"),
+        origin: params("origin"),
+      }),
+    { loggerLevel: "system" },
   );
 }
 
@@ -121,25 +125,31 @@ function persistEvents(db: SQLiteDbWrapper<MemoryDbSchema>, events: PersistedCrd
     const chunkSize = 100;
     for (let i = 0; i < events.length; i += chunkSize) {
       const chunk = events.slice(i, i + chunkSize);
-      db.executeKysely((db) => db.insertInto("persisted_crdt_events").values(chunk));
+      db.executeKysely((db) => db.insertInto("persisted_crdt_events").values(chunk), { loggerLevel: "system" });
     }
   });
 }
 
 function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOptions) {
-  return db.executeKysely((db) =>
-    applyKyselyEventsBatchFilters(db.selectFrom("persisted_crdt_events").selectAll(), {
-      limit: 50,
-      ...opts,
-    }),
+  return db.executeKysely(
+    (db) =>
+      applyKyselyEventsBatchFilters(db.selectFrom("persisted_crdt_events").selectAll(), {
+        limit: 50,
+        ...opts,
+      }),
+    { loggerLevel: "system" },
   ).rows;
 }
 
 function updateEventStatus(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, status: CrdtEventStatus) {
-  db.executePrepared("update-crdt-event-status", { syncId, status }, (db, params) =>
-    db
-      .updateTable("persisted_crdt_events")
-      .set({ status: params("status") })
-      .where("sync_id", "=", params("syncId")),
+  db.executePrepared(
+    "update-crdt-event-status",
+    { syncId, status },
+    (db, params) =>
+      db
+        .updateTable("persisted_crdt_events")
+        .set({ status: params("status") })
+        .where("sync_id", "=", params("syncId")),
+    { loggerLevel: "system" },
   );
 }

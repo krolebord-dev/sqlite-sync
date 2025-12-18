@@ -67,9 +67,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     sqlite3,
   });
 
-  db.execute("PRAGMA locking_mode=exclusive");
-  db.execute("PRAGMA journal_mode=WAL");
-  db.execute(`ATTACH DATABASE '${config.dbPath}-worker' as worker`);
+  db.execute("PRAGMA locking_mode=exclusive", { loggerLevel: "system" });
+  db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
+  db.execute(`ATTACH DATABASE '${config.dbPath}-worker' as worker`, { loggerLevel: "system" });
   applyWorkerDbSchema(db);
   const kysely = createSQLiteKysely<WorkerDbSchema>(db);
   const migrator = createSyncDbMigrator({
@@ -141,9 +141,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const rpcTarget: WorkerRpc = {
     execute: (query) => db.execute(query),
     getSnapshot: () => {
-      db.execute("PRAGMA journal_mode=off");
+      db.execute("PRAGMA journal_mode=off", { loggerLevel: "system" });
       const file = db.createSnapshot();
-      db.execute("PRAGMA journal_mode=WAL");
+      db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
       return {
         file,
         syncId: localSyncId.current,
@@ -258,8 +258,11 @@ export async function startDbWorker(opts: WorkerOptions) {
 }
 
 function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {
-  const result = db.executePrepared("get-latest-sync-id", {}, (db) =>
-    db.selectFrom("worker.crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
+  const result = db.executePrepared(
+    "get-latest-sync-id",
+    {},
+    (db) => db.selectFrom("worker.crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
+    { loggerLevel: "system" },
   );
   return result[0]?.sync_id ?? 0;
 }
@@ -269,37 +272,50 @@ function persistEvents(db: SQLiteDbWrapper<WorkerDbSchema>, events: PersistedCrd
     const chunkSize = 100;
     for (let i = 0; i < events.length; i += chunkSize) {
       const chunk = events.slice(i, i + chunkSize);
-      db.executeKysely((db) => db.insertInto("worker.crdt_events").values(chunk));
+      db.executeKysely((db) => db.insertInto("worker.crdt_events").values(chunk), { loggerLevel: "system" });
     }
   });
 }
 
 function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOptions) {
-  return db.executeKysely((db) => applyKyselyEventsBatchFilters(db.selectFrom("worker.crdt_events").selectAll(), opts))
-    .rows;
+  return db.executeKysely(
+    (db) => applyKyselyEventsBatchFilters(db.selectFrom("worker.crdt_events").selectAll(), opts),
+    { loggerLevel: "system" },
+  ).rows;
 }
 
 function updateEventStatus(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, status: CrdtEventStatus) {
-  db.executePrepared("update-crdt-event-status", { syncId, status }, (db, params) =>
-    db
-      .updateTable("worker.crdt_events")
-      .set({ status: params("status") })
-      .where("sync_id", "=", params("syncId")),
+  db.executePrepared(
+    "update-crdt-event-status",
+    { syncId, status },
+    (db, params) =>
+      db
+        .updateTable("worker.crdt_events")
+        .set({ status: params("status") })
+        .where("sync_id", "=", params("syncId")),
+    { loggerLevel: "system" },
   );
 }
 
 function getMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string) {
-  const [result] = db.executePrepared("get-meta-value", { key }, (db, params) =>
-    db.selectFrom("worker.meta").where("key", "=", params("key")).select("value"),
+  const [result] = db.executePrepared(
+    "get-meta-value",
+    { key },
+    (db, params) => db.selectFrom("worker.meta").where("key", "=", params("key")).select("value"),
+    { loggerLevel: "system" },
   );
   return result?.value ?? null;
 }
 
 function setMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string, value: string) {
-  db.executePrepared("set-meta-value", { key, value }, (db, params) =>
-    db
-      .insertInto("worker.meta")
-      .values({ key: params("key"), value: params("value") })
-      .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
+  db.executePrepared(
+    "set-meta-value",
+    { key, value },
+    (db, params) =>
+      db
+        .insertInto("worker.meta")
+        .values({ key: params("key"), value: params("value") })
+        .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
+    { loggerLevel: "system" },
   );
 }

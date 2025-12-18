@@ -54,15 +54,19 @@ type ColumnMetadata = {
 
 export function introspectDb<BaseDatabase>(_db: SQLiteDbWrapper<BaseDatabase>): DatabaseIntrospection {
   const db = _db as unknown as SQLiteDbWrapper<SqliteSystemDatabase>;
-  const tables = db.executeKysely((db) => tablesQuery(db as unknown as Kysely<SqliteSystemDatabase>)).rows;
+  const tables = db.executeKysely((db) => tablesQuery(db as unknown as Kysely<SqliteSystemDatabase>), {
+    loggerLevel: "system",
+  }).rows;
 
-  const tablesMetadata = db.executeKysely((db) =>
-    db
-      .with("table_list", (qb) => tablesQuery(qb as unknown as Kysely<SqliteSystemDatabase>))
-      .selectFrom(["table_list as tl", sql<PragmaTableInfo>`pragma_table_info(tl.name)`.as("p")])
-      .select(["tl.name as table", "p.cid", "p.name", "p.type", "p.notnull", "p.dflt_value", "p.pk"])
-      .orderBy("tl.name")
-      .orderBy("p.cid"),
+  const tablesMetadata = db.executeKysely(
+    (db) =>
+      db
+        .with("table_list", (qb) => tablesQuery(qb as unknown as Kysely<SqliteSystemDatabase>))
+        .selectFrom(["table_list as tl", sql<PragmaTableInfo>`pragma_table_info(tl.name)`.as("p")])
+        .select(["tl.name as table", "p.cid", "p.name", "p.type", "p.notnull", "p.dflt_value", "p.pk"])
+        .orderBy("tl.name")
+        .orderBy("p.cid"),
+    { loggerLevel: "system" },
   ).rows;
 
   const columnsByTable: Record<string, typeof tablesMetadata> = {};

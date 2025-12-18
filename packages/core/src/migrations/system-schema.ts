@@ -14,9 +14,13 @@ export type WorkerDbSchema = {
 
 export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
   db.executeTransaction((db) => {
-    db.executeKysely((kysely) => crdtSchema.metaTable(kysely.schema, "worker.meta"));
-    db.executeKysely((kysely) => crdtSchema.crdtUpdateLogTable(kysely.schema, "crdt_update_log"));
-    db.executeKysely((kysely) => crdtSchema.persistedEventsTable(kysely.schema, "worker.crdt_events"));
+    db.executeKysely((kysely) => crdtSchema.metaTable(kysely.schema, "worker.meta"), { loggerLevel: "system" });
+    db.executeKysely((kysely) => crdtSchema.crdtUpdateLogTable(kysely.schema, "crdt_update_log"), {
+      loggerLevel: "system",
+    });
+    db.executeKysely((kysely) => crdtSchema.persistedEventsTable(kysely.schema, "worker.crdt_events"), {
+      loggerLevel: "system",
+    });
   });
 }
 
@@ -26,6 +30,10 @@ export type MemoryDbSchema = {
 };
 
 export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
-  db.executeKysely((kysely) => crdtSchema.crdtUpdateLogTable(kysely.schema, "crdt_update_log"));
-  db.executeKysely((kysely) => crdtSchema.persistedEventsTable(kysely.schema, "persisted_crdt_events"));
+  db.executeKysely((kysely) => crdtSchema.crdtUpdateLogTable(kysely.schema, "crdt_update_log"), {
+    loggerLevel: "system",
+  });
+  db.executeKysely((kysely) => crdtSchema.persistedEventsTable(kysely.schema, "persisted_crdt_events"), {
+    loggerLevel: "system",
+  });
 }

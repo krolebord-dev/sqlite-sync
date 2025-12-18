@@ -40,6 +40,7 @@ export function applyCrdtEventMutations({ db, event, updateLogTableName }: Apply
         .where("item_id", "=", params("item_id"))
         .where("dataset", "=", params("dataset"));
     },
+    { loggerLevel: "system" },
   );
 
   const meta = metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
@@ -78,10 +79,13 @@ function applyItemCreated(context: ApplyCrdtContext) {
   // TODO SQL sanitization
 
   const keys = Array.from(Object.keys(context.eventPayload));
-  context.db.execute({
-    sql: `insert into ${context.event.dataset} (${keys.join(",")}) values (${keys.map(() => "?").join(",")})`,
-    parameters: keys.map((key) => context.eventPayload[key]),
-  });
+  context.db.execute(
+    {
+      sql: `insert into ${context.event.dataset} (${keys.join(",")}) values (${keys.map(() => "?").join(",")})`,
+      parameters: keys.map((key) => context.eventPayload[key]),
+    },
+    { loggerLevel: "system" },
+  );
 
   const newUpdateLog = Object.fromEntries(keys.map((key) => [key, context.event.timestamp]));
   insertCrdtUpdateLog(context, newUpdateLog);
@@ -101,6 +105,7 @@ function insertCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, stri
         dataset: params("dataset"),
         payload: params("payload"),
       }),
+    { loggerLevel: "system" },
   );
 }
 
@@ -121,10 +126,13 @@ function applyItemUpdated(context: ApplyCrdtContext) {
   });
 
   if (keys.length > 0) {
-    context.db.execute({
-      sql: `update ${context.event.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
-      parameters: [...keys.map((key) => context.eventPayload[key]), context.event.item_id],
-    });
+    context.db.execute(
+      {
+        sql: `update ${context.event.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+        parameters: [...keys.map((key) => context.eventPayload[key]), context.event.item_id],
+      },
+      { loggerLevel: "system" },
+    );
 
     keys.forEach((key) => {
       meta[key] = context.event.timestamp;
@@ -149,5 +157,6 @@ function updateCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, stri
         })
         .where("item_id", "=", params("item_id"))
         .where("dataset", "=", params("dataset")),
+    { loggerLevel: "system" },
   );
 }

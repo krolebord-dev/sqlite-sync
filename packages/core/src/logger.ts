@@ -1,4 +1,4 @@
-export type LogLevel = "info" | "warning" | "error" | "trace";
+export type LogLevel = "info" | "warning" | "error" | "trace" | "system";
 
 export type Logger = (type: string, message: string, level?: LogLevel) => void;
 

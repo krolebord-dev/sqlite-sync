@@ -171,6 +171,7 @@ export class SQLiteReactiveDb<Database> {
     if (!this.tablesUsedStatement) {
       this.tablesUsedStatement = this.db.prepare<[string], { name: string; isWrite: boolean }>(
         "select t.tbl_name as name, u.wr as isWrite from tables_used(?) as u inner join sqlite_master as t on t.name = u.name where u.schema = 'main'",
+        { loggerLevel: "system" },
       );
     }
 
@@ -189,7 +190,7 @@ export class SQLiteReactiveDb<Database> {
       opcode: string;
       p1: number;
       p2: number;
-    }>(`EXPLAIN ${query.split(";")[0]}`).rows;
+    }>(`EXPLAIN ${query.split(";")[0]}`, { loggerLevel: "system" }).rows;
 
     const clearedTablesRootPages = new Set<number>();
     for (const operation of operations) {
@@ -206,6 +207,7 @@ export class SQLiteReactiveDb<Database> {
       `select t.tbl_name as name, true as isWrite from sqlite_master as t where t.rootpage in (${Array.from(
         clearedTablesRootPages,
       ).join(",")})`,
+      { loggerLevel: "system" },
     ).rows;
 
     return tableNames;

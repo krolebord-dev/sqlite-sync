@@ -42,6 +42,10 @@ export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
   "execute" | "sql" | "executeKysely" | "prepare" | "executePrepared" | "prepareKysely"
 >;
 
+type QueryMetaOpts = {
+  loggerLevel?: "info" | "system";
+};
+
 export class SQLiteDbWrapper<TDatabase = unknown> {
   private db: SQLiteDatabase | null = null;
   private sqlite3: Sqlite3Static;
@@ -76,7 +80,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return this.loadedDbSchema;
   }
 
-  execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>): ExecuteResult<T> {
+  execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>, meta?: QueryMetaOpts): ExecuteResult<T> {
     const sql = typeof opts === "string" ? opts : opts.sql;
     const bind = typeof opts === "string" ? undefined : opts.parameters;
 
@@ -87,7 +91,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       returnValue: "resultRows",
       rowMode: "object",
     });
-    perf?.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, "info");
+    perf?.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, meta?.loggerLevel);
 
     return { rows: rows as T[] };
   }
@@ -96,10 +100,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return this.ensureDb.transaction(() => callback(this));
   }
 
-  prepare<TParams extends SqlValue[], TResult>(sql: string) {
+  prepare<TParams extends SqlValue[], TResult>(sql: string, opts?: QueryMetaOpts) {
     const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
     const stmt = this.ensureDb.prepare(sql);
-    perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, "info");
+    perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
 
     let isFinalized = false;
 
@@ -117,7 +121,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         results.push(stmt.get({}) as TResult);
       }
       stmt.reset(true);
-      perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, "info");
+      perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       return results;
     };
 
@@ -139,12 +143,12 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return preparedStatement;
   }
 
-  prepareKysely<TParams extends Record<string, unknown>>() {
+  prepareKysely<TParams extends Record<string, unknown>>(opts?: QueryMetaOpts) {
     return <TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
       factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>,
     ): TypedStatement<TParams, TResult> => {
       const query = factory(dummyKysely, (key) => key as any).compile();
-      const statement = this.prepare<SqlValue[], TResult>(query.sql);
+      const statement = this.prepare<SqlValue[], TResult>(query.sql, opts);
 
       return {
         execute: (parameters) => {
@@ -158,19 +162,25 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
   executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
     factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
+    meta?: QueryMetaOpts,
   ) {
     const query = factory(dummyKysely).compile();
-    return this.execute(query);
+    return this.execute(query, meta);
   }
 
   executePrepared<
     TParams extends Record<string, unknown>,
     TQuery extends Compilable<TResult>,
     TResult = QueryBuilderOutput<TQuery>,
-  >(key: string, params: TParams, factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>) {
+  >(
+    key: string,
+    params: TParams,
+    factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>,
+    meta?: QueryMetaOpts,
+  ) {
     let statement = this.preparedStatementsMap.get(key) as TypedStatement<TParams, TResult> | undefined;
     if (!statement) {
-      statement = this.prepareKysely<TParams>()(factory);
+      statement = this.prepareKysely<TParams>(meta)(factory);
       this.preparedStatementsMap.set(key, statement as TypedStatement<Record<string, unknown>, unknown>);
     }
 
