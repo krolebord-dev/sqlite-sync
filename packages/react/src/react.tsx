@@ -29,9 +29,10 @@ export function createDbContext<Database>() {
   }: UseDbQueryOptions<TParams, TResult, Database>) => {
     const db = useDb();
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: parameters is a dependency of the query
     const compiledQuery = useMemo(() => {
       return queryFn(dummyKysely, parameters as TParams).compile();
-    }, [parameters, queryFn]);
+    }, [...(parameters ?? [])]);
 
     const liveQuery = useMemo(() => {
       return db.reactiveDb.createLiveQuery<TResult>({

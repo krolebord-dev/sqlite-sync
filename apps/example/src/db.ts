@@ -14,7 +14,6 @@ export const { useDb, DbProvider, useDbQuery } = createDbContext<{
     id: string;
     title: string;
     completed: boolean;
-    tombstone: boolean;
   };
 }>();
 

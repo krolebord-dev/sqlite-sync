@@ -78,6 +78,7 @@ function applyItemCreated(context: ApplyCrdtContext) {
 
   // TODO SQL sanitization
 
+  context.eventPayload.tombstone = false;
   const keys = Array.from(Object.keys(context.eventPayload));
   context.db.execute(
     {

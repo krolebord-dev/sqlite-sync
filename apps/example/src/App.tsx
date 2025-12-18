@@ -4,7 +4,7 @@ import { useDb, useDbQuery } from "./db";
 import { QueryShell } from "./QueryShell";
 
 export function App() {
-  const db = useDb();
+  const { db } = useDb();
   const [isTabSyncEnabled, setIsTabSyncEnabled] = useState(true);
   const toggleTabSync = () => {
     setIsTabSyncEnabled(!isTabSyncEnabled);
@@ -12,23 +12,31 @@ export function App() {
   };
 
   const [newTodoTitle, setNewTodoTitle] = useState("");
+  const [randomCount, setRandomCount] = useState(10);
 
-  // Query all active todos (not tombstoned)
   const { rows: todos } = useDbQuery({
-    queryFn: (db) => db.selectFrom("todo").selectAll().where("tombstone", "=", false).orderBy("id"),
+    parameters: [newTodoTitle],
+    queryFn: (db, [newTodoTitle]) => {
+      let query = db.selectFrom("todo").selectAll().orderBy("id");
+
+      if (newTodoTitle) {
+        query = query.where("title", "like", `${newTodoTitle}%`);
+      }
+
+      return query.limit(100).orderBy("id", "asc");
+    },
   });
 
-  // Count active todos
   const {
     rows: [todoStats],
   } = useDbQuery({
-    queryFn: (db) =>
-      db
+    queryFn: (db) => {
+      const query = db
         .selectFrom("todo")
-        .where("tombstone", "=", false)
-        .select(({ fn }) => [fn.countAll<number>().as("total"), fn.sum<number>("completed").as("completed")]),
+        .select(({ fn }) => [fn.countAll<number>().as("total"), fn.sum<number>("completed").as("completed")]);
+      return query;
+    },
   });
-
   const completedCount = Number(todoStats?.completed ?? 0);
   const totalCount = todoStats?.total ?? 0;
 
@@ -36,36 +44,45 @@ export function App() {
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;
 
-    db.db.executeKysely((db: any) =>
+    db.executeKysely((db) =>
       db.insertInto("todo").values({
         id: generateId(),
         title: newTodoTitle.trim(),
         completed: false,
-        tombstone: false,
       }),
     );
-    db.reactiveDb.notifyTableSubscribers(["todo"]);
     setNewTodoTitle("");
   };
 
-  // Toggle todo completion
+  const addRandomTodos = () => {
+    const count = Number(randomCount);
+    if (Number.isNaN(count) || count <= 0) return;
+
+    db.executeTransaction((trx) => {
+      for (let i = 0; i < count; i += 100) {
+        const batchSize = Math.min(100, count - i);
+        const values = Array.from({ length: batchSize }).map(() => ({
+          id: generateId(),
+          title: `Random Todo ${Math.floor(Math.random() * 10000)}`,
+          completed: false,
+        }));
+        trx.executeKysely((db) => db.insertInto("todo").values(values));
+      }
+    });
+  };
+
   const toggleTodo = (id: string, currentCompleted: boolean) => {
-    db.db.executeKysely((db: any) => db.updateTable("todo").set({ completed: !currentCompleted }).where("id", "=", id));
-    db.reactiveDb.notifyTableSubscribers(["todo"]);
+    db.executeKysely((db) => db.updateTable("todo").set({ completed: !currentCompleted }).where("id", "=", id));
   };
 
-  // Delete a todo (set tombstone to true)
   const deleteTodo = (id: string) => {
-    db.db.executeKysely((db: any) => db.updateTable("todo").set({ tombstone: true }).where("id", "=", id));
-    db.reactiveDb.notifyTableSubscribers(["todo"]);
+    db.executeKysely((db) => db.deleteFrom("todo").where("id", "=", id));
   };
 
-  // Update todo title
   const updateTodoTitle = (id: string, newTitle: string) => {
     if (!newTitle.trim()) return;
 
-    db.db.executeKysely((db: any) => db.updateTable("todo").set({ title: newTitle.trim() }).where("id", "=", id));
-    db.reactiveDb.notifyTableSubscribers(["todo"]);
+    db.executeKysely((db) => db.updateTable("todo").set({ title: newTitle.trim() }).where("id", "=", id));
   };
 
   return (
@@ -108,6 +125,24 @@ export function App() {
         />
         <button type="button" className="rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600" onClick={addTodo}>
           Add
+        </button>
+      </div>
+
+      {/* Add random todos */}
+      <div className="mt-4 flex gap-2">
+        <input
+          className="w-auto rounded border border-gray-300 px-3 py-2"
+          type="number"
+          min="1"
+          value={randomCount}
+          onChange={(e) => setRandomCount(parseInt(e.target.value, 10) || 0)}
+        />
+        <button
+          type="button"
+          className="rounded bg-green-500 px-4 py-2 text-white hover:bg-green-600"
+          onClick={addRandomTodos}
+        >
+          Add {randomCount} random todos
         </button>
       </div>
 
