@@ -83,6 +83,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     initialSyncId: getLatestSyncId(db),
   });
 
+  let crdtSyncRemoteSource: CrdtSyncRemoteSource | null = null;
+
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
     applyCrdtEventMutations: (event) =>
@@ -108,7 +110,6 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   if (opts.createRemoteSource) {
-    let crdtSyncRemoteSource: CrdtSyncRemoteSource | null = null;
     const remoteSource = opts.createRemoteSource?.({
       onEventsAvailable: () => {
         crdtSyncRemoteSource?.pullEvents();

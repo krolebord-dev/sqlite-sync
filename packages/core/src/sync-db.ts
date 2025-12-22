@@ -1,6 +1,6 @@
 import { deserializeHLC, HLCCounter } from "./hlc";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
-import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
 import { generateId } from "./utils";
@@ -10,11 +10,7 @@ import { createBroadcastChannels } from "./worker-db/worker-common";
 type SyncedDbOptions = {
   dbPath: string;
   clearOnInit?: boolean;
-  // tabId?: string;
-  // clientId: string;
-  // logger?: Logger;
   crdtTables: MemoryDbCrdtTableConfig[];
-
   worker: Worker;
 };
 

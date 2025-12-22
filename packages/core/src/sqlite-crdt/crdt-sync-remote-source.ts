@@ -1,3 +1,4 @@
+import retryAsPromised from "retry-as-promised";
 import { ensureSingletonExecution } from "../utils";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage, GetEventsBatch } from "./crdt-storage";
@@ -67,10 +68,20 @@ export const createCrdtSyncRemoteSource = ({
     let hasMore = true;
     let afterSyncId = opts.afterSyncId;
     while (hasMore) {
-      const response = await pullEventsChunk({
-        ...opts,
-        afterSyncId,
-      });
+      const response = await retryAsPromised(
+        () =>
+          pullEventsChunk({
+            ...opts,
+            afterSyncId,
+          }),
+        {
+          max: 3,
+          backoffBase: 100,
+          backoffExponent: 1.5,
+          backoffJitter: 150,
+          timeout: 10000,
+        },
+      );
       hasMore = response.hasMore;
       afterSyncId = response.nextSyncId;
 
@@ -103,10 +114,20 @@ export const createCrdtSyncRemoteSource = ({
         break;
       }
 
-      await pushEvents({
-        nodeId,
-        events: eventsBatch.events,
-      });
+      await retryAsPromised(
+        () =>
+          pushEvents({
+            nodeId,
+            events: eventsBatch.events,
+          }),
+        {
+          max: 3,
+          backoffBase: 100,
+          backoffExponent: 1.5,
+          backoffJitter: 150,
+          timeout: 10000,
+        },
+      );
 
       pushSyncId.current = eventsBatch.nextSyncId;
       pendingEventsCount -= eventsBatch.events.length;

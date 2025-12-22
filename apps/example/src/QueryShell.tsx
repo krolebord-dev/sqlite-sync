@@ -34,7 +34,7 @@ function saveHistoryToStorage(history: string[]): void {
 }
 
 export function QueryShell() {
-  const db = useDb();
+  const { db, workerDb } = useDb();
   const [dbType, setDbType] = useState<DbType>("memoryDb");
   const [query, setQuery] = useState("");
   const [history, setHistory] = useState<string[]>(() => loadHistoryFromStorage());
@@ -112,10 +112,10 @@ export function QueryShell() {
       let rows: unknown[] = [];
 
       if (dbType === "memoryDb") {
-        const result = db.db.execute(query);
+        const result = db.execute(query);
         rows = result.rows;
       } else {
-        const result = await db.workerDb.execute({
+        const result = await workerDb.execute({
           sql: query,
           parameters: [],
         });
