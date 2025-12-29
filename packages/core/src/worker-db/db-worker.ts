@@ -4,15 +4,9 @@ import type { Logger } from "../logger";
 import { createSyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
 import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { createCrdtStorage, type GetEventsBatch, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
+import { type CrdtStorage, createCrdtStorage, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
-import {
-  type CrdtSyncRemoteSource,
-  createCrdtSyncRemoteSource,
-  type EventsPullRequest,
-  type EventsPushRequest,
-  type EventsPushResponse,
-} from "../sqlite-crdt/crdt-sync-remote-source";
+import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
@@ -55,7 +49,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     name: "sync-db-storage",
-    clearOnInit: opts.clearOnInit,
+    clearOnInit: config.clearOnInit,
   });
 
   await normalizePoolCapacity(pool);
@@ -83,8 +77,6 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     initialSyncId: getLatestSyncId(db),
   });
 
-  let crdtSyncRemoteSource: CrdtSyncRemoteSource | null = null;
-
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
     applyCrdtEventMutations: (event) =>
@@ -109,35 +101,26 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
   });
 
-  if (opts.createRemoteSource) {
-    const remoteSource = opts.createRemoteSource?.({
-      onEventsAvailable: () => {
-        crdtSyncRemoteSource?.pullEvents();
+  const postState = () => {
+    broadcastChannels.responses.postMessage({
+      notificationType: "state-changed",
+      state: {
+        remoteState: remoteSource.getState(),
       },
     });
+  };
 
-    const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "pull-sync-id"), 10);
-    const pullIdCounter = createSyncIdCounter({
-      initialSyncId: Number.isNaN(storedRemoteSyncId) ? -1 : storedRemoteSyncId,
-      saveToStorage: (syncId) => setMetaValue(db, "pull-sync-id", syncId.toString()),
-    });
+  const remoteSource = createRemoteSource({
+    db,
+    crdtStorage,
+    clientId: config.clientId,
+    remoteFactory: opts.createRemoteSource,
+  });
+  remoteSource.goOnline();
 
-    const storedPushSyncId = Number.parseInt(getMetaValue(db, "push-sync-id"), 10);
-    const pushIdCounter = createSyncIdCounter({
-      initialSyncId: Number.isNaN(storedPushSyncId) ? -1 : storedPushSyncId,
-      saveToStorage: (syncId) => setMetaValue(db, "push-sync-id", syncId.toString()),
-    });
-    crdtSyncRemoteSource = createCrdtSyncRemoteSource({
-      bufferSize: 50,
-      pullSyncId: pullIdCounter,
-      pushSyncId: pushIdCounter,
-      nodeId: config.clientId,
-      storage: crdtStorage,
-      pullEvents: remoteSource.pullEvents,
-      pushEvents: remoteSource.pushEvents,
-    });
-    await crdtSyncRemoteSource.pullEvents({ includeSelf: true });
-  }
+  remoteSource.addEventListener("state-changed", () => {
+    postState();
+  });
 
   const rpcTarget: WorkerRpc = {
     execute: (query) => db.execute(query),
@@ -150,11 +133,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         syncId: localSyncId.current,
       };
     },
-    postInitReady: () => {
-      broadcastChannels.responses.postMessage({
-        type: "init-ready",
-      });
-    },
+    postState,
     pushTabEvents: (request) => {
       crdtStorage.enqueueEvents(
         request.events.map((event) => ({
@@ -174,6 +153,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         limit: 100,
       });
     },
+    goOnline: () => remoteSource.goOnline(),
+    goOffline: () => remoteSource.goOffline(),
   };
 
   broadcastChannels.requests.onmessage = (event) => {
@@ -185,15 +166,56 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
     const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
     const data = method.apply(null, message.args as []);
-    const response: WorkerResponseMessage = {
-      type: "response",
-      requestId: message.requestId,
-      data,
-    };
-    broadcastChannels.responses.postMessage(response);
+
+    if (data instanceof Promise) {
+      data.then((result) => {
+        const response: WorkerResponseMessage = {
+          type: "response",
+          requestId: message.requestId,
+          data: result,
+        };
+        broadcastChannels.responses.postMessage(response);
+      });
+    } else {
+      const response: WorkerResponseMessage = {
+        type: "response",
+        requestId: message.requestId,
+        data,
+      };
+      broadcastChannels.responses.postMessage(response);
+    }
   };
 
-  rpcTarget.postInitReady();
+  rpcTarget.postState();
+}
+
+type InitRemoteOptions = {
+  db: SQLiteDbWrapper<WorkerDbSchema>;
+  clientId: string;
+  crdtStorage: CrdtStorage;
+  remoteFactory?: CreateRemoteSourceFactory;
+};
+
+function createRemoteSource({ db, clientId, crdtStorage, remoteFactory }: InitRemoteOptions) {
+  const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "pull-sync-id"), 10);
+  const pullIdCounter = createSyncIdCounter({
+    initialSyncId: Number.isNaN(storedRemoteSyncId) ? -1 : storedRemoteSyncId,
+    saveToStorage: (syncId) => setMetaValue(db, "pull-sync-id", syncId.toString()),
+  });
+
+  const storedPushSyncId = Number.parseInt(getMetaValue(db, "push-sync-id"), 10);
+  const pushIdCounter = createSyncIdCounter({
+    initialSyncId: Number.isNaN(storedPushSyncId) ? -1 : storedPushSyncId,
+    saveToStorage: (syncId) => setMetaValue(db, "push-sync-id", syncId.toString()),
+  });
+  return createCrdtSyncRemoteSource({
+    bufferSize: 50,
+    pullSyncId: pullIdCounter,
+    pushSyncId: pushIdCounter,
+    nodeId: clientId,
+    storage: crdtStorage,
+    remoteFactory,
+  });
 }
 
 async function getConfig(): Promise<WorkerConfig> {
@@ -234,12 +256,6 @@ type WorkerOptions = {
   migrations: Record<number, Migration>;
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
-  clearOnInit?: boolean;
-};
-
-type CreateRemoteSourceFactory = (opts: { onEventsAvailable: (newSyncId: number) => void }) => {
-  pullEvents: (request: EventsPullRequest) => Promise<GetEventsBatch>;
-  pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {

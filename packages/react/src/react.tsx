@@ -1,7 +1,7 @@
-import type { SyncedDb } from "@sqlite-sync/core";
+import type { SyncedDb, WorkerState } from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useMemo, useSyncExternalStore } from "react";
+import { createContext, use, useCallback, useMemo, useSyncExternalStore } from "react";
 
 type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, TResult, Database> = {
   parameters?: TParams;
@@ -46,5 +46,21 @@ export function createDbContext<Database>() {
     return { rows, refresh: liveQuery.refresh };
   };
 
-  return { useDb, DbProvider, useDbQuery };
+  const useDbState = (): WorkerState => {
+    const db = useDb();
+
+    const subscribeToDbState = useCallback(
+      (onChange: () => void) => {
+        db.workerDb.addEventListener("state-changed", onChange);
+        return () => {
+          db.workerDb.removeEventListener("state-changed", onChange);
+        };
+      },
+      [db],
+    );
+
+    return useSyncExternalStore<WorkerState>(subscribeToDbState, () => db.workerDb.getState());
+  };
+
+  return { useDb, DbProvider, useDbQuery, useDbState };
 }

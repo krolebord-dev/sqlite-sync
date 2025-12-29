@@ -1,11 +1,11 @@
 import { deserializeHLC, HLCCounter } from "./hlc";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
-import { createSQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
-import { generateId } from "./utils";
-import { createWorkerDbClient, initializeWorkerDb } from "./worker-db/db-worker-client";
-import { createBroadcastChannels } from "./worker-db/worker-common";
+import { generateId, type TypedEvent } from "./utils";
+import { createWorkerDbClient } from "./worker-db/db-worker-client";
+import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
 
 type SyncedDbOptions = {
   dbPath: string;
@@ -23,16 +23,13 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
 
   const broadcastChannels = createBroadcastChannels();
 
-  await initializeWorkerDb({
+  const workerClient = await createWorkerDbClient({
     worker: options.worker,
-    broadcastChannels,
     config: {
       clientId: generateId(),
       dbPath: options.dbPath,
+      clearOnInit: options.clearOnInit,
     },
-  });
-
-  const workerClient = createWorkerDbClient({
     broadcastChannels,
   });
 
@@ -55,22 +52,30 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
   const pushSyncId = createSyncIdCounter({
     initialSyncId: 0,
   });
-  const remoteSyncSource = createCrdtSyncRemoteSource({
+  const tabRemoteSource = createCrdtSyncRemoteSource({
     bufferSize: 100,
     pullSyncId,
     pushSyncId,
     storage: crdtStorage,
     nodeId: tabId,
-    pullEvents: (request) => workerClient.pullEvents(request),
-    pushEvents: (request) => workerClient.pushTabEvents(request),
-  });
+    remoteFactory: ({ onEventsAvailable }) => {
+      const onNewEventChunkApplied = (
+        event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "new-event-chunk-applied" }>>,
+      ) => {
+        onEventsAvailable(event.payload.newSyncId);
+      };
+      workerClient.addEventListener("new-event-chunk-applied", onNewEventChunkApplied);
 
-  workerClient.addEventListener("new-notification", (event) => {
-    const notification = event.payload;
-    if (notification.notificationType === "new-event-chunk-applied") {
-      remoteSyncSource.pullEvents();
-    }
+      return {
+        pullEvents: (request) => workerClient.pullEvents(request),
+        pushEvents: (request) => workerClient.pushTabEvents(request),
+        disconnect: () => {
+          workerClient.removeEventListener("new-event-chunk-applied", onNewEventChunkApplied);
+        },
+      };
+    },
   });
+  tabRemoteSource.goOnline();
 
   crdtStorage.addEventListener("event-applied", (event) => {
     if (event.payload.origin === "remote") {

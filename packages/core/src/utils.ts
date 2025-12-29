@@ -4,13 +4,29 @@ export type DeferredPromise<T> = {
   reject: (error: Error) => void;
 };
 
-export function createDeferredPromise<T>(): DeferredPromise<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (error: Error) => void;
+export function createDeferredPromise<T>(opts?: { timeout?: number; onTimeout?: () => void }): DeferredPromise<T> {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   const promise = new Promise<T>((_resolve, _reject) => {
-    resolve = _resolve;
-    reject = _reject;
+    resolve = (value) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      _resolve(value);
+    };
+    reject = (reason) => {
+      if (timeoutId) clearTimeout(timeoutId);
+      _reject(reason);
+    };
+
+    if (opts?.timeout) {
+      timeoutId = setTimeout(() => {
+        _reject(new Error(`Promise timed out after ${opts.timeout}ms`));
+        tryCatch(() => opts?.onTimeout?.());
+      }, opts.timeout);
+    }
   });
+
   return { promise, resolve, reject };
 }
 
@@ -20,28 +36,32 @@ export const generateId = () => {
 
 export type DistributiveOmit<T, K extends keyof T> = T extends any ? Omit<T, K> : never;
 
-export function ensureSingletonExecution(fn: () => Promise<void>) {
-  let isExecuting = false;
+export function ensureSingletonExecution<T>(
+  fn: () => Promise<T>,
+  opts: { queueReExecution?: boolean } = { queueReExecution: true },
+) {
+  let executingPromise: Promise<T> | null = null;
   let shouldReExecute = false;
 
   const wrappedFn = () => {
-    if (isExecuting) {
+    if (executingPromise) {
       shouldReExecute = true;
-      return;
+      return executingPromise;
     }
 
-    isExecuting = true;
-    fn().finally(() => {
-      isExecuting = false;
+    executingPromise = fn().finally(() => {
+      executingPromise = null;
 
-      if (shouldReExecute) {
+      if (shouldReExecute && opts?.queueReExecution) {
         shouldReExecute = false;
         wrappedFn();
       }
     });
+    return executingPromise;
   };
 
-  wrappedFn.isExecuting = () => isExecuting;
+  wrappedFn.promise = () => executingPromise;
+  wrappedFn.isExecuting = () => !!executingPromise;
 
   return wrappedFn;
 }
@@ -134,7 +154,13 @@ export class TypedEvent<T = unknown> extends Event {
   }
 }
 
-export const createTypedEventTarget = <T extends Record<string, unknown>>() => {
+export type TypedEventTarget<T extends Record<string, unknown>> = {
+  addEventListener: <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => void;
+  removeEventListener: <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => void;
+  dispatchEvent: <K extends keyof T & string>(type: K, payload: T[K]) => void;
+};
+
+export const createTypedEventTarget = <T extends Record<string, unknown>>(): TypedEventTarget<T> => {
   const eventTarget = new EventTarget();
 
   const addEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
@@ -156,24 +182,44 @@ export const createTypedEventTarget = <T extends Record<string, unknown>>() => {
   };
 };
 
-export function jsonSafeParse<T>(json: string):
+type TryCatchResult<T> =
   | {
-      status: "ok";
+      success: true;
       data: T;
     }
   | {
-      status: "error";
+      success: false;
       error: unknown;
-    } {
+    };
+
+export function tryCatch<T>(fn: () => T): TryCatchResult<T> {
   try {
     return {
-      status: "ok",
-      data: JSON.parse(json),
+      success: true,
+      data: fn(),
     };
   } catch (error) {
     return {
-      status: "error",
+      success: false,
       error,
     };
   }
+}
+
+export async function tryCatchAsync<T>(fn: () => Promise<T>): Promise<TryCatchResult<T>> {
+  try {
+    return {
+      success: true,
+      data: await fn(),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error,
+    };
+  }
+}
+
+export function jsonSafeParse<T>(json: string) {
+  return tryCatch(() => JSON.parse(json) as T);
 }

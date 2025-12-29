@@ -82,17 +82,13 @@ export {
   TypedEvent,
 } from "./utils";
 // Worker DB Client
-export {
-  createWorkerDbClient,
-  initializeWorkerDb,
-} from "./worker-db/db-worker-client";
+export { createWorkerDbClient } from "./worker-db/db-worker-client";
 export {
   type AsyncRpc,
   broadcastChannelNames,
   createBroadcastChannels,
   type GetSnapshotResponse,
   isWorkerInitMessage,
-  isWorkerInitResponse,
   isWorkerNotificationMessage,
   isWorkerRequestMessage,
   isWorkerResponseMessage,
@@ -101,10 +97,10 @@ export {
   type WorkerBroadcastChannels,
   type WorkerConfig,
   type WorkerInitMessage,
-  type WorkerInitResponse,
   type WorkerNotificationMessage,
   type WorkerRequestMessage,
   type WorkerRequestMethod,
   type WorkerResponseMessage,
   type WorkerRpc,
+  type WorkerState,
 } from "./worker-db/worker-common";

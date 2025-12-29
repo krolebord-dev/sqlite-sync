@@ -1,101 +1,115 @@
-import { startDbWorker } from "@sqlite-sync/core/worker";
+import {
+  createDeferredPromise,
+  type DeferredPromise,
+  type EventsPullRequest,
+  type EventsPushRequest,
+  type EventsPushResponse,
+  jsonSafeParse,
+} from "@sqlite-sync/core";
+import type { SyncServerMessage, SyncServerRequest } from "@sqlite-sync/core/server";
+import { type GetEventsBatch, startDbWorker } from "@sqlite-sync/core/worker";
+import { PartySocket } from "partysocket";
 import { seedMigration } from "./seed-migration";
 
 await startDbWorker({
   migrations: {
     1: seedMigration,
   },
-  // createRemoteSource: ({ onEventsAvailable }) => {
-  //   const socket = new PartySocket({
-  //     host: "localhost:8787",
-  //     party: "event-log-server",
-  //     room: "main",
-  //   });
+  createRemoteSource: async ({ onEventsAvailable }) => {
+    const socket = new PartySocket({
+      host: "localhost:8787",
+      party: "event-log-server",
+      room: "main",
+    });
 
-  //   const requestsMap = new Map<string, DeferredPromise<unknown>>();
+    const openPromise = createDeferredPromise<void>({
+      timeout: 5000,
+      onTimeout: () => {
+        socket.close();
+      },
+    });
+    socket.addEventListener("open", () => {
+      openPromise.resolve(undefined);
+    });
+    await openPromise.promise;
 
-  //   const pushEvents = async (
-  //     request: EventsPushRequest
-  //   ): Promise<EventsPushResponse> => {
-  //     // TODO Add timeout
-  //     const requestId = crypto.randomUUID();
-  //     const promise = createDeferredPromise<EventsPushResponse>();
-  //     requestsMap.set(requestId, promise as DeferredPromise<unknown>);
+    const requestsMap = new Map<string, DeferredPromise<unknown>>();
 
-  //     const wsRequest: SyncServerRequest = {
-  //       type: "push-events",
-  //       requestId,
-  //       nodeId: request.nodeId,
-  //       events: request.events,
-  //     };
-  //     socket.send(JSON.stringify(wsRequest));
+    const pushEvents = async (request: EventsPushRequest): Promise<EventsPushResponse> => {
+      const requestId = crypto.randomUUID();
+      const promise = createDeferredPromise<EventsPushResponse>({ timeout: 5000 });
+      requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
-  //     return promise.promise;
-  //   };
+      const wsRequest: SyncServerRequest = {
+        type: "push-events",
+        requestId,
+        nodeId: request.nodeId,
+        events: request.events,
+      };
+      socket.send(JSON.stringify(wsRequest));
 
-  //   const pullEvents = async (
-  //     request: EventsPullRequest
-  //   ): Promise<EventsPullResponse> => {
-  //     // TODO Add timeout
-  //     const requestId = crypto.randomUUID();
-  //     const promise = createDeferredPromise<EventsPullResponse>();
-  //     requestsMap.set(requestId, promise as DeferredPromise<unknown>);
+      return promise.promise;
+    };
 
-  //     const wsRequest: SyncServerRequest = {
-  //       type: "pull-events",
-  //       requestId,
-  //       afterSyncId: request.afterSyncId,
-  //       excludeNodeId: request.excludeNodeId,
-  //     };
-  //     socket.send(JSON.stringify(wsRequest));
+    const pullEvents = async (request: EventsPullRequest): Promise<GetEventsBatch> => {
+      const requestId = crypto.randomUUID();
+      const promise = createDeferredPromise<GetEventsBatch>({ timeout: 2000 });
+      requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
-  //     return promise.promise;
-  //   };
+      const wsRequest: SyncServerRequest = {
+        type: "pull-events",
+        requestId,
+        afterSyncId: request.afterSyncId,
+        excludeNodeId: request.excludeNodeId,
+      };
+      socket.send(JSON.stringify(wsRequest));
 
-  //   socket.onmessage = (event) => {
-  //     const result = jsonSafeParse<SyncServerMessage>(event.data);
+      return promise.promise;
+    };
 
-  //     if (
-  //       result.status !== "ok" ||
-  //       !("type" in result.data) ||
-  //       !result.data.type
-  //     ) {
-  //       return;
-  //     }
+    socket.onmessage = (event) => {
+      const result = jsonSafeParse<SyncServerMessage>(event.data);
 
-  //     const message = result.data;
+      if (!result.success || !("type" in result.data) || !result.data.type) {
+        return;
+      }
 
-  //     switch (message.type) {
-  //       case "events-pull-response": {
-  //         const promise = requestsMap.get(message.requestId);
-  //         if (!promise) {
-  //           return;
-  //         }
-  //         promise.resolve(message.data);
-  //         requestsMap.delete(message.requestId);
-  //         break;
-  //       }
-  //       case "events-push-response": {
-  //         const promise = requestsMap.get(message.requestId);
-  //         if (!promise) {
-  //           return;
-  //         }
-  //         promise.resolve(message.data);
-  //         requestsMap.delete(message.requestId);
-  //         break;
-  //       }
-  //       case "events-applied":
-  //         onEventsAvailable(message.newSyncId);
-  //         break;
-  //       default:
-  //         message satisfies never;
-  //         return;
-  //     }
-  //   };
+      const message = result.data;
 
-  //   return {
-  //     pushEvents,
-  //     pullEvents,
-  //   };
-  // },
+      switch (message.type) {
+        case "events-pull-response": {
+          const promise = requestsMap.get(message.requestId);
+          if (!promise) {
+            return;
+          }
+          promise.resolve(message.data);
+          requestsMap.delete(message.requestId);
+          break;
+        }
+        case "events-push-response": {
+          const promise = requestsMap.get(message.requestId);
+          if (!promise) {
+            return;
+          }
+          promise.resolve(message.data);
+          requestsMap.delete(message.requestId);
+          break;
+        }
+        case "events-applied":
+          onEventsAvailable(message.newSyncId);
+          break;
+        default:
+          message satisfies never;
+          return;
+      }
+    };
+
+    return {
+      pushEvents,
+      pullEvents,
+      disconnect: () => {
+        socket.close();
+      },
+    };
+  },
 });

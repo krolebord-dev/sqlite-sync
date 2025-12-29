@@ -1,6 +1,6 @@
 import { z } from "zod";
-import type { GetEventsBatch } from "../sqlite-crdt/crdt-storage";
 import type { EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
+import type { EventsPullResponse } from "../worker-db/worker-common";
 
 export const syncServerRequestSchema = z.discriminatedUnion("type", [
   z.object({
@@ -29,7 +29,7 @@ export type SyncServerMessage =
   | {
       type: "events-pull-response";
       requestId: string;
-      data: GetEventsBatch;
+      data: EventsPullResponse;
     }
   | {
       type: "events-push-response";

@@ -3,7 +3,7 @@ import { createDbContext } from "@sqlite-sync/react";
 import { logger } from "./logger";
 import type { Database } from "./seed";
 
-export const { useDb, DbProvider, useDbQuery } = createDbContext<{
+export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext<{
   _todo: {
     id: string;
     title: string;

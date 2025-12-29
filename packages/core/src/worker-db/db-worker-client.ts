@@ -1,4 +1,10 @@
-import { createDeferredPromise, createTypedEventTarget, type DeferredPromise } from "../utils";
+import {
+  createDeferredPromise,
+  createTypedEventTarget,
+  type DeferredPromise,
+  type TypedEvent,
+  type TypedEventTarget,
+} from "../utils";
 import type {
   AsyncRpc,
   WorkerBroadcastChannels,
@@ -9,19 +15,30 @@ import type {
   WorkerRequestMethod,
   WorkerResponseMessage,
   WorkerRpc,
+  WorkerState,
 } from "./worker-common";
-import { isWorkerInitResponse, isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
+import { isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
 
-export const createWorkerDbClient = ({ broadcastChannels }: { broadcastChannels: WorkerBroadcastChannels }) => {
-  const eventTarget = createTypedEventTarget<{
-    "new-notification": WorkerNotificationMessage;
-  }>();
+type NotificationEvents = {
+  [K in WorkerNotificationMessage["notificationType"]]: Extract<WorkerNotificationMessage, { notificationType: K }>;
+};
+
+export const createWorkerDbClient = async ({
+  broadcastChannels,
+  worker,
+  config,
+}: {
+  broadcastChannels: WorkerBroadcastChannels;
+  worker: Worker;
+  config: WorkerConfig;
+}) => {
+  const eventTarget = createTypedEventTarget<NotificationEvents>();
   const workerRequestsMap = new Map<string, DeferredPromise<unknown>>();
 
   const queryWorker = <TMethod extends WorkerRequestMethod>(
     method: TMethod,
     args: Parameters<WorkerRpc[TMethod]>,
-  ): Promise<ReturnType<WorkerRpc[TMethod]>> => {
+  ): Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>> => {
     // TODO Add timeout
     const requestId = crypto.randomUUID();
     const promise = createDeferredPromise<unknown>();
@@ -36,7 +53,7 @@ export const createWorkerDbClient = ({ broadcastChannels }: { broadcastChannels:
 
     broadcastChannels.requests.postMessage(request);
 
-    return promise.promise as Promise<ReturnType<WorkerRpc[TMethod]>>;
+    return promise.promise as Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>>;
   };
 
   const handleWorkerResponse = (message: WorkerResponseMessage) => {
@@ -55,7 +72,7 @@ export const createWorkerDbClient = ({ broadcastChannels }: { broadcastChannels:
     if (isWorkerResponseMessage(message)) {
       handleWorkerResponse(message);
     } else if (isWorkerNotificationMessage(message)) {
-      eventTarget.dispatchEvent("new-notification", message);
+      eventTarget.dispatchEvent(message.notificationType, message);
     }
   };
 
@@ -64,47 +81,48 @@ export const createWorkerDbClient = ({ broadcastChannels }: { broadcastChannels:
     getSnapshot: () => queryWorker("getSnapshot", []),
     pushTabEvents: (request) => queryWorker("pushTabEvents", [request]),
     pullEvents: (params) => queryWorker("pullEvents", [params]),
-    postInitReady: () => queryWorker("postInitReady", []),
+    postState: () => queryWorker("postState", []),
+    goOnline: () => queryWorker("goOnline", []),
+    goOffline: () => queryWorker("goOffline", []),
   };
+
+  const statePromise = awaitWorkerState(eventTarget);
+  postWorkerConfig(worker, config);
+  rpc.postState();
+
+  let workerState = await statePromise;
+
+  eventTarget.addEventListener("state-changed", (event) => {
+    workerState = event.payload.state;
+  });
 
   return {
     ...rpc,
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
+    getState: () => workerState,
   };
 };
 
-export function initializeWorkerDb({
-  worker,
-  broadcastChannels,
-  config,
-}: {
-  worker: Worker;
-  broadcastChannels: WorkerBroadcastChannels;
-  config: WorkerConfig;
-}) {
-  const promise = createDeferredPromise<void>();
-  broadcastChannels.responses.onmessage = (event) => {
-    const message = event.data;
-    if (!isWorkerInitResponse(message)) {
-      return;
-    }
-    promise.resolve();
-    worker.onmessage = null;
+function awaitWorkerState(eventTarget: TypedEventTarget<NotificationEvents>) {
+  const promise = createDeferredPromise<WorkerState>();
+
+  const onStateChanged = (
+    event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "state-changed" }>>,
+  ) => {
+    promise.resolve(event.payload.state);
+    eventTarget.removeEventListener("state-changed", onStateChanged);
   };
 
+  eventTarget.addEventListener("state-changed", onStateChanged);
+
+  return promise.promise;
+}
+
+function postWorkerConfig(worker: Worker, config: WorkerConfig) {
   const configMessage: WorkerInitMessage = {
     type: "init",
     config,
   };
   worker.postMessage(configMessage);
-
-  broadcastChannels.requests.postMessage({
-    type: "request",
-    requestId: crypto.randomUUID(),
-    method: "postInitReady",
-    args: [],
-  });
-
-  return promise.promise;
 }

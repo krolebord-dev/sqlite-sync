@@ -52,7 +52,7 @@ type EventLogDbSchema = {
   crdt_events: PersistedCrdtEvent;
 };
 
-const batchSize = 50;
+const batchSize = 100;
 
 export class EventLogServer extends Server<Env> {
   static options = {
@@ -114,7 +114,7 @@ export class EventLogServer extends Server<Env> {
   onMessage(connection: Connection, message: string) {
     const requestRaw = jsonSafeParse<SyncServerRequest>(message);
 
-    if (requestRaw.status !== "ok") {
+    if (!requestRaw.success) {
       console.log("Invalid request", requestRaw.error);
       return;
     }
@@ -152,7 +152,17 @@ export class EventLogServer extends Server<Env> {
     const eventsPullMessage: SyncServerMessage = {
       type: "events-pull-response",
       requestId: request.requestId,
-      data: batch,
+      data: {
+        hasMore: batch.hasMore,
+        nextSyncId: batch.nextSyncId,
+        events: batch.events.map((x) => ({
+          timestamp: x.timestamp,
+          type: x.type,
+          dataset: x.dataset,
+          item_id: x.item_id,
+          payload: x.payload,
+        })),
+      },
     };
 
     connection.send(JSON.stringify(eventsPullMessage));

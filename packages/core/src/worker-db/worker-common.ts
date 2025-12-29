@@ -1,13 +1,22 @@
-import type { GetEventsBatch } from "../sqlite-crdt/crdt-storage";
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
+import type { CrdtEventType } from "../sqlite-crdt/crdt-table-schema";
 import type { ExecuteParams, ExecuteResult } from "../sqlite-db-wrapper";
 import { TypedBroadcastChannel } from "../utils";
 
 export const syncDbWorkerLockName = "sync-db-worker-lock";
 
-export type WorkerNotificationMessage = {
-  notificationType: "new-event-chunk-applied";
-  newSyncId: number;
+export type WorkerNotificationMessage =
+  | {
+      notificationType: "new-event-chunk-applied";
+      newSyncId: number;
+    }
+  | {
+      notificationType: "state-changed";
+      state: WorkerState;
+    };
+
+export type WorkerState = {
+  remoteState: "online" | "offline" | "pending";
 };
 
 export type PushTabEventsResponse = {
@@ -20,12 +29,26 @@ export type GetSnapshotResponse = {
   syncId: number;
 };
 
+export type EventsPullResponse = {
+  events: {
+    type: CrdtEventType;
+    timestamp: string;
+    dataset: string;
+    item_id: string;
+    payload: string;
+  }[];
+  hasMore: boolean;
+  nextSyncId: number;
+};
+
 export interface WorkerRpc {
   getSnapshot: () => GetSnapshotResponse;
   pushTabEvents: (request: EventsPushRequest) => EventsPushResponse;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
-  pullEvents: (params: EventsPullRequest) => GetEventsBatch;
-  postInitReady: () => void;
+  pullEvents: (params: EventsPullRequest) => EventsPullResponse;
+  postState: () => void;
+  goOnline: () => Promise<void>;
+  goOffline: () => void;
 }
 
 export type WorkerRequestMethod = keyof WorkerRpc;
@@ -44,9 +67,7 @@ export type WorkerResponseMessage<TMethod extends WorkerRequestMethod = WorkerRe
 };
 
 export type AsyncRpc<T> = {
-  [K in keyof T]: T[K] extends (...args: infer U) => infer V
-    ? (...args: U) => V extends Promise<infer W> ? Promise<W> : Promise<V>
-    : never;
+  [K in keyof T]: T[K] extends (...args: infer U) => infer V ? (...args: U) => Promise<Awaited<V>> : never;
 };
 
 export const broadcastChannelNames = {
@@ -56,7 +77,7 @@ export const broadcastChannelNames = {
 
 export type WorkerBroadcastChannels = {
   requests: TypedBroadcastChannel<WorkerRequestMessage>;
-  responses: TypedBroadcastChannel<WorkerResponseMessage | WorkerNotificationMessage | WorkerInitResponse>;
+  responses: TypedBroadcastChannel<WorkerResponseMessage | WorkerNotificationMessage>;
 };
 
 export const createBroadcastChannels = (): WorkerBroadcastChannels => {
@@ -69,6 +90,7 @@ export const createBroadcastChannels = (): WorkerBroadcastChannels => {
 export type WorkerConfig = {
   dbPath: string;
   clientId: string;
+  clearOnInit?: boolean;
 };
 
 export type WorkerInitMessage = {
@@ -78,14 +100,6 @@ export type WorkerInitMessage = {
 
 export function isWorkerInitMessage(message: unknown): message is WorkerInitMessage {
   return typeof message === "object" && message !== null && "type" in message && message.type === "init";
-}
-
-export type WorkerInitResponse = {
-  type: "init-ready";
-};
-
-export function isWorkerInitResponse(message: unknown): message is WorkerInitResponse {
-  return typeof message === "object" && message !== null && "type" in message && message.type === "init-ready";
 }
 
 export function isWorkerRequestMessage(message: unknown): message is WorkerRequestMessage {

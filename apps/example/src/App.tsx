@@ -1,15 +1,10 @@
 import { generateId } from "@sqlite-sync/core";
 import { useEffect, useState } from "react";
-import { useDb, useDbQuery } from "./db";
+import { useDb, useDbQuery, useDbState } from "./db";
 import { QueryShell } from "./QueryShell";
 
 export function App() {
   const { db } = useDb();
-  const [isTabSyncEnabled, setIsTabSyncEnabled] = useState(true);
-  const toggleTabSync = () => {
-    setIsTabSyncEnabled(!isTabSyncEnabled);
-    // db.tabSyncEnabled = !isTabSyncEnabled;
-  };
 
   const [newTodoTitle, setNewTodoTitle] = useState("");
   const [randomCount, setRandomCount] = useState(10);
@@ -87,16 +82,11 @@ export function App() {
 
   return (
     <div className="mx-auto max-w-2xl p-8">
-      <h1 className="mb-4 font-bold text-3xl">SQLite Sync Todo Demo</h1>
+      <a href="/">
+        <h1 className="mb-4 font-bold text-3xl">SQLite Sync Todo Demo</h1>
+      </a>
       <p className="mb-6 text-gray-600">A todo list powered by SQLite Sync with live queries and optimistic updates.</p>
-      <button
-        type="button"
-        className="rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
-        onClick={toggleTabSync}
-      >
-        {isTabSyncEnabled ? "Disable Tab Sync" : "Enable Tab Sync"}
-      </button>
-
+      <OnlineStatusButton />
       <BlockingIndicator />
 
       <QueryShell />
@@ -252,6 +242,36 @@ function TodoItem({
         </>
       )}
     </div>
+  );
+}
+
+function OnlineStatusButton() {
+  const { workerDb } = useDb();
+  const dbState = useDbState();
+
+  const toggleOnlineStatus = () => {
+    if (dbState.remoteState === "online") {
+      workerDb.goOffline();
+    } else {
+      workerDb.goOnline();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`rounded px-4 py-2 text-white ${
+        dbState.remoteState === "online"
+          ? "bg-blue-500 hover:bg-blue-600"
+          : dbState.remoteState === "pending"
+            ? "bg-yellow-500 hover:bg-yellow-600"
+            : "bg-red-500 hover:bg-red-600"
+      }`}
+      disabled={dbState.remoteState === "pending"}
+      onClick={toggleOnlineStatus}
+    >
+      {dbState.remoteState}
+    </button>
   );
 }
 
