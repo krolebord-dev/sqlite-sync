@@ -53,7 +53,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
     initialSyncId: 0,
   });
   const tabRemoteSource = createCrdtSyncRemoteSource({
-    bufferSize: 100,
+    bufferSize: 500,
     pullSyncId,
     pushSyncId,
     storage: crdtStorage,

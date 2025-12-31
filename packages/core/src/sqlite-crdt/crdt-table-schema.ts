@@ -28,24 +28,10 @@ export type CrdtUpdateLogItem = {
 
 export type CrdtUpdateLogPayload = Record<string, string>;
 
-export type MetaItem = {
-  key: string;
-  value: string;
-};
-
 export const crdtSchema = {
-  metaTable: createMetaTableQuery,
   persistedEventsTable: createPersistedEventsTable,
   crdtUpdateLogTable: createCrdtUpdateLogTableQuery,
 };
-
-function createMetaTableQuery(schema: SchemaModule, tableName: string) {
-  return schema
-    .createTable(tableName)
-    .ifNotExists()
-    .addColumn("key", "text", (col) => col.notNull().primaryKey())
-    .addColumn("value", "text", (col) => col.notNull());
-}
 
 function createPersistedEventsTable(schema: SchemaModule, tableName: string) {
   return schema

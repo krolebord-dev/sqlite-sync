@@ -11,6 +11,7 @@ import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-ta
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { createSQLiteKvStore } from "../sqlite-kv-store";
 import { createSQLiteKysely } from "../sqlite-kysely";
 import { createDeferredPromise } from "../utils";
 import {
@@ -63,8 +64,15 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   db.execute("PRAGMA locking_mode=exclusive", { loggerLevel: "system" });
   db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
+  db.execute("PRAGMA synchronous=NORMAL", { loggerLevel: "system" });
+
   db.execute(`ATTACH DATABASE '${config.dbPath}-worker' as worker`, { loggerLevel: "system" });
+  db.execute("PRAGMA worker.synchronous=NORMAL", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.journal_mode=WAL", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.locking_mode=exclusive", { loggerLevel: "system" });
+
   applyWorkerDbSchema(db);
+
   const kysely = createSQLiteKysely<WorkerDbSchema>(db);
   const migrator = createSyncDbMigrator({
     db: kysely as Kysely<unknown>,
@@ -91,7 +99,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   createCrdtSyncProducer({
-    bufferSize: 100,
+    bufferSize: 500,
     storage: crdtStorage,
     broadcastEvents: (chunk) => {
       broadcastChannels.responses.postMessage({
@@ -197,16 +205,19 @@ type InitRemoteOptions = {
 };
 
 function createRemoteSource({ db, clientId, crdtStorage, remoteFactory }: InitRemoteOptions) {
-  const storedRemoteSyncId = Number.parseInt(getMetaValue(db, "pull-sync-id"), 10);
-  const pullIdCounter = createSyncIdCounter({
-    initialSyncId: Number.isNaN(storedRemoteSyncId) ? -1 : storedRemoteSyncId,
-    saveToStorage: (syncId) => setMetaValue(db, "pull-sync-id", syncId.toString()),
+  const kvStore = createSQLiteKvStore({
+    db,
+    metaTableName: "worker.meta",
   });
 
-  const storedPushSyncId = Number.parseInt(getMetaValue(db, "push-sync-id"), 10);
+  const pullIdCounter = createSyncIdCounter({
+    initialSyncId: kvStore.getNumberOrDefault("pull-sync-id", -1),
+    saveToStorage: (syncId) => kvStore.set("pull-sync-id", syncId.toString()),
+  });
+
   const pushIdCounter = createSyncIdCounter({
-    initialSyncId: Number.isNaN(storedPushSyncId) ? -1 : storedPushSyncId,
-    saveToStorage: (syncId) => setMetaValue(db, "push-sync-id", syncId.toString()),
+    initialSyncId: kvStore.getNumberOrDefault("push-sync-id", -1),
+    saveToStorage: (syncId) => kvStore.set("push-sync-id", syncId.toString()),
   });
   return createCrdtSyncRemoteSource({
     bufferSize: 50,
@@ -310,29 +321,6 @@ function updateEventStatus(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, 
         .updateTable("worker.crdt_events")
         .set({ status: params("status") })
         .where("sync_id", "=", params("syncId")),
-    { loggerLevel: "system" },
-  );
-}
-
-function getMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string) {
-  const [result] = db.executePrepared(
-    "get-meta-value",
-    { key },
-    (db, params) => db.selectFrom("worker.meta").where("key", "=", params("key")).select("value"),
-    { loggerLevel: "system" },
-  );
-  return result?.value ?? null;
-}
-
-function setMetaValue(db: SQLiteDbWrapper<WorkerDbSchema>, key: string, value: string) {
-  db.executePrepared(
-    "set-meta-value",
-    { key, value },
-    (db, params) =>
-      db
-        .insertInto("worker.meta")
-        .values({ key: params("key"), value: params("value") })
-        .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
     { loggerLevel: "system" },
   );
 }

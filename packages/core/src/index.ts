@@ -80,6 +80,8 @@ export {
   orderBy,
   TypedBroadcastChannel,
   TypedEvent,
+  tryCatch,
+  tryCatchAsync,
 } from "./utils";
 // Worker DB Client
 export { createWorkerDbClient } from "./worker-db/db-worker-client";

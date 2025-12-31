@@ -1,10 +1,6 @@
-import {
-  type CrdtUpdateLogItem,
-  crdtSchema,
-  type MetaItem,
-  type PersistedCrdtEvent,
-} from "../sqlite-crdt/crdt-table-schema";
+import { type CrdtUpdateLogItem, crdtSchema, type PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { createMetaTableQuery, type MetaItem } from "../sqlite-kv-store";
 
 export type WorkerDbSchema = {
   crdt_update_log: CrdtUpdateLogItem;
@@ -14,7 +10,7 @@ export type WorkerDbSchema = {
 
 export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
   db.executeTransaction((db) => {
-    db.executeKysely((kysely) => crdtSchema.metaTable(kysely.schema, "worker.meta"), { loggerLevel: "system" });
+    db.executeKysely((kysely) => createMetaTableQuery(kysely.schema, "worker.meta"), { loggerLevel: "system" });
     db.executeKysely((kysely) => crdtSchema.crdtUpdateLogTable(kysely.schema, "crdt_update_log"), {
       loggerLevel: "system",
     });
