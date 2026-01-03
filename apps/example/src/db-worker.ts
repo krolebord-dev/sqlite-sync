@@ -9,12 +9,10 @@ import {
 import type { SyncServerMessage, SyncServerRequest } from "@sqlite-sync/core/server";
 import { type GetEventsBatch, startDbWorker } from "@sqlite-sync/core/worker";
 import { PartySocket } from "partysocket";
-import { seedMigration } from "./seed-migration";
+import { migrations } from "./migrations";
 
 await startDbWorker({
-  migrations: {
-    1: seedMigration,
-  },
+  migrations,
   createRemoteSource: async ({ onEventsAvailable }) => {
     const socket = new PartySocket({
       host: "localhost:8787",

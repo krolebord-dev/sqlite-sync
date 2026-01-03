@@ -5,11 +5,12 @@ import { applyCrdtEventMutations, type PendingCrdtEvent } from "./apply-crdt-eve
 
 export type CrdtEventType = "item-created" | "item-updated";
 
-export type CrdtEventStatus = "pending" | "applied" | "failed";
+export type CrdtEventStatus = "pending" | "applied" | "failed" | "skipped";
 
 export type CrdtEventOrigin = "remote" | (string & {});
 
 export type PersistedCrdtEvent = {
+  schema_version: number;
   sync_id: number;
   status: CrdtEventStatus;
   type: CrdtEventType;
@@ -38,6 +39,7 @@ function createPersistedEventsTable(schema: SchemaModule, tableName: string) {
     .createTable(tableName)
     .ifNotExists()
     .addColumn("sync_id", "integer", (col) => col.notNull().primaryKey())
+    .addColumn("schema_version", "integer", (col) => col.notNull())
     .addColumn("status", "text", (col) => col.notNull())
     .addColumn("type", "text", (col) => col.notNull())
     .addColumn("timestamp", "text", (col) => col.notNull())

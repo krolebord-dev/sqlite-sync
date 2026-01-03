@@ -1,6 +1,7 @@
 import { deserializeHLC, HLCCounter } from "./hlc";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
+import type { SyncDbMigrator } from "./migrations/migrator";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
 import { generateId, type TypedEvent } from "./utils";
@@ -39,7 +40,22 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
   const reactiveDb = await createSQLiteReactiveDb<Database>({
     snapshot: workerClientSnapshot.file,
   });
+
+  const memoryDbMigrator: SyncDbMigrator = {
+    currentSchemaVersion: workerClientSnapshot.schemaVersion,
+    latestSchemaVersion: workerClientSnapshot.schemaVersion,
+    migrateDbToLatest: () => {
+      throw new Error("Memory DB migrations are not implemented");
+    },
+    migrateEvent: (event, targetVersion) => {
+      if (event.schema_version === targetVersion) {
+        return event;
+      }
+      throw new Error("Memory DB migrations are not implemented");
+    },
+  };
   const { crdtStorage } = await createMemoryDb({
+    migrator: memoryDbMigrator,
     reactiveDb: reactiveDb,
     hlcCounter,
     tabId,
@@ -58,6 +74,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
     pushSyncId,
     storage: crdtStorage,
     nodeId: tabId,
+    migrator: memoryDbMigrator,
     remoteFactory: ({ onEventsAvailable }) => {
       const onNewEventChunkApplied = (
         event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "new-event-chunk-applied" }>>,

@@ -1,9 +1,10 @@
 import type { Kysely } from "kysely";
 import { type HLCCounter, serializeHLC } from "../hlc";
+import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
 import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { createCrdtStorage, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
-import { type CrdtEventStatus, type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
+import { createCrdtStorage, type EventUpdate, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
+import { type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { makeCrdtTable } from "../sqlite-crdt/make-crdt-table";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
@@ -17,6 +18,7 @@ export type MemoryDbCrdtTableConfig = {
 };
 
 type MemoryDbOptions<Database> = {
+  migrator: SyncDbMigrator;
   reactiveDb: SQLiteReactiveDb<Database>;
   hlcCounter: HLCCounter;
   tabId: string;
@@ -24,6 +26,7 @@ type MemoryDbOptions<Database> = {
 };
 
 export async function createMemoryDb<Database>({
+  migrator,
   reactiveDb: _reactiveDb,
   hlcCounter,
   tabId,
@@ -54,6 +57,7 @@ export async function createMemoryDb<Database>({
     onEventApplied: (event) => {
       const persistedEvent: PersistedCrdtEvent = {
         ...event,
+        schema_version: migrator.currentSchemaVersion,
         origin: tabId,
         sync_id: ++localSyncId.current,
         status: "applied" as const,
@@ -87,13 +91,14 @@ export async function createMemoryDb<Database>({
     syncId: localSyncId,
     persistEvents: (events) => persistEvents(db, events),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
+    migrator,
     applyCrdtEventMutations: (event) =>
       applyCrdtEventMutations({
         db,
         event,
         updateLogTableName: "crdt_update_log",
       }),
-    updateEventStatus: (syncId, status) => updateEventStatus(db, syncId, status),
+    updateEvent: (syncId, update) => updateEvent(db, syncId, update),
   });
 
   return {
@@ -107,6 +112,7 @@ function enqueueCrdtEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedC
     event,
     (db, params) =>
       (db as unknown as Kysely<MemoryDbSchema>).insertInto("persisted_crdt_events").values({
+        schema_version: params("schema_version"),
         status: params("status"),
         sync_id: params("sync_id"),
         type: params("type"),
@@ -141,14 +147,21 @@ function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOpti
   ).rows;
 }
 
-function updateEventStatus(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, status: CrdtEventStatus) {
+function updateEvent(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, update: EventUpdate) {
   db.executePrepared(
-    "update-crdt-event-status",
-    { syncId, status },
+    "update-crdt-event",
+    { syncId, ...update },
     (db, params) =>
       db
         .updateTable("persisted_crdt_events")
-        .set({ status: params("status") })
+        .set({
+          status: params("status"),
+          schema_version: params("schema_version"),
+          type: params("type"),
+          dataset: params("dataset"),
+          item_id: params("item_id"),
+          payload: params("payload"),
+        })
         .where("sync_id", "=", params("syncId")),
     { loggerLevel: "system" },
   );

@@ -27,10 +27,12 @@ export type PushTabEventsResponse = {
 export type GetSnapshotResponse = {
   file: Uint8Array<ArrayBufferLike>;
   syncId: number;
+  schemaVersion: number;
 };
 
 export type EventsPullResponse = {
   events: {
+    schema_version: number;
     type: CrdtEventType;
     timestamp: string;
     dataset: string;

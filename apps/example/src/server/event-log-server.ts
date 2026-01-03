@@ -1,10 +1,11 @@
+import { createMigrator, type SyncDbMigrator } from "@sqlite-sync/core";
 import {
   applyKyselyEventsBatchFilters,
   type CrdtStorage,
   crdtSchema,
   createCrdtStorage,
   createCrdtSyncProducer,
-  createSyncIdCounter,
+  createStoredValue,
   dummyKysely,
   type ExtractSyncServerRequest,
   jsonSafeParse,
@@ -15,6 +16,7 @@ import {
 } from "@sqlite-sync/core/server";
 import type { Compilable, Kysely } from "kysely";
 import { type Connection, routePartykitRequest, Server } from "partyserver";
+import { migrations } from "../migrations";
 
 type ExecuteParams = {
   sql: string;
@@ -63,18 +65,39 @@ export class EventLogServer extends Server<Env> {
   private sqlExecutor: SqlExecutor<EventLogDbSchema> = null!;
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private storage: CrdtStorage = null!;
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
+  private migrator: SyncDbMigrator = null!;
 
   onStart(): void | Promise<void> {
     this.sqlExecutor = createKyselyExecutor(this.ctx.storage.sql);
 
     this.sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, "crdt_events"));
 
-    const syncId = createSyncIdCounter({
-      initialSyncId: this.getLatestSyncId(),
+    const syncId = createStoredValue({
+      initialValue: this.getLatestSyncId(),
+    });
+
+    const schemaVersion = createStoredValue<number>({
+      initialValue: this.ctx.storage.kv.get("schema-version") ?? 0,
+      saveToStorage: (val) => this.ctx.storage.kv.put("schema-version", val),
+    });
+
+    this.migrator = createMigrator({
+      migrations,
+      schemaVersion,
+    });
+
+    this.migrator.migrateDbToLatest({
+      startTransaction: (callback) => {
+        this.ctx.storage.transactionSync(() =>
+          callback({ execute: (sql, parameters) => this.ctx.storage.sql.exec(sql, ...parameters) }),
+        );
+      },
     });
 
     this.storage = createCrdtStorage({
       syncId,
+      migrator: this.migrator,
       applyCrdtEventMutations: () => {},
       persistEvents: (events) => {
         this.ctx.storage.transactionSync(() => {
@@ -91,9 +114,19 @@ export class EventLogServer extends Server<Env> {
           }),
         ).rows;
       },
-      updateEventStatus: (syncId, status) =>
+      updateEvent: (syncId, event) =>
         this.sqlExecutor.executeKysely((db) =>
-          db.updateTable("crdt_events").set({ status }).where("sync_id", "=", syncId),
+          db
+            .updateTable("crdt_events")
+            .set({
+              status: event.status,
+              dataset: event.dataset,
+              item_id: event.item_id,
+              schema_version: event.schema_version,
+              type: event.type,
+              payload: event.payload,
+            })
+            .where("sync_id", "=", syncId),
         ),
     });
 
@@ -156,6 +189,7 @@ export class EventLogServer extends Server<Env> {
         hasMore: batch.hasMore,
         nextSyncId: batch.nextSyncId,
         events: batch.events.map((x) => ({
+          schema_version: x.schema_version,
           timestamp: x.timestamp,
           type: x.type,
           dataset: x.dataset,
@@ -169,7 +203,25 @@ export class EventLogServer extends Server<Env> {
   }
 
   private handlePushEvents(connection: Connection, request: ExtractSyncServerRequest<"push-events">) {
-    this.storage.enqueueEvents(request.events.map((x) => ({ ...x, origin: request.nodeId })));
+    const migratedEvents = request.events.map((event) => {
+      if (event.schema_version > this.migrator.currentSchemaVersion) {
+        throw new Error(
+          `Event schema version ${event.schema_version} is greater than current schema version ${this.migrator.currentSchemaVersion}`,
+        );
+      }
+
+      if (event.schema_version === this.migrator.currentSchemaVersion) {
+        return event;
+      }
+
+      return this.migrator.migrateEvent(event, this.migrator.currentSchemaVersion);
+    });
+    this.storage.enqueueEvents(
+      migratedEvents.filter(Boolean).map((event) => {
+        // biome-ignore lint/style/noNonNullAssertion: checked for null
+        return { ...event!, schema_version: this.migrator.currentSchemaVersion, origin: request.nodeId };
+      }),
+    );
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,

@@ -26,7 +26,13 @@ export {
   SQLiteReactiveDb,
 } from "./memory-db/sqlite-reactive-db";
 // Migrations
-export { createSyncDbMigrations, createSyncDbMigrator } from "./migrations/migrator";
+export {
+  createMigrations,
+  createMigrator,
+  type MigratableEvent,
+  type Migrations,
+  type SyncDbMigrator,
+} from "./migrations/migrator";
 export { applyMemoryDbSchema, applyWorkerDbSchema } from "./migrations/system-schema";
 // CRDT
 export { applyCrdtEventMutations, type PendingCrdtEvent } from "./sqlite-crdt/apply-crdt-event";
@@ -62,8 +68,6 @@ export {
   type SQLiteTransactionWrapper,
 } from "./sqlite-db-wrapper";
 export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "./sqlite-kv-store";
-// SQLite Kysely integration
-export { createSQLiteKysely, SqliteDriver } from "./sqlite-kysely";
 export { createSyncedDb, type SyncedDb } from "./sync-db";
 
 // Utilities

@@ -1,4 +1,5 @@
 import retryAsPromised from "retry-as-promised";
+import type { SyncDbMigrator } from "../migrations/migrator";
 import { createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
 import type { EventsPullResponse } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
@@ -8,6 +9,7 @@ import type { StoredValue } from "./stored-value";
 type CrdtSyncRemoteSourceConfig = {
   bufferSize: number;
   storage: CrdtStorage;
+  migrator: SyncDbMigrator;
   pullSyncId: StoredValue<number>;
   pushSyncId: StoredValue<number>;
   nodeId: string;
@@ -21,7 +23,7 @@ export type EventsPullRequest = {
 
 export type EventsPushRequest = {
   nodeId: string;
-  events: PendingCrdtEvent[];
+  events: (PendingCrdtEvent & { schema_version: number })[];
 };
 export type EventsPushResponse = {
   ok: boolean;
@@ -45,15 +47,24 @@ type RemoteSourceState =
     }
   | {
       type: "offline";
+      reason: OfflineReason;
     }
   | {
       type: "online";
       source: RemoteSource;
     };
 
+export type OfflineReason =
+  | "NOT_INITIALIZED"
+  | "INITIALIZATION_FAILED"
+  | "REMOTE_PUSH_ERROR"
+  | "REMOTE_PULL_ERROR"
+  | "DISCONNECTED";
+
 export const createCrdtSyncRemoteSource = ({
   bufferSize,
   storage,
+  migrator,
   pullSyncId,
   pushSyncId,
   nodeId,
@@ -63,7 +74,7 @@ export const createCrdtSyncRemoteSource = ({
     "state-changed": RemoteSourceState["type"];
   }>();
 
-  let remoteState: RemoteSourceState = { type: "offline" };
+  let remoteState: RemoteSourceState = { type: "offline", reason: "NOT_INITIALIZED" };
 
   const setRemoteState = (state: RemoteSourceState) => {
     remoteState = state;
@@ -91,7 +102,7 @@ export const createCrdtSyncRemoteSource = ({
       });
 
       if (!factoryResult.success) {
-        setRemoteState({ type: "offline" });
+        setRemoteState({ type: "offline", reason: "INITIALIZATION_FAILED" });
         console.warn("Failed to create remote source", factoryResult.error);
         return;
       }
@@ -117,7 +128,7 @@ export const createCrdtSyncRemoteSource = ({
   );
 
   const goOffline = ensureSingletonExecution(
-    async () => {
+    async (reason: OfflineReason) => {
       if (remoteState.type !== "online") {
         return;
       }
@@ -133,7 +144,7 @@ export const createCrdtSyncRemoteSource = ({
         console.warn("Error while disconnecting from remote source", disconnectResult.error);
       }
 
-      setRemoteState({ type: "offline" });
+      setRemoteState({ type: "offline", reason });
     },
     { queueReExecution: false },
   );
@@ -170,7 +181,7 @@ export const createCrdtSyncRemoteSource = ({
     })
       .catch((error) => {
         console.error("Error pulling events. Going offline.", error);
-        goOffline();
+        goOffline("REMOTE_PULL_ERROR");
       })
       .finally(() => {
         pullPromise = null;
@@ -211,10 +222,17 @@ export const createCrdtSyncRemoteSource = ({
 
       if (response.events) {
         storage.enqueueEvents(
-          response.events.map((x) => ({
-            ...x,
-            origin: "remote",
-          })),
+          response.events.map((x) => {
+            if (x.schema_version > migrator.currentSchemaVersion) {
+              throw new Error(
+                `Event schema version ${x.schema_version} is greater than current schema version ${migrator.currentSchemaVersion}`,
+              );
+            }
+            return {
+              ...x,
+              origin: "remote",
+            };
+          }),
         );
       }
       if (response.nextSyncId <= pullSyncId.current) {
@@ -243,25 +261,35 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
-      try {
-        await retryAsPromised(
-          () =>
-            source.pushEvents({
-              nodeId,
-              events: eventsBatch.events,
-            }),
-          {
-            max: 3,
-            backoffBase: 100,
-            backoffExponent: 1.5,
-            backoffJitter: 150,
-            timeout: 10000,
-          },
-        );
-      } catch (error) {
-        console.error("Error pushing events. Going offline.", error);
-        goOffline();
-        return;
+      // Migrate events to latest schema version and filter out nulls (dropped events)
+      const migratedEvents = eventsBatch.events
+        .map((event) => {
+          return migrator.migrateEvent(event, migrator.currentSchemaVersion);
+        })
+        .filter((event): event is NonNullable<typeof event> => event !== null);
+
+      // Only push if there are events after migration
+      if (migratedEvents.length > 0) {
+        try {
+          await retryAsPromised(
+            () =>
+              source.pushEvents({
+                nodeId,
+                events: migratedEvents,
+              }),
+            {
+              max: 3,
+              backoffBase: 100,
+              backoffExponent: 1.5,
+              backoffJitter: 150,
+              timeout: 10000,
+            },
+          );
+        } catch (error) {
+          console.error("Error pushing events. Going offline.", error);
+          goOffline("REMOTE_PUSH_ERROR");
+          return;
+        }
       }
 
       pushSyncId.current = eventsBatch.nextSyncId;

@@ -15,6 +15,7 @@ export const syncServerRequestSchema = z.discriminatedUnion("type", [
     nodeId: z.string(),
     events: z.array(
       z.object({
+        schema_version: z.number(),
         timestamp: z.string(),
         type: z.enum(["item-created", "item-updated"]),
         dataset: z.string(),

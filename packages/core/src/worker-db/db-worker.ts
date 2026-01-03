@@ -1,18 +1,21 @@
 import sqlite3InitModule, { type SAHPoolUtil } from "@sqlite.org/sqlite-wasm";
-import type { Kysely } from "kysely";
 import type { Logger } from "../logger";
-import { createSyncDbMigrator } from "../migrations/migrator";
+import { createMigrator, type Migrations, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
 import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
-import { type CrdtStorage, createCrdtStorage, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
+import {
+  type CrdtStorage,
+  createCrdtStorage,
+  type EventUpdate,
+  type GetEventsOptions,
+} from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
-import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
+import type { PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { createSQLiteKvStore } from "../sqlite-kv-store";
-import { createSQLiteKysely } from "../sqlite-kysely";
+import { createSQLiteKvStore, type KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
 import {
   createBroadcastChannels,
@@ -73,12 +76,20 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   applyWorkerDbSchema(db);
 
-  const kysely = createSQLiteKysely<WorkerDbSchema>(db);
-  const migrator = createSyncDbMigrator({
-    db: kysely as Kysely<unknown>,
-    migrations: opts.migrations,
+  const kvStore = createSQLiteKvStore({
+    db,
+    metaTableName: "worker.kv",
   });
-  await migrator.migrateToLatest();
+
+  const migrator = createMigrator({
+    migrations: opts.migrations,
+    schemaVersion: kvStore.createNumberStoredValue("schema-version", -1),
+  });
+  migrator.migrateDbToLatest({
+    startTransaction: (callback) => {
+      db.executeTransaction((tx) => callback({ execute: (sql, parameters) => tx.execute({ sql, parameters }) }));
+    },
+  });
   db.invalidateDbSchema();
 
   const localSyncId = createStoredValue({
@@ -87,6 +98,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
+    migrator,
     applyCrdtEventMutations: (event) =>
       applyCrdtEventMutations({
         db,
@@ -95,7 +107,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       }),
     persistEvents: (events) => persistEvents(db, events),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
-    updateEventStatus: (syncId, status) => updateEventStatus(db, syncId, status),
+    updateEvent: (syncId, update) => updateEvent(db, syncId, update),
   });
 
   createCrdtSyncProducer({
@@ -119,8 +131,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   };
 
   const remoteSource = createRemoteSource({
-    db,
+    kvStore,
     crdtStorage,
+    migrator,
     clientId: config.clientId,
     remoteFactory: opts.createRemoteSource,
   });
@@ -139,6 +152,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return {
         file,
         syncId: localSyncId.current,
+        schemaVersion: migrator.currentSchemaVersion,
       };
     },
     postState,
@@ -146,6 +160,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       crdtStorage.enqueueEvents(
         request.events.map((event) => ({
           ...event,
+          schema_version: migrator.currentSchemaVersion,
           origin: request.nodeId,
         })),
       );
@@ -162,7 +177,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       });
     },
     goOnline: () => remoteSource.goOnline(),
-    goOffline: () => remoteSource.goOffline(),
+    goOffline: () => remoteSource.goOffline("DISCONNECTED"),
   };
 
   broadcastChannels.requests.onmessage = (event) => {
@@ -198,24 +213,21 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 }
 
 type InitRemoteOptions = {
-  db: SQLiteDbWrapper<WorkerDbSchema>;
+  kvStore: KvStore;
   clientId: string;
   crdtStorage: CrdtStorage;
+  migrator: SyncDbMigrator;
   remoteFactory?: CreateRemoteSourceFactory;
 };
 
-function createRemoteSource({ db, clientId, crdtStorage, remoteFactory }: InitRemoteOptions) {
-  const kvStore = createSQLiteKvStore({
-    db,
-    metaTableName: "worker.kv",
-  });
-
+function createRemoteSource({ kvStore, clientId, crdtStorage, migrator, remoteFactory }: InitRemoteOptions) {
   return createCrdtSyncRemoteSource({
     bufferSize: 50,
     pullSyncId: kvStore.createNumberStoredValue("pull-sync-id", -1),
     pushSyncId: kvStore.createNumberStoredValue("push-sync-id", -1),
     nodeId: clientId,
     storage: crdtStorage,
+    migrator,
     remoteFactory,
   });
 }
@@ -255,7 +267,7 @@ async function normalizePoolCapacity(pool: SAHPoolUtil) {
 }
 
 type WorkerOptions = {
-  migrations: Record<number, Migration>;
+  migrations: Migrations;
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
 };
@@ -303,14 +315,21 @@ function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOpti
   ).rows;
 }
 
-function updateEventStatus(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, status: CrdtEventStatus) {
+function updateEvent(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, update: EventUpdate) {
   db.executePrepared(
-    "update-crdt-event-status",
-    { syncId, status },
+    "update-crdt-event",
+    { syncId, ...update },
     (db, params) =>
       db
         .updateTable("worker.crdt_events")
-        .set({ status: params("status") })
+        .set({
+          status: params("status"),
+          schema_version: params("schema_version"),
+          type: params("type"),
+          dataset: params("dataset"),
+          item_id: params("item_id"),
+          payload: params("payload"),
+        })
         .where("sync_id", "=", params("syncId")),
     { loggerLevel: "system" },
   );

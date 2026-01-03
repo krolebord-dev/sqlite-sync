@@ -32,7 +32,7 @@ export function createSQLiteKvStore({
         .selectFrom(metaTableName as "meta")
         .where("key", "=", params("key"))
         .select("value")
-        .limit(1),
+        .limit((eb) => eb.lit(1)),
     );
 
     return result?.value ?? null;
@@ -76,3 +76,5 @@ export function createSQLiteKvStore({
       }),
   };
 }
+
+export type KvStore = ReturnType<typeof createSQLiteKvStore>;

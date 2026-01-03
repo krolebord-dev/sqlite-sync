@@ -1,8 +1,10 @@
+import type { SyncDbMigrator } from "../migrations/migrator";
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
 import type { CrdtEventOrigin, CrdtEventStatus, CrdtEventType, PersistedCrdtEvent } from "./crdt-table-schema";
 import type { StoredValue } from "./stored-value";
 
 type LocalCrdtEvent = {
+  schema_version: number;
   type: CrdtEventType;
   timestamp: string;
   dataset: string;
@@ -24,11 +26,21 @@ export type GetEventsBatch = {
   nextSyncId: number;
 };
 
+export type EventUpdate = {
+  status: CrdtEventStatus;
+  schema_version: number;
+  type: CrdtEventType;
+  dataset: string;
+  item_id: string;
+  payload: string;
+};
+
 type DbSyncerStorage = {
   syncId: StoredValue<number>;
+  migrator: SyncDbMigrator;
   persistEvents: (events: PersistedCrdtEvent[]) => void;
   getEventsBatch: (options: GetEventsOptions) => PersistedCrdtEvent[];
-  updateEventStatus: (syncId: number, status: CrdtEventStatus) => void;
+  updateEvent: (syncId: number, update: EventUpdate) => void;
   applyCrdtEventMutations: (event: PersistedCrdtEvent) => void;
 };
 
@@ -44,6 +56,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     const firstEventSyncId = storage.syncId.current + 1;
     storage.persistEvents(
       events.map((x) => ({
+        schema_version: x.schema_version,
         timestamp: x.timestamp,
         type: x.type,
         dataset: x.dataset,
@@ -90,6 +103,30 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
 
       for (const event of events) {
+        // Migrate event to latest schema version
+        const migratedEvent = storage.migrator.migrateEvent(event, storage.migrator.latestSchemaVersion);
+
+        if (migratedEvent === null) {
+          // Event was dropped during migration (e.g., table was deleted)
+          event.status = "skipped";
+          storage.updateEvent(event.sync_id, {
+            status: event.status,
+            schema_version: storage.migrator.latestSchemaVersion,
+            type: event.type,
+            dataset: event.dataset,
+            item_id: event.item_id,
+            payload: event.payload,
+          });
+          continue;
+        }
+
+        // Update event with migrated values
+        event.schema_version = migratedEvent.schema_version;
+        event.type = migratedEvent.type;
+        event.dataset = migratedEvent.dataset;
+        event.item_id = migratedEvent.item_id;
+        event.payload = migratedEvent.payload;
+
         try {
           storage.applyCrdtEventMutations(event);
           event.status = "applied";
@@ -97,7 +134,14 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           console.error("Error applying enqueued CRDT event", error);
           event.status = "failed";
         } finally {
-          storage.updateEventStatus(event.sync_id, event.status);
+          storage.updateEvent(event.sync_id, {
+            status: event.status,
+            schema_version: event.schema_version,
+            type: event.type,
+            dataset: event.dataset,
+            item_id: event.item_id,
+            payload: event.payload,
+          });
           eventTarget.dispatchEvent("event-applied", event);
         }
       }

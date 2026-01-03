@@ -36,25 +36,25 @@ export const generateId = () => {
 
 export type DistributiveOmit<T, K extends keyof T> = T extends any ? Omit<T, K> : never;
 
-export function ensureSingletonExecution<T>(
-  fn: () => Promise<T>,
+export function ensureSingletonExecution<T, TArgs extends any[]>(
+  fn: (...args: TArgs) => Promise<T>,
   opts: { queueReExecution?: boolean } = { queueReExecution: true },
 ) {
   let executingPromise: Promise<T> | null = null;
   let shouldReExecute = false;
 
-  const wrappedFn = () => {
+  const wrappedFn = (...args: TArgs) => {
     if (executingPromise) {
       shouldReExecute = true;
       return executingPromise;
     }
 
-    executingPromise = fn().finally(() => {
+    executingPromise = fn(...args).finally(() => {
       executingPromise = null;
 
       if (shouldReExecute && opts?.queueReExecution) {
         shouldReExecute = false;
-        wrappedFn();
+        wrappedFn(...args);
       }
     });
     return executingPromise;
