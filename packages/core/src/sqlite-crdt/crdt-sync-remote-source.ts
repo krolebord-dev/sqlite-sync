@@ -3,13 +3,13 @@ import { createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from 
 import type { EventsPullResponse } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage } from "./crdt-storage";
-import type { SyncIdCounter } from "./sync-id-counter";
+import type { StoredValue } from "./stored-value";
 
 type CrdtSyncRemoteSourceConfig = {
   bufferSize: number;
   storage: CrdtStorage;
-  pullSyncId: SyncIdCounter;
-  pushSyncId: SyncIdCounter;
+  pullSyncId: StoredValue<number>;
+  pushSyncId: StoredValue<number>;
   nodeId: string;
   remoteFactory?: CreateRemoteSourceFactory;
 };

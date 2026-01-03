@@ -1,12 +1,13 @@
 import type { SchemaModule } from "kysely";
+import { createStoredValue } from "./sqlite-crdt/stored-value";
 import type { SQLiteTransactionWrapper } from "./sqlite-db-wrapper";
 
-export type MetaItem = {
+export type KvStoreItem = {
   key: string;
   value: string;
 };
 
-export function createMetaTableQuery(schema: SchemaModule, tableName: string) {
+export function createKvStoreTableQuery(schema: SchemaModule, tableName: string) {
   return schema
     .createTable(tableName)
     .ifNotExists()
@@ -22,7 +23,7 @@ export function createSQLiteKvStore({
   metaTableName: string;
 }) {
   const metaDb = db as SQLiteTransactionWrapper<{
-    meta: MetaItem;
+    meta: KvStoreItem;
   }>;
 
   const get = (key: string): string | null => {
@@ -63,6 +64,15 @@ export function createSQLiteKvStore({
     get,
     set,
     remove,
-    getNumberOrDefault,
+    createStringStoredValue: (key: string, defaultValue: string) =>
+      createStoredValue<string>({
+        initialValue: get(key) ?? defaultValue,
+        saveToStorage: (val) => set(key, val),
+      }),
+    createNumberStoredValue: (key: string, defaultValue: number) =>
+      createStoredValue<number>({
+        initialValue: getNumberOrDefault(key, defaultValue),
+        saveToStorage: (val) => set(key, val.toString()),
+      }),
   };
 }

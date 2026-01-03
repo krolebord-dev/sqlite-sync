@@ -1,5 +1,5 @@
 import sqlite3InitModule, { type SAHPoolUtil } from "@sqlite.org/sqlite-wasm";
-import type { Kysely, Migration } from "kysely";
+import type { Kysely } from "kysely";
 import type { Logger } from "../logger";
 import { createSyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
@@ -9,7 +9,7 @@ import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
-import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
+import { createStoredValue } from "../sqlite-crdt/stored-value";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createSQLiteKvStore } from "../sqlite-kv-store";
 import { createSQLiteKysely } from "../sqlite-kysely";
@@ -81,8 +81,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   await migrator.migrateToLatest();
   db.invalidateDbSchema();
 
-  const localSyncId = createSyncIdCounter({
-    initialSyncId: getLatestSyncId(db),
+  const localSyncId = createStoredValue({
+    initialValue: getLatestSyncId(db),
   });
 
   const crdtStorage = createCrdtStorage({
@@ -207,22 +207,13 @@ type InitRemoteOptions = {
 function createRemoteSource({ db, clientId, crdtStorage, remoteFactory }: InitRemoteOptions) {
   const kvStore = createSQLiteKvStore({
     db,
-    metaTableName: "worker.meta",
+    metaTableName: "worker.kv",
   });
 
-  const pullIdCounter = createSyncIdCounter({
-    initialSyncId: kvStore.getNumberOrDefault("pull-sync-id", -1),
-    saveToStorage: (syncId) => kvStore.set("pull-sync-id", syncId.toString()),
-  });
-
-  const pushIdCounter = createSyncIdCounter({
-    initialSyncId: kvStore.getNumberOrDefault("push-sync-id", -1),
-    saveToStorage: (syncId) => kvStore.set("push-sync-id", syncId.toString()),
-  });
   return createCrdtSyncRemoteSource({
     bufferSize: 50,
-    pullSyncId: pullIdCounter,
-    pushSyncId: pushIdCounter,
+    pullSyncId: kvStore.createNumberStoredValue("pull-sync-id", -1),
+    pushSyncId: kvStore.createNumberStoredValue("push-sync-id", -1),
     nodeId: clientId,
     storage: crdtStorage,
     remoteFactory,

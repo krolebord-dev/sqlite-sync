@@ -2,7 +2,7 @@ import { deserializeHLC, HLCCounter } from "./hlc";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
-import { createSyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+import { createStoredValue } from "./sqlite-crdt/stored-value";
 import { generateId, type TypedEvent } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
@@ -46,11 +46,11 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
     crdtTables: options.crdtTables,
   });
 
-  const pullSyncId = createSyncIdCounter({
-    initialSyncId: workerClientSnapshot.syncId,
+  const pullSyncId = createStoredValue({
+    initialValue: workerClientSnapshot.syncId,
   });
-  const pushSyncId = createSyncIdCounter({
-    initialSyncId: 0,
+  const pushSyncId = createStoredValue({
+    initialValue: 0,
   });
   const tabRemoteSource = createCrdtSyncRemoteSource({
     bufferSize: 500,

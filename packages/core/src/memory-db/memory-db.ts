@@ -6,7 +6,7 @@ import { createCrdtStorage, type GetEventsOptions } from "../sqlite-crdt/crdt-st
 import { type CrdtEventStatus, type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { makeCrdtTable } from "../sqlite-crdt/make-crdt-table";
-import { createSyncIdCounter } from "../sqlite-crdt/sync-id-counter";
+import { createStoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { generateId } from "../utils";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
@@ -41,8 +41,8 @@ export async function createMemoryDb<Database>({
     });
   }
 
-  const localSyncId = createSyncIdCounter({
-    initialSyncId: 0,
+  const localSyncId = createStoredValue({
+    initialValue: 0,
   });
 
   const pendingLocalEvents: PersistedCrdtEvent[] = [];

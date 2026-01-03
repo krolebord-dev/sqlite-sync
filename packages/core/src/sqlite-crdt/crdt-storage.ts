@@ -1,6 +1,6 @@
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
 import type { CrdtEventOrigin, CrdtEventStatus, CrdtEventType, PersistedCrdtEvent } from "./crdt-table-schema";
-import type { SyncIdCounter } from "./sync-id-counter";
+import type { StoredValue } from "./stored-value";
 
 type LocalCrdtEvent = {
   type: CrdtEventType;
@@ -25,7 +25,7 @@ export type GetEventsBatch = {
 };
 
 type DbSyncerStorage = {
-  syncId: SyncIdCounter;
+  syncId: StoredValue<number>;
   persistEvents: (events: PersistedCrdtEvent[]) => void;
   getEventsBatch: (options: GetEventsOptions) => PersistedCrdtEvent[];
   updateEventStatus: (syncId: number, status: CrdtEventStatus) => void;

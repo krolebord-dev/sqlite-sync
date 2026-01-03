@@ -1,4 +1,3 @@
-export type { Migration } from "kysely";
 export type { GetEventsBatch } from "./sqlite-crdt/crdt-storage";
 export type {
   EventsPullRequest,

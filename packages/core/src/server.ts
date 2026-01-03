@@ -17,7 +17,7 @@ export {
   type PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
 export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
-export { createSyncIdCounter, type SyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // Utilities
 export {
   createDeferredPromise,

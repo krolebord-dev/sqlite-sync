@@ -46,12 +46,11 @@ export {
   type CrdtUpdateLogItem,
   type CrdtUpdateLogPayload,
   crdtSchema,
-  type MetaItem,
   type PersistedCrdtEvent,
   registerCrdtFunctions,
 } from "./sqlite-crdt/crdt-table-schema";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
-export { createSyncIdCounter, type SyncIdCounter } from "./sqlite-crdt/sync-id-counter";
+export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // SQLite Wrapper
 export {
   type ExecuteParams,
@@ -62,6 +61,7 @@ export {
   SQLiteDbWrapper,
   type SQLiteTransactionWrapper,
 } from "./sqlite-db-wrapper";
+export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "./sqlite-kv-store";
 // SQLite Kysely integration
 export { createSQLiteKysely, SqliteDriver } from "./sqlite-kysely";
 export { createSyncedDb, type SyncedDb } from "./sync-db";
