@@ -31,6 +31,7 @@ export {
   createMigrator,
   type MigratableEvent,
   type Migrations,
+  type MigrationsDb,
   type SyncDbMigrator,
 } from "./migrations/migrator";
 export { applyMemoryDbSchema, applyWorkerDbSchema } from "./migrations/system-schema";
@@ -55,6 +56,7 @@ export {
   type PersistedCrdtEvent,
   registerCrdtFunctions,
 } from "./sqlite-crdt/crdt-table-schema";
+export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
 export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // SQLite Wrapper
@@ -69,7 +71,6 @@ export {
 } from "./sqlite-db-wrapper";
 export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "./sqlite-kv-store";
 export { createSyncedDb, type SyncedDb } from "./sync-db";
-
 // Utilities
 export {
   createAsyncAutoFlushBuffer,

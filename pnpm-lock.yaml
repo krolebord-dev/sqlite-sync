@@ -26,6 +26,9 @@ importers:
 
   apps/example:
     dependencies:
+      '@sqlite-sync/cloudflare':
+        specifier: workspace:*
+        version: link:../../packages/cloudflare
       '@sqlite-sync/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -37,13 +40,13 @@ importers:
         version: 4.1.17(vite@7.2.6(@types/node@22.19.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.5))
       jotai:
         specifier: ^2.13.1
-        version: 2.13.1(@babel/core@7.28.4)(@babel/template@7.27.2)(@types/react@19.2.7)(react@19.2.1)
+        version: 2.13.1(@babel/core@7.28.5)(@babel/template@7.27.2)(@types/react@19.2.7)(react@19.2.1)
       kysely:
         specifier: ^0.28.8
         version: 0.28.8
       partyserver:
         specifier: ^0.0.75
-        version: 0.0.75(@cloudflare/workers-types@4.20251205.0)
+        version: 0.0.75(@cloudflare/workers-types@4.20260103.0)
       partysocket:
         specifier: ^1.1.6
         version: 1.1.6
@@ -77,7 +80,7 @@ importers:
         version: 7.2.6(@types/node@22.19.2)(jiti@2.6.1)(lightningcss@1.30.2)(terser@5.44.1)(tsx@4.20.5)
       wrangler:
         specifier: ^4.53.0
-        version: 4.53.0(@cloudflare/workers-types@4.20251205.0)
+        version: 4.53.0(@cloudflare/workers-types@4.20260103.0)
 
   apps/watchlist:
     dependencies:
@@ -301,6 +304,25 @@ importers:
       wrangler:
         specifier: ^4.42.0
         version: 4.53.0(@cloudflare/workers-types@4.20251205.0)
+
+  packages/cloudflare:
+    dependencies:
+      '@sqlite-sync/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20260103.0
+        version: 4.20260103.0
+      kysely:
+        specifier: ^0.28.8
+        version: 0.28.8
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(@swc/core@1.15.3)(jiti@2.6.1)(postcss@8.5.6)(tsx@4.20.5)(typescript@5.9.3)
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
 
   packages/core:
     dependencies:
@@ -1044,6 +1066,9 @@ packages:
 
   '@cloudflare/workers-types@4.20251205.0':
     resolution: {integrity: sha512-7pup7fYkuQW5XD8RUS/vkxF9SXlrGyCXuZ4ro3uVQvca/GTeSa+8bZ8T4wbq1Aea5lmLIGSlKbhl2msME7bRBA==}
+
+  '@cloudflare/workers-types@4.20260103.0':
+    resolution: {integrity: sha512-jANmoGpJcXARnwlkvrQOeWyjYD1quTfHcs+++Z544XRHOSfLc4XSlts7snIhbiIGgA5bo66zDhraF+9lKUr2hw==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
@@ -6265,6 +6290,8 @@ snapshots:
 
   '@cloudflare/workers-types@4.20251205.0': {}
 
+  '@cloudflare/workers-types@4.20260103.0': {}
+
   '@cspotcode/source-map-support@0.8.1':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
@@ -8878,9 +8905,9 @@ snapshots:
 
   jiti@2.6.1: {}
 
-  jotai@2.13.1(@babel/core@7.28.4)(@babel/template@7.27.2)(@types/react@19.2.7)(react@19.2.1):
+  jotai@2.13.1(@babel/core@7.28.5)(@babel/template@7.27.2)(@types/react@19.2.7)(react@19.2.1):
     optionalDependencies:
-      '@babel/core': 7.28.4
+      '@babel/core': 7.28.5
       '@babel/template': 7.27.2
       '@types/react': 19.2.7
       react: 19.2.1
@@ -9183,6 +9210,11 @@ snapshots:
   partyserver@0.0.75(@cloudflare/workers-types@4.20251205.0):
     dependencies:
       '@cloudflare/workers-types': 4.20251205.0
+      nanoid: 5.1.6
+
+  partyserver@0.0.75(@cloudflare/workers-types@4.20260103.0):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260103.0
       nanoid: 5.1.6
 
   partysocket@1.1.6:
@@ -10343,6 +10375,23 @@ snapshots:
       workerd: 1.20251202.0
     optionalDependencies:
       '@cloudflare/workers-types': 4.20251205.0
+      fsevents: 2.3.3
+    transitivePeerDependencies:
+      - bufferutil
+      - utf-8-validate
+
+  wrangler@4.53.0(@cloudflare/workers-types@4.20260103.0):
+    dependencies:
+      '@cloudflare/kv-asset-handler': 0.4.1
+      '@cloudflare/unenv-preset': 2.7.13(unenv@2.0.0-rc.24)(workerd@1.20251202.0)
+      blake3-wasm: 2.1.5
+      esbuild: 0.27.0
+      miniflare: 4.20251202.1
+      path-to-regexp: 6.3.0
+      unenv: 2.0.0-rc.24
+      workerd: 1.20251202.0
+    optionalDependencies:
+      '@cloudflare/workers-types': 4.20260103.0
       fsevents: 2.3.3
     transitivePeerDependencies:
       - bufferutil

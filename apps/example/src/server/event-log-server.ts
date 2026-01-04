@@ -1,4 +1,9 @@
-import { createMigrator, type SyncDbMigrator } from "@sqlite-sync/core";
+import {
+  createKyselyExecutor,
+  createMigrator,
+  type KyselyExecutor,
+  type SyncDbMigrator,
+} from "@sqlite-sync/cloudflare";
 import {
   applyKyselyEventsBatchFilters,
   type CrdtStorage,
@@ -6,49 +11,17 @@ import {
   createCrdtStorage,
   createCrdtSyncProducer,
   createStoredValue,
-  dummyKysely,
-  type ExtractSyncServerRequest,
   jsonSafeParse,
   type PersistedCrdtEvent,
+} from "@sqlite-sync/core";
+import {
+  type ExtractSyncServerRequest,
   type SyncServerMessage,
   type SyncServerRequest,
   syncServerRequestSchema,
 } from "@sqlite-sync/core/server";
-import type { Compilable, Kysely } from "kysely";
 import { type Connection, routePartykitRequest, Server } from "partyserver";
 import { migrations } from "../migrations";
-
-type ExecuteParams = {
-  sql: string;
-  parameters: readonly unknown[];
-};
-
-type ExecuteResult<T> = {
-  rows: T[];
-};
-
-type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
-
-type KyselyQueryFactory<TDatabase, TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>> = (
-  kysely: Kysely<TDatabase>,
-) => TQuery;
-
-function createKyselyExecutor<TDatabase>(db: SqlStorage) {
-  return {
-    execute<TResult = unknown>(query: ExecuteParams): ExecuteResult<TResult> {
-      const rows = db.exec(query.sql, ...query.parameters).toArray();
-      return { rows: rows as TResult[] };
-    },
-    executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
-      factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
-    ): ExecuteResult<TResult> {
-      const query = factory(dummyKysely).compile();
-      return this.execute(query);
-    },
-  };
-}
-
-type SqlExecutor<TDatabase> = ReturnType<typeof createKyselyExecutor<TDatabase>>;
 
 type EventLogDbSchema = {
   crdt_events: PersistedCrdtEvent;
@@ -62,7 +35,7 @@ export class EventLogServer extends Server<Env> {
   };
 
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
-  private sqlExecutor: SqlExecutor<EventLogDbSchema> = null!;
+  private sqlExecutor: KyselyExecutor<EventLogDbSchema> = null!;
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private storage: CrdtStorage = null!;
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
@@ -70,29 +43,13 @@ export class EventLogServer extends Server<Env> {
 
   onStart(): void | Promise<void> {
     this.sqlExecutor = createKyselyExecutor(this.ctx.storage.sql);
+    this.migrator = createMigrator(this.ctx.storage, migrations);
 
     this.sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, "crdt_events"));
+    this.migrator.migrateDbToLatest();
 
     const syncId = createStoredValue({
       initialValue: this.getLatestSyncId(),
-    });
-
-    const schemaVersion = createStoredValue<number>({
-      initialValue: this.ctx.storage.kv.get("schema-version") ?? 0,
-      saveToStorage: (val) => this.ctx.storage.kv.put("schema-version", val),
-    });
-
-    this.migrator = createMigrator({
-      migrations,
-      schemaVersion,
-    });
-
-    this.migrator.migrateDbToLatest({
-      startTransaction: (callback) => {
-        this.ctx.storage.transactionSync(() =>
-          callback({ execute: (sql, parameters) => this.ctx.storage.sql.exec(sql, ...parameters) }),
-        );
-      },
     });
 
     this.storage = createCrdtStorage({
@@ -203,25 +160,14 @@ export class EventLogServer extends Server<Env> {
   }
 
   private handlePushEvents(connection: Connection, request: ExtractSyncServerRequest<"push-events">) {
-    const migratedEvents = request.events.map((event) => {
-      if (event.schema_version > this.migrator.currentSchemaVersion) {
-        throw new Error(
-          `Event schema version ${event.schema_version} is greater than current schema version ${this.migrator.currentSchemaVersion}`,
-        );
-      }
-
-      if (event.schema_version === this.migrator.currentSchemaVersion) {
-        return event;
-      }
-
-      return this.migrator.migrateEvent(event, this.migrator.currentSchemaVersion);
-    });
-    this.storage.enqueueEvents(
-      migratedEvents.filter(Boolean).map((event) => {
+    const migratedEvents = request.events
+      .map((event) => this.migrator.migrateEvent(event, this.migrator.currentSchemaVersion))
+      .filter(Boolean)
+      .map((event) => {
         // biome-ignore lint/style/noNonNullAssertion: checked for null
-        return { ...event!, schema_version: this.migrator.currentSchemaVersion, origin: request.nodeId };
-      }),
-    );
+        return { ...event!, origin: request.nodeId };
+      });
+    this.storage.enqueueEvents(migratedEvents);
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,

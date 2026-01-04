@@ -249,6 +249,14 @@ export function createMigrations(
 
 export type Migrations = ReturnType<typeof createMigrations>;
 
+export type MigrationsDb = {
+  startTransaction: (callback: (tx: MigrationsTransaction) => void) => void;
+};
+
+type MigrationsTransaction = {
+  execute: (sql: string, parameters: readonly unknown[]) => void;
+};
+
 export function createMigrator({
   migrations,
   schemaVersion,
@@ -276,15 +284,13 @@ export function createMigrator({
     });
   };
 
-  type MigrationsDb = {
-    startTransaction: (callback: (tx: MigrationsTransaction) => void) => void;
-  };
-
-  type MigrationsTransaction = {
-    execute: (sql: string, parameters: readonly unknown[]) => void;
-  };
-
   const migrateEvent = <Event extends MigratableEvent>(event: Event, targetVersion: number): Event | null => {
+    if (targetVersion > schemaVersion.current) {
+      throw new Error(
+        `Event schema version ${event.schema_version} is greater than current schema version ${schemaVersion.current}`,
+      );
+    }
+
     if (event.schema_version >= targetVersion) {
       return event;
     }

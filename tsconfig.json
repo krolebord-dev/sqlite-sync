@@ -11,5 +11,10 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "references": [{ "path": "./packages/core" }, { "path": "./packages/react" }, { "path": "./apps/example" }]
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/react" },
+    { "path": "./apps/example" },
+    { "path": "./packages/cloudflare" }
+  ]
 }

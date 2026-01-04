@@ -1,0 +1,53 @@
+{
+  "name": "@sqlite-sync/cloudflare",
+  "version": "0.0.1",
+  "description": "Cloudflare utilities for @sqlite-sync/core",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krolebord/sqlite-sync.git",
+    "directory": "packages/cloudflare"
+  },
+  "keywords": [
+    "sqlite",
+    "sync",
+    "cloudflare",
+    "workers",
+    "durable-objects",
+    "kysely"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@sqlite-sync/source": "./src/index.ts",
+      "workerd": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@sqlite-sync/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "kysely": "^0.28.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260103.0",
+    "kysely": "^0.28.8",
+    "tsup": "^8.3.5",
+    "typescript": "~5.9.3"
+  }
+}
