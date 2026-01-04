@@ -35,7 +35,6 @@ export function App() {
   const completedCount = Number(todoStats?.completed ?? 0);
   const totalCount = todoStats?.total ?? 0;
 
-  // Create a new todo
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;
 
@@ -287,10 +286,8 @@ function BlockingIndicator() {
       const deltaTime = currentTime - lastTime;
       lastTime = currentTime;
 
-      // Update rotation (360 degrees per second)
       setRotation((prev) => (prev + deltaTime * 0.36) % 360);
 
-      // Update frame counter
       setFrameCount((prev) => prev + 1);
 
       animationFrameId = requestAnimationFrame(animate);

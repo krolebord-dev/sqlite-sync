@@ -4,7 +4,7 @@ export default defineConfig({
   entry: {
     index: "src/index.ts",
     worker: "src/worker.ts",
-    server: "src/server.ts",
+    server: "src/server/index.ts",
   },
   format: ["esm"],
   dts: true,

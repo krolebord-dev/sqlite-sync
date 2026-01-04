@@ -81,7 +81,6 @@ export {
   ensureSingletonExecution,
   generateId,
   jsonSafeParse,
-  orderBy,
   TypedBroadcastChannel,
   TypedEvent,
   tryCatch,

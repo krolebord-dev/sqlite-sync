@@ -8,8 +8,8 @@ import type {
   Kysely,
 } from "kysely";
 import { dummyKysely } from "../dummy-kysely";
-import type { StoredValue } from "../server";
 import type { CrdtEventType } from "../sqlite-crdt/crdt-table-schema";
+import type { StoredValue } from "../sqlite-crdt/stored-value";
 
 type CrdtEvent = {
   type: CrdtEventType;

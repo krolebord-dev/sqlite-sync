@@ -66,26 +66,6 @@ export function ensureSingletonExecution<T, TArgs extends any[]>(
   return wrappedFn;
 }
 
-export function orderBy<T>(
-  inputArray: T[],
-  picker: (item: T) => any,
-  opts?: {
-    direction?: "asc" | "desc";
-    inPlace?: boolean;
-  },
-): T[] {
-  const array = opts?.inPlace ? inputArray : [...inputArray];
-  const direction = opts?.direction ?? "asc";
-  return array.sort((a, b) => {
-    const aVal = picker(a);
-    const bVal = picker(b);
-
-    if (aVal < bVal) return direction === "asc" ? -1 : 1;
-    if (aVal > bVal) return direction === "asc" ? 1 : -1;
-    return 0;
-  });
-}
-
 export function createAutoFlushBuffer<T>({ size, flush }: { size: number; flush: (items: T[]) => void }) {
   const buffer: T[] = [];
 

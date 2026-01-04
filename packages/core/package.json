@@ -31,7 +31,7 @@
       "import": "./dist/worker.js"
     },
     "./server": {
-      "@sqlite-sync/source": "./src/server.ts",
+      "@sqlite-sync/source": "./src/server/index.ts",
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     }
