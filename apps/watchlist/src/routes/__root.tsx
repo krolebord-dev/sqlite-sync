@@ -1,21 +1,58 @@
-import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
-import { TanStackRouterDevtools } from '@tanstack/router-devtools';
-import type { trpcClient, trpcUtils } from '../trpc';
+import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
+import { TanStackDevtools } from '@tanstack/react-devtools'
 
-type RouterContext = {
-  trpc: typeof trpcUtils;
-  trpcClient: typeof trpcClient;
-};
+import Header from '../components/Header'
 
-export const Route = createRootRouteWithContext<RouterContext>()({
-  component: Root,
-});
+import appCss from '../styles.css?url'
 
-function Root() {
+export const Route = createRootRoute({
+  head: () => ({
+    meta: [
+      {
+        charSet: 'utf-8',
+      },
+      {
+        name: 'viewport',
+        content: 'width=device-width, initial-scale=1',
+      },
+      {
+        title: 'TanStack Start Starter',
+      },
+    ],
+    links: [
+      {
+        rel: 'stylesheet',
+        href: appCss,
+      },
+    ],
+  }),
+
+  shellComponent: RootDocument,
+})
+
+function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <Outlet />
-      {import.meta.env.DEV && <TanStackRouterDevtools />}
-    </>
-  );
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        <Header />
+        {children}
+        <TanStackDevtools
+          config={{
+            position: 'bottom-right',
+          }}
+          plugins={[
+            {
+              name: 'Tanstack Router',
+              render: <TanStackRouterDevtoolsPanel />,
+            },
+          ]}
+        />
+        <Scripts />
+      </body>
+    </html>
+  )
 }
