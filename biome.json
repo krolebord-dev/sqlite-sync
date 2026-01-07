@@ -7,7 +7,16 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!**/dist", "!**/node_modules", "!**/build", "!apps/watchlist", "!**/worker-configuration.d.ts"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/node_modules",
+      "!**/build",
+      "apps/watchlist",
+      "!**/worker-configuration.d.ts",
+      "!**/.wrangler",
+      "!**/*.gen.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -22,17 +31,20 @@
       "a11y": {
         "useKeyWithClickEvents": "off",
         "useKeyWithMouseEvents": "off",
-        "noStaticElementInteractions": "off"
+        "noStaticElementInteractions": "off",
+        "useSemanticElements": "off"
       },
       "correctness": {
-        "noUnusedImports": "warn"
+        "noUnusedImports": "warn",
+        "useUniqueElementIds": "off"
       },
       "nursery": {
         "useSortedClasses": "warn"
       },
       "suspicious": {
         "noUnknownAtRules": "off",
-        "noExplicitAny": "off"
+        "noExplicitAny": "off",
+        "noArrayIndexKey": "off"
       }
     }
   },

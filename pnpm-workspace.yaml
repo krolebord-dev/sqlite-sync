@@ -2,6 +2,9 @@ packages:
   - packages/*
   - apps/*
 
+ignoredBuiltDependencies:
+  - '@prisma/client'
+
 onlyBuiltDependencies:
   - '@swc/core'
   - '@tailwindcss/oxide'
