@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import { useLoaderData, useNavigate } from "@tanstack/react-router";
 import { signOut as signOutFn } from "./auth";
 
 export function useSignOut() {
@@ -11,13 +11,17 @@ export function useSignOut() {
     },
   });
 
-  return () => {
+  function signOut() {
     signOutMutation.mutate({});
-  };
+  }
+
+  signOut.isPending = signOutMutation.isPending;
+
+  return signOut;
 }
 
 export function useAuth() {
-  const routeContext = useRouteContext({ from: "/_app" });
+  const routeContext = useLoaderData({ from: "/_app" });
 
   return routeContext.auth;
 }

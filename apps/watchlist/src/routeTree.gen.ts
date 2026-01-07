@@ -14,6 +14,7 @@ import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignInRouteImport } from './routes/_auth/sign-in'
 import { Route as AuthMagicLinkVerifyRouteImport } from './routes/_auth/magic-link-verify'
+import { Route as AppListIdRouteImport } from './routes/_app/list.$id'
 import { Route as ApiAuthCallbackGoogleRouteImport } from './routes/api/auth/callback.google'
 
 const AuthRouteRoute = AuthRouteRouteImport.update({
@@ -39,6 +40,11 @@ const AuthMagicLinkVerifyRoute = AuthMagicLinkVerifyRouteImport.update({
   path: '/magic-link-verify',
   getParentRoute: () => AuthRouteRoute,
 } as any)
+const AppListIdRoute = AppListIdRouteImport.update({
+  id: '/list/$id',
+  path: '/list/$id',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 const ApiAuthCallbackGoogleRoute = ApiAuthCallbackGoogleRouteImport.update({
   id: '/api/auth/callback/google',
   path: '/api/auth/callback/google',
@@ -49,12 +55,14 @@ export interface FileRoutesByFullPath {
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
   '/': typeof AppIndexRoute
+  '/list/$id': typeof AppListIdRoute
   '/api/auth/callback/google': typeof ApiAuthCallbackGoogleRoute
 }
 export interface FileRoutesByTo {
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
   '/': typeof AppIndexRoute
+  '/list/$id': typeof AppListIdRoute
   '/api/auth/callback/google': typeof ApiAuthCallbackGoogleRoute
 }
 export interface FileRoutesById {
@@ -64,6 +72,7 @@ export interface FileRoutesById {
   '/_auth/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/_auth/sign-in': typeof AuthSignInRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/list/$id': typeof AppListIdRoute
   '/api/auth/callback/google': typeof ApiAuthCallbackGoogleRoute
 }
 export interface FileRouteTypes {
@@ -72,9 +81,15 @@ export interface FileRouteTypes {
     | '/magic-link-verify'
     | '/sign-in'
     | '/'
+    | '/list/$id'
     | '/api/auth/callback/google'
   fileRoutesByTo: FileRoutesByTo
-  to: '/magic-link-verify' | '/sign-in' | '/' | '/api/auth/callback/google'
+  to:
+    | '/magic-link-verify'
+    | '/sign-in'
+    | '/'
+    | '/list/$id'
+    | '/api/auth/callback/google'
   id:
     | '__root__'
     | '/_app'
@@ -82,6 +97,7 @@ export interface FileRouteTypes {
     | '/_auth/magic-link-verify'
     | '/_auth/sign-in'
     | '/_app/'
+    | '/_app/list/$id'
     | '/api/auth/callback/google'
   fileRoutesById: FileRoutesById
 }
@@ -128,6 +144,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthMagicLinkVerifyRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/_app/list/$id': {
+      id: '/_app/list/$id'
+      path: '/list/$id'
+      fullPath: '/list/$id'
+      preLoaderRoute: typeof AppListIdRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/api/auth/callback/google': {
       id: '/api/auth/callback/google'
       path: '/api/auth/callback/google'
@@ -140,10 +163,12 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
+  AppListIdRoute: typeof AppListIdRoute
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppIndexRoute: AppIndexRoute,
+  AppListIdRoute: AppListIdRoute,
 }
 
 const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(

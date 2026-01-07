@@ -3,7 +3,7 @@ import { getAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/_app")({
   component: RouteComponent,
-  beforeLoad: async () => {
+  loader: async () => {
     const auth = await getAuth();
 
     if (!auth) {
@@ -12,13 +12,9 @@ export const Route = createFileRoute("/_app")({
 
     return { auth };
   },
+  staleTime: 1000 * 60 * 5,
 });
 
 function RouteComponent() {
-  return (
-    <div>
-      route
-      <Outlet />
-    </div>
-  );
+  return <Outlet />;
 }

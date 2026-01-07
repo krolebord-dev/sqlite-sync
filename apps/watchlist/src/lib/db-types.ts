@@ -15,6 +15,12 @@ export interface D1Migrations {
   name: string | null;
 }
 
+export interface List {
+  createdAt: string;
+  id: string;
+  name: string;
+}
+
 export interface Session {
   createdAt: string;
   expiresAt: string;
@@ -31,6 +37,11 @@ export interface User {
   updatedAt: string;
 }
 
+export interface UserToList {
+  listId: string;
+  userId: string;
+}
+
 export interface Verification {
   createdAt: string;
   expiresAt: string;
@@ -40,7 +51,9 @@ export interface Verification {
 
 export interface DB {
   d1_migrations: D1Migrations;
+  list: List;
   session: Session;
   user: User;
+  user_to_list: UserToList;
   verification: Verification;
 }
