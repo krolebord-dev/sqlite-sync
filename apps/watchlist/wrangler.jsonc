@@ -1,7 +1,33 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tanstack-start-app",
+  "name": "watchlist",
+  "main": "src/server.ts",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
-  "main": "@tanstack/react-start/server-entry"
+  "route": {
+    "pattern": "watchlist.krolebord.com",
+    "custom_domain": true
+  },
+  "observability": {
+    "enabled": true
+  },
+  "placement": {
+    "mode": "smart"
+  },
+  "vars": {
+    "MODE": "production",
+    "VITE_APP_URL": "https://watchlist.krolebord.com"
+  },
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
+  "d1_databases": [
+    {
+      "binding": "MAIN_DB",
+      "database_name": "watchlist-admin",
+      "database_id": "b3c1b286-6a7e-45a6-b3d5-1bf14b1f31e9",
+      "migrations_dir": "migrations"
+    }
+  ]
 }
