@@ -1,4 +1,4 @@
-const key = 'last-opened-list';
+const key = "last-opened-list";
 
 function getLastOpenedList() {
   return localStorage.getItem(key);
