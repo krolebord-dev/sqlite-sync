@@ -1,9 +1,9 @@
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatch } from "@tanstack/react-router";
 import { useMemo } from "react";
 import { useAuth, useSignOut } from "@/lib/auth-client";
-import { getListsQuery } from "@/lib/lists";
 import { cn } from "@/lib/utils";
+import { orpc } from "@/orpc/orpc-client";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import {
   DropdownMenu,
@@ -32,7 +32,7 @@ type ProjectSelectorProps = {
   showCreate?: boolean;
 };
 export function ProjectSelector({ showCreate = true }: ProjectSelectorProps) {
-  const lists = useSuspenseQuery(getListsQuery);
+  const lists = useSuspenseQuery(orpc.list.getLists.queryOptions());
 
   const selectedListId = useMatch({ from: "/_app/list/$id", shouldThrow: false, select: (m) => m.loaderData?.list.id });
   const selectedList = useMemo(() => {

@@ -1,21 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
 import { PlusIcon } from "lucide-react";
 import { useForm } from "react-hook-form";
 import z from "zod";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { authenticatedMiddleware } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { getListsQuery } from "@/lib/lists";
+import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_app/")({
   component: RouteComponent,
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(getListsQuery);
+    await context.queryClient.ensureQueryData(orpc.list.getLists.queryOptions());
   },
 });
 
@@ -44,37 +41,26 @@ const createListSchema = z.object({
 
 type CreateListSchema = z.infer<typeof createListSchema>;
 
-const createList = createServerFn({ method: "POST" })
-  .middleware([authenticatedMiddleware])
-  .inputValidator(createListSchema)
-  .handler(async ({ context, data }) => {
-    const userId = context.auth.userId;
-    const listId = crypto.randomUUID();
-    await db.insertInto("list").values({ id: listId, name: data.name, createdAt: new Date().toISOString() }).execute();
-    await db.insertInto("user_to_list").values({ userId, listId }).execute();
-
-    return { success: true, listId };
-  });
-
 function CreateListForm() {
   const navigate = useNavigate();
 
   const queryClient = useQueryClient();
-  const createListMutation = useMutation({
-    mutationFn: (name: string) => createList({ data: { name } }),
-    onSuccess: (data) => {
-      if (data.listId) {
-        queryClient.invalidateQueries({ queryKey: getListsQuery.queryKey });
-        navigate({ to: "/list/$id", params: { id: data.listId } });
-      }
-    },
-  });
+  const createListMutation = useMutation(
+    orpc.list.createList.mutationOptions({
+      onSuccess: (data) => {
+        if (data.listId) {
+          queryClient.invalidateQueries({ queryKey: orpc.list.getLists.key() });
+          navigate({ to: "/list/$id", params: { id: data.listId } });
+        }
+      },
+    }),
+  );
   const { register, handleSubmit } = useForm<CreateListSchema>({
     resolver: zodResolver(createListSchema),
   });
 
   const onSubmit = (data: CreateListSchema) => {
-    createListMutation.mutate(data.name);
+    createListMutation.mutate(data);
   };
 
   return (

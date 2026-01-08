@@ -238,7 +238,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
     this.invalidateDbSchema();
 
-    perf?.logEnd("useSnapshot", "success", "info");
+    perf?.logEnd("useSnapshot", "success", "system");
   }
 
   createSnapshot() {

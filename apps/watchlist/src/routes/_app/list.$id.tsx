@@ -1,26 +1,28 @@
-import { createFileRoute, useLoaderData } from "@tanstack/react-router";
-import { createServerFn } from "@tanstack/react-start";
+import type { SyncedDb } from "@sqlite-sync/core";
+import { ClientOnly, createFileRoute } from "@tanstack/react-router";
 import { AppHeader, ProjectSelector } from "@/components/app-layout";
-import { userCanAccessListMiddleware } from "@/lib/lists";
+import { initListDb } from "@/lib/list-db/list-db";
+import type { ListDb } from "@/lib/list-db/migrations";
+import { orpc } from "@/orpc/orpc-client";
 
-const getList = createServerFn({ method: "GET" })
-  .middleware([userCanAccessListMiddleware])
-  .handler(async ({ context }) => {
-    return context.list;
-  });
+let db: SyncedDb<ListDb> | null = null;
 
 export const Route = createFileRoute("/_app/list/$id")({
   component: RouteComponent,
   loaderDeps: () => ({}),
   shouldReload: false,
-  loader: async ({ params }) => {
-    const list = await getList({ data: { listId: params.id } });
+  loader: async ({ params, context }) => {
+    const list = await context.queryClient.ensureQueryData(
+      orpc.list.getList.queryOptions({ input: { listId: params.id } }),
+    );
+    if (!db) {
+      db = await initListDb({ listId: list.id });
+    }
     return { list };
   },
 });
 
 function RouteComponent() {
-  const { list } = useLoaderData({ from: "/_app/list/$id" });
   return (
     <>
       <AppHeader>

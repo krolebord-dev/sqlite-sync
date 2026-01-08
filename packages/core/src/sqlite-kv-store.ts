@@ -27,29 +27,40 @@ export function createSQLiteKvStore({
   }>;
 
   const get = (key: string): string | null => {
-    const [result] = metaDb.executePrepared("get-meta-value", { key }, (db, params) =>
-      db
-        .selectFrom(metaTableName as "meta")
-        .where("key", "=", params("key"))
-        .select("value")
-        .limit((eb) => eb.lit(1)),
+    const [result] = metaDb.executePrepared(
+      "get-meta-value",
+      { key },
+      (db, params) =>
+        db
+          .selectFrom(metaTableName as "meta")
+          .where("key", "=", params("key"))
+          .select("value")
+          .limit((eb) => eb.lit(1)),
+      { loggerLevel: "system" },
     );
 
     return result?.value ?? null;
   };
 
   const set = (key: string, value: string) => {
-    metaDb.executePrepared("set-meta-value", { key, value }, (db, params) =>
-      db
-        .insertInto(metaTableName as "meta")
-        .values({ key: params("key"), value: params("value") })
-        .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
+    metaDb.executePrepared(
+      "set-meta-value",
+      { key, value },
+      (db, params) =>
+        db
+          .insertInto(metaTableName as "meta")
+          .values({ key: params("key"), value: params("value") })
+          .onConflict((oc) => oc.doUpdateSet({ value: params("value") })),
+      { loggerLevel: "system" },
     );
   };
 
   const remove = (key: string) => {
-    metaDb.executePrepared("remove-meta-value", { key }, (db, params) =>
-      db.deleteFrom(metaTableName as "meta").where("key", "=", params("key")),
+    metaDb.executePrepared(
+      "remove-meta-value",
+      { key },
+      (db, params) => db.deleteFrom(metaTableName as "meta").where("key", "=", params("key")),
+      { loggerLevel: "system" },
     );
   };
 

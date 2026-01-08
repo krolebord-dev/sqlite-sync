@@ -1,10 +1,10 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { getAuth } from "@/lib/auth";
+import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_app")({
   component: RouteComponent,
-  loader: async () => {
-    const auth = await getAuth();
+  loader: async ({ context }) => {
+    const auth = await context.queryClient.ensureQueryData(orpc.auth.getAuth.queryOptions());
 
     if (!auth) {
       throw redirect({ to: "/sign-in" });

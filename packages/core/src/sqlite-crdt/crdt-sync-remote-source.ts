@@ -88,7 +88,9 @@ export const createCrdtSyncRemoteSource = ({
       }
 
       if (!remoteFactory) {
-        throw new Error("Remote source factory not provided");
+        console.warn("Remote source factory not provided. Going offline.");
+        setRemoteState({ type: "offline", reason: "NOT_INITIALIZED" });
+        return;
       }
 
       setRemoteState({ type: "pending" });

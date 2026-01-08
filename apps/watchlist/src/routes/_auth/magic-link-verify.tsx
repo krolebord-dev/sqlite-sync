@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { verifyMagicLink } from "@/lib/auth";
+import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_auth/magic-link-verify")({
   component: RouteComponent,
@@ -29,20 +29,21 @@ function RouteComponent() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  const { mutate: verify, isPending } = useMutation({
-    mutationFn: (data: { email: string; code: string }) => verifyMagicLink({ data }),
-    onSuccess: (result) => {
-      if (result.success) {
-        toast.success("Successfully signed in!");
-        navigate({ to: "/" });
-      } else {
-        setError(result.error ?? "Verification failed");
-      }
-    },
-    onError: () => {
-      toast.error("An unexpected error occurred");
-    },
-  });
+  const { mutate: verify, isPending } = useMutation(
+    orpc.auth.verifyMagicLink.mutationOptions({
+      onSuccess: (result) => {
+        if (result.success) {
+          toast.success("Successfully signed in!");
+          navigate({ to: "/" });
+        } else {
+          setError(result.error ?? "Verification failed");
+        }
+      },
+      onError: () => {
+        toast.error("An unexpected error occurred");
+      },
+    }),
+  );
 
   const handleSubmit = () => {
     if (!email) {
@@ -93,6 +94,9 @@ function RouteComponent() {
           {error && <p className="text-destructive text-sm">{error}</p>}
           <Button disabled={isPending || code.length !== 6 || !email} className="gap-2" onClick={handleSubmit}>
             {isPending ? <Loader2 size={16} className="animate-spin" /> : "Verify Code"}
+          </Button>
+          <Button variant="secondary" asChild>
+            <Link to="/sign-in">Sign In</Link>
           </Button>
         </div>
       </CardContent>

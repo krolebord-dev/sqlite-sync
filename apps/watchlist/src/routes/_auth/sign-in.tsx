@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { initiateGoogleSignIn, signUpWithMagicLink } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_auth/sign-in")({
   component: RouteComponent,
@@ -30,16 +30,17 @@ function RouteComponent() {
     }
   }, []);
 
-  const { mutate: sendMagicLink, isPending } = useMutation({
-    mutationFn: (data: { email: string }) => signUpWithMagicLink({ data }),
-    onSuccess: () => {
-      toast.success("Magic link sent! Check your email.");
-      navigate({ to: "/magic-link-verify", search: { email, code: undefined } });
-    },
-    onError: () => {
-      toast.error("Failed to send magic link. Please try again.");
-    },
-  });
+  const { mutate: sendMagicLink, isPending } = useMutation(
+    orpc.auth.signUpWithMagicLink.mutationOptions({
+      onSuccess: () => {
+        toast.success("Magic link sent! Check your email.");
+        navigate({ to: "/magic-link-verify", search: { email, code: undefined } });
+      },
+      onError: () => {
+        toast.error("Failed to send magic link. Please try again.");
+      },
+    }),
+  );
 
   const handleSendMagicLink = () => {
     if (!email.trim()) {
@@ -95,7 +96,7 @@ function RouteComponent() {
               disabled={isPending}
               onClick={async () => {
                 try {
-                  const result = await initiateGoogleSignIn();
+                  const result = await orpc.auth.initiateGoogleSignIn.call();
                   window.location.href = result.url;
                 } catch {
                   toast.error("Failed to initiate Google sign-in");

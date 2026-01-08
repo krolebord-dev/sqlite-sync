@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "watchlist",
-  "main": "src/server.ts",
+  "main": "./src/server.ts",
   "compatibility_date": "2025-09-02",
   "compatibility_flags": ["nodejs_compat"],
   "route": {
@@ -29,5 +29,10 @@
       "database_id": "b3c1b286-6a7e-45a6-b3d5-1bf14b1f31e9",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/rpc/*", "/api/*"]
+  }
 }

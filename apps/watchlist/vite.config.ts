@@ -2,24 +2,31 @@ import path from "node:path";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { devtools } from "@tanstack/devtools-vite";
-import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 const config = defineConfig({
-  plugins: [devtools(), cloudflare({ viteEnvironment: { name: "ssr" } }), tailwindcss(), tanstackStart(), viteReact()],
-  environments: {
-    ssr: {
-      optimizeDeps: {
-        exclude: ["node:sqlite"],
-      },
-    },
-  },
+  plugins: [
+    devtools(),
+    cloudflare(),
+    tailwindcss(),
+    tanstackRouter({
+      target: "react",
+      autoCodeSplitting: true,
+    }),
+    viteReact(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
+    conditions: ["@sqlite-sync/source"],
   },
+  optimizeDeps: {
+    exclude: ["@sqlite.org/sqlite-wasm"],
+  },
+  worker: { format: "es" },
 });
 
 export default config;

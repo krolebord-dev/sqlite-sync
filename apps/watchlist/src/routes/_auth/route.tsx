@@ -1,10 +1,11 @@
+import { safe } from "@orpc/client";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
-import { getAuth } from "@/lib/auth";
+import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_auth")({
   component: RouteComponent,
   beforeLoad: async () => {
-    const auth = await getAuth();
+    const [_, auth] = await safe(orpc.auth.getAuth.call());
     if (auth) {
       throw redirect({ to: "/" });
     }

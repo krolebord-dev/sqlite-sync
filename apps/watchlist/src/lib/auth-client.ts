@@ -1,15 +1,18 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLoaderData, useNavigate } from "@tanstack/react-router";
-import { signOut as signOutFn } from "./auth";
+import { orpc } from "@/orpc/orpc-client";
 
 export function useSignOut() {
   const navigate = useNavigate();
-  const signOutMutation = useMutation({
-    mutationFn: signOutFn,
-    onSuccess: async () => {
-      navigate({ to: "/sign-in", replace: true, reloadDocument: true });
-    },
-  });
+  const queryClient = useQueryClient();
+  const signOutMutation = useMutation(
+    orpc.auth.signOut.mutationOptions({
+      onSuccess: async () => {
+        navigate({ to: "/sign-in", replace: true, reloadDocument: true });
+        queryClient.invalidateQueries();
+      },
+    }),
+  );
 
   function signOut() {
     signOutMutation.mutate({});

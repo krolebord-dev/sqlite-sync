@@ -8,8 +8,8 @@ let sqliteModule: Sqlite3Static | null = null;
 type TableName<Database> = keyof Database extends string ? keyof Database : never;
 
 type SQLiteReactiveDbOptions = {
-  snapshot?: Uint8Array<ArrayBufferLike>;
-  logger?: Logger;
+  snapshot: Uint8Array<ArrayBufferLike>;
+  logger: Logger;
 };
 
 type EventsMap = {
@@ -21,24 +21,6 @@ type EventsMap = {
 export function createSQLiteReactiveDb<Database>(opts: SQLiteReactiveDbOptions) {
   return SQLiteReactiveDb.create<Database>(opts);
 }
-
-const defaultLogger: Logger = (type, message, level = "info") => {
-  const logMessage = `[${type}] ${message}`;
-  switch (level) {
-    case "info":
-      console.log(logMessage);
-      break;
-    case "warning":
-      console.warn(logMessage);
-      break;
-    case "error":
-      console.error(logMessage);
-      break;
-    case "trace":
-      console.trace(logMessage);
-      break;
-  }
-};
 
 export class SQLiteReactiveDb<Database> {
   readonly db: SQLiteDbWrapper<Database>;
@@ -63,7 +45,7 @@ export class SQLiteReactiveDb<Database> {
   }
 
   static async create<Database>(opts: SQLiteReactiveDbOptions) {
-    const logger = opts.logger ?? defaultLogger;
+    const logger = opts.logger;
     const perf = startPerformanceLogger(logger);
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
@@ -76,7 +58,7 @@ export class SQLiteReactiveDb<Database> {
     }
     db.registerDbHooks();
 
-    perf.logEnd("createSQLiteMemoryDb", "success", "info");
+    perf.logEnd("createSQLiteMemoryDb", "success", "system");
 
     return db;
   }

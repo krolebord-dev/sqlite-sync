@@ -1,4 +1,5 @@
 import { deserializeHLC, HLCCounter } from "./hlc";
+import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import type { SyncDbMigrator } from "./migrations/migrator";
@@ -15,10 +16,30 @@ type SyncedDbOptions = {
   worker: Worker;
 };
 
+const defaultLogger: Logger = (type, message, level = "info") => {
+  const logMessage = `[${type}] ${message}`;
+  switch (level) {
+    case "info":
+      console.log(logMessage);
+      break;
+    case "warning":
+      console.warn(logMessage);
+      break;
+    case "error":
+      console.error(logMessage);
+      break;
+    case "trace":
+      console.trace(logMessage);
+      break;
+  }
+};
+
 export async function createSyncedDb<Database>(options: SyncedDbOptions) {
   if (!options.dbPath.startsWith("/")) {
     throw new Error("dbPath must be an absolute path");
   }
+
+  const perf = startPerformanceLogger(defaultLogger);
 
   const tabId = generateId();
 
@@ -39,6 +60,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
   const workerClientSnapshot = await workerClient.getSnapshot();
   const reactiveDb = await createSQLiteReactiveDb<Database>({
     snapshot: workerClientSnapshot.file,
+    logger: defaultLogger,
   });
 
   const memoryDbMigrator: SyncDbMigrator = {
@@ -99,6 +121,8 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
       hlcCounter.mergeHLC(deserializeHLC(event.payload.timestamp));
     }
   });
+
+  perf.logEnd("createSyncedDb", "initialized", "info");
 
   return {
     db: reactiveDb.db,
