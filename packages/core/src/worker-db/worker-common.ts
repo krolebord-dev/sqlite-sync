@@ -82,15 +82,15 @@ export type WorkerBroadcastChannels = {
   responses: TypedBroadcastChannel<WorkerResponseMessage | WorkerNotificationMessage>;
 };
 
-export const createBroadcastChannels = (): WorkerBroadcastChannels => {
+export const createBroadcastChannels = (prefix: string): WorkerBroadcastChannels => {
   return {
-    requests: new TypedBroadcastChannel(broadcastChannelNames.requests),
-    responses: new TypedBroadcastChannel(broadcastChannelNames.responses),
+    requests: new TypedBroadcastChannel(`${prefix}-${broadcastChannelNames.requests}`),
+    responses: new TypedBroadcastChannel(`${prefix}-${broadcastChannelNames.responses}`),
   };
 };
 
 export type WorkerConfig = {
-  dbPath: string;
+  dbId: string;
   clientId: string;
   clearOnInit?: boolean;
 };

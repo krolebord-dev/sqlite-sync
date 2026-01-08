@@ -1,4 +1,4 @@
-import sqlite3InitModule, { type SAHPoolUtil } from "@sqlite.org/sqlite-wasm";
+import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import type { Logger } from "../logger";
 import { createMigrator, type Migrations, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
@@ -46,20 +46,20 @@ const defaultLogger: Logger = (type, message, level = "info") => {
 };
 
 async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
-  const broadcastChannels = createBroadcastChannels();
+  const broadcastChannels = createBroadcastChannels(config.dbId);
   const logger = opts.logger ?? defaultLogger;
 
   const sqlite3 = await sqlite3InitModule();
 
   const pool = await sqlite3.installOpfsSAHPoolVfs({
-    name: "sync-db-storage",
+    name: config.dbId,
+    directory: `.${config.dbId}`,
     clearOnInit: config.clearOnInit,
+    initialCapacity: 8,
   });
 
-  await normalizePoolCapacity(pool);
-
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
-    db: new pool.OpfsSAHPoolDb(config.dbPath),
+    db: new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
     logger: logger,
     loggerPrefix: "worker",
     sqlite3,
@@ -69,10 +69,10 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
   db.execute("PRAGMA synchronous=NORMAL", { loggerLevel: "system" });
 
-  db.execute(`ATTACH DATABASE '${config.dbPath}-worker' as worker`, { loggerLevel: "system" });
-  db.execute("PRAGMA worker.synchronous=NORMAL", { loggerLevel: "system" });
-  db.execute("PRAGMA worker.journal_mode=WAL", { loggerLevel: "system" });
+  db.execute(`ATTACH DATABASE '/${config.dbId}-worker.db' as worker`, { loggerLevel: "system" });
   db.execute("PRAGMA worker.locking_mode=exclusive", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.journal_mode=WAL", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.synchronous=NORMAL", { loggerLevel: "system" });
 
   applyWorkerDbSchema(db);
 
@@ -254,18 +254,6 @@ async function getConfig(): Promise<WorkerConfig> {
   return responsePromise.promise;
 }
 
-async function normalizePoolCapacity(pool: SAHPoolUtil) {
-  const capacity = pool.getCapacity();
-  const fileCount = pool.getFileCount();
-  const capacityDiff = capacity - fileCount;
-
-  if (capacityDiff < 6) {
-    await pool.addCapacity(6 - capacityDiff);
-  } else {
-    await pool.reduceCapacity(capacityDiff - 6);
-  }
-}
-
 type WorkerOptions = {
   migrations: Migrations;
   logger?: Logger;
@@ -275,7 +263,7 @@ type WorkerOptions = {
 export async function startDbWorker(opts: WorkerOptions) {
   const config = await getConfig();
 
-  await navigator.locks.request(syncDbWorkerLockName, { mode: "exclusive" }, async (lock) => {
+  await navigator.locks.request(`${syncDbWorkerLockName}-${config.dbId}`, { mode: "exclusive" }, async (lock) => {
     if (!lock) {
       return;
     }

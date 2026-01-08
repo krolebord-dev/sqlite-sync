@@ -9,7 +9,7 @@ export async function initListDb({ listId }: { listId: string }) {
     type: "module",
   });
   const db = await createSyncedDb<ListDb>({
-    dbPath: `/db-${listId}.sqlite3`,
+    dbId: `list-${listId}`,
     worker,
     crdtTables: [{ baseTableName: "_item", crdtTableName: "item" }],
   });

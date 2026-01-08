@@ -1,11 +1,11 @@
 import type { SyncedDb } from "@sqlite-sync/core";
-import { ClientOnly, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLoaderData } from "@tanstack/react-router";
 import { AppHeader, ProjectSelector } from "@/components/app-layout";
-import { initListDb } from "@/lib/list-db/list-db";
+import { DbProvider, initListDb } from "@/lib/list-db/list-db";
 import type { ListDb } from "@/lib/list-db/migrations";
 import { orpc } from "@/orpc/orpc-client";
 
-let db: SyncedDb<ListDb> | null = null;
+const dbs = new Map<string, SyncedDb<ListDb>>();
 
 export const Route = createFileRoute("/_app/list/$id")({
   component: RouteComponent,
@@ -15,14 +15,27 @@ export const Route = createFileRoute("/_app/list/$id")({
     const list = await context.queryClient.ensureQueryData(
       orpc.list.getList.queryOptions({ input: { listId: params.id } }),
     );
+
+    let db = dbs.get(list.id);
     if (!db) {
       db = await initListDb({ listId: list.id });
+      dbs.set(list.id, db);
     }
-    return { list };
+    return { list, db };
   },
 });
 
 function RouteComponent() {
+  const { db } = useLoaderData({ from: "/_app/list/$id" });
+
+  return (
+    <DbProvider db={db}>
+      <ListPage />
+    </DbProvider>
+  );
+}
+
+function ListPage() {
   return (
     <>
       <AppHeader>
@@ -36,8 +49,8 @@ function RouteComponent() {
       <div className="sticky top-0 z-10 flex items-center justify-center bg-background/80 pb-2 backdrop-blur-md">
         <div className="grid w-full max-w-7xl grid-cols-[1fr_auto] items-center justify-start gap-x-4 gap-y-1 px-4 pt-2 sm:grid-cols-[auto_1fr_auto]">
           {/* <SortingHeader />
-          <SearchInput className="max-sm:col-span-2 max-sm:row-start-2 sm:max-w-52" />
-          <HeaderMenu /> */}
+      <SearchInput className="max-sm:col-span-2 max-sm:row-start-2 sm:max-w-52" />
+      <HeaderMenu /> */}
         </div>
       </div>
       <div className="flex w-full flex-col items-center">{/* <ItemsList /> */}</div>

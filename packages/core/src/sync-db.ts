@@ -1,3 +1,4 @@
+import { validateDbId } from "./db-id";
 import { deserializeHLC, HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
@@ -10,7 +11,7 @@ import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
 
 type SyncedDbOptions = {
-  dbPath: string;
+  dbId: string;
   clearOnInit?: boolean;
   crdtTables: MemoryDbCrdtTableConfig[];
   worker: Worker;
@@ -35,21 +36,19 @@ const defaultLogger: Logger = (type, message, level = "info") => {
 };
 
 export async function createSyncedDb<Database>(options: SyncedDbOptions) {
-  if (!options.dbPath.startsWith("/")) {
-    throw new Error("dbPath must be an absolute path");
-  }
+  validateDbId(options.dbId);
 
   const perf = startPerformanceLogger(defaultLogger);
 
   const tabId = generateId();
 
-  const broadcastChannels = createBroadcastChannels();
+  const broadcastChannels = createBroadcastChannels(options.dbId);
 
   const workerClient = await createWorkerDbClient({
     worker: options.worker,
     config: {
       clientId: generateId(),
-      dbPath: options.dbPath,
+      dbId: options.dbId,
       clearOnInit: options.clearOnInit,
     },
     broadcastChannels,

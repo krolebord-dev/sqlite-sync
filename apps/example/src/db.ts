@@ -1,6 +1,5 @@
-import { createSyncedDb, startPerformanceLogger } from "@sqlite-sync/core";
+import { createSyncedDb } from "@sqlite-sync/core";
 import { createDbContext } from "@sqlite-sync/react";
-import { logger } from "./logger";
 import type { Database } from "./seed";
 
 export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext<{
@@ -18,18 +17,15 @@ export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext<{
 }>();
 
 export async function initDb() {
-  const perf = startPerformanceLogger(logger);
   const worker = new Worker(new URL("./db-worker.ts", import.meta.url), {
     type: "module",
   });
   const db = await createSyncedDb<Database>({
-    dbPath: "/db.sqlite3",
+    dbId: "example-db",
     worker,
     crdtTables: [{ baseTableName: "_todo", crdtTableName: "todo" }],
     clearOnInit: window.location.search.includes("clear"),
   });
-
-  perf.logEnd("initDb", "success");
 
   return db;
 }
