@@ -9,7 +9,7 @@ export function App() {
   const [newTodoTitle, setNewTodoTitle] = useState("");
   const [randomCount, setRandomCount] = useState(10);
 
-  const { rows: todos } = useDbQuery({
+  const { data: todos } = useDbQuery({
     parameters: [newTodoTitle],
     queryFn: (db, [newTodoTitle]) => {
       let query = db.selectFrom("todo").selectAll().orderBy("id");
@@ -22,18 +22,18 @@ export function App() {
     },
   });
 
-  const {
-    rows: [todoStats],
-  } = useDbQuery({
+  const { data: todoStats } = useDbQuery({
     queryFn: (db) => {
       const query = db
         .selectFrom("todo")
         .select(({ fn }) => [fn.countAll<number>().as("total"), fn.sum<number>("completed").as("completed")]);
       return query;
     },
+    mapData: ([todoStats]) => ({
+      completedCount: Number(todoStats?.completed ?? 0),
+      totalCount: Number(todoStats?.total ?? 0),
+    }),
   });
-  const completedCount = Number(todoStats?.completed ?? 0);
-  const totalCount = todoStats?.total ?? 0;
 
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;
@@ -94,7 +94,7 @@ export function App() {
         <p className="text-sm">
           ✅ Optimistic DB (in-memory) ready
           <br />✅ Sync DB (persistent) ready
-          <br />✅ {totalCount} active todos ({completedCount} completed)
+          <br />✅ {todoStats.totalCount} active todos ({todoStats.completedCount} completed)
         </p>
       </div>
 

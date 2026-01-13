@@ -3,9 +3,10 @@ import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
 import { createContext, use, useCallback, useMemo, useSyncExternalStore } from "react";
 
-type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, TResult, Database> = {
+type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, Database, TResult, TMapResult = TResult> = {
   parameters?: TParams;
   queryFn: (kysely: Kysely<Database>, keys: TParams) => Compilable<TResult>;
+  mapData?: (data: TResult[]) => TMapResult;
 };
 
 export function createDbContext<Database>() {
@@ -23,10 +24,11 @@ export function createDbContext<Database>() {
     return <dbContext.Provider value={db}>{children}</dbContext.Provider>;
   };
 
-  const useDbQuery = <TResult, TParams extends readonly unknown[] | undefined = undefined>({
+  const useDbQuery = <TResult, TMapResult = TResult[], TParams extends readonly unknown[] | undefined = undefined>({
     parameters,
     queryFn,
-  }: UseDbQueryOptions<TParams, TResult, Database>) => {
+    mapData,
+  }: UseDbQueryOptions<TParams, Database, TResult, TMapResult>) => {
     const db = useDb();
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: parameters is a dependency of the query
@@ -41,9 +43,14 @@ export function createDbContext<Database>() {
       });
     }, [db, compiledQuery]);
 
-    const rows = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
+    const data = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
 
-    return { rows, refresh: liveQuery.refresh };
+    // biome-ignore lint/correctness/useExhaustiveDependencies: mapData is a dependency of the mapped data
+    const mappedData = useMemo(() => {
+      return mapData ? mapData(data) : data;
+    }, [data]) as TMapResult;
+
+    return { data: mappedData, refresh: liveQuery.refresh };
   };
 
   const useDbState = (): WorkerState => {
