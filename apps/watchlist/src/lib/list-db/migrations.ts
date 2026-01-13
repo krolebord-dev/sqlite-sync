@@ -1,20 +1,23 @@
 import { createMigrations } from "@sqlite-sync/core";
 
+export type ListItem = {
+  id: string;
+  type: "movie" | "tv";
+  tmdbId: number;
+  priority: number;
+  title: string;
+  posterUrl: string | null;
+  rating: number | null;
+  overview: string | null;
+  releaseDate: number | null;
+  duration: number | null;
+  episodeCount: number | null;
+  watchedAt: number | null;
+  createdAt: number;
+};
+
 export type ListDb = {
-  item: {
-    id: string;
-    type: "movie" | "tv";
-    tmdbId: number;
-    priority: number;
-    title: string;
-    posterUrl: string | null;
-    rating: number | null;
-    overview: string | null;
-    releaseDate: number | null;
-    duration: number | null;
-    episodeCount: number | null;
-    watchedAt: number | null;
-  };
+  item: ListItem;
 };
 
 export const migrations = createMigrations((b) => ({
@@ -34,7 +37,8 @@ export const migrations = createMigrations((b) => ({
           .addColumn("releaseDate", "integer")
           .addColumn("duration", "integer")
           .addColumn("episodeCount", "integer")
-          .addColumn("watchedAt", "integer"),
+          .addColumn("watchedAt", "integer")
+          .addColumn("createdAt", "integer", (col) => col.notNull()),
       ),
     ],
   },

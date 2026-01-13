@@ -1,7 +1,7 @@
 import { createORPCClient, type InferClientErrorUnion, isDefinedError } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ClientRetryPluginContext } from "@orpc/client/plugins";
-import type { RouterClient } from "@orpc/server";
+import type { InferRouterOutputs, RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils, type RouterUtils } from "@orpc/tanstack-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { AnyRouter } from "@tanstack/react-router";
@@ -24,6 +24,8 @@ const link = new RPCLink<ORPCClientContext>({
 const orpcClient: BaseORPCClient = createORPCClient(link);
 
 export const orpc: ORPCClient = createTanstackQueryUtils(orpcClient);
+
+export type ORPCOutputs = InferRouterOutputs<typeof orpcRouter>;
 
 export function setupOrpcQueryClientIntegration<TRouter extends AnyRouter>(queryClient: QueryClient, router: TRouter) {
   const handleORPCClientError = (error: ORPCClientError): boolean => {

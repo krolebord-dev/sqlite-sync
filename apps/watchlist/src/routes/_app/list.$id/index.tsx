@@ -1,0 +1,448 @@
+import { generateId, type SyncedDb } from "@sqlite-sync/core";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, useLoaderData, useSearch } from "@tanstack/react-router";
+import { format } from "date-fns";
+import { Provider, useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useHydrateAtoms } from "jotai/utils";
+import { sql } from "kysely";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CalendarIcon,
+  CheckIcon,
+  Clock4Icon,
+  EllipsisVertical,
+  HashIcon,
+  ShuffleIcon,
+  SquareDashed,
+  SquareDashedMousePointerIcon,
+  StarIcon,
+} from "lucide-react";
+import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { DbProvider, initListDb, useDb, useDbQuery } from "@/lib/list-db/list-db";
+import type { ListDb } from "@/lib/list-db/migrations";
+import { cn } from "@/lib/utils";
+import { useThrottle } from "@/lib/utils/use-throttle";
+import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
+import { priorityColors } from "./-/common";
+import { getPriorityValue, ListItemCard, VoteAverage } from "./-/item-card";
+import {
+  clearRandomizedItemAtom,
+  clearSelectedItemsAtom,
+  dbAtom,
+  isSelectionModeAtom,
+  itemsFilterSchema,
+  randomizedItemAtom,
+  type SortingOptions,
+  searchQueryAtom,
+  selectAllAtom,
+  selectRandomFromSelectedItemsAtom,
+} from "./-/list-atoms";
+
+const dbs = new Map<string, SyncedDb<ListDb>>();
+
+export const Route = createFileRoute("/_app/list/$id/")({
+  component: RouteComponent,
+  validateSearch: itemsFilterSchema,
+  loaderDeps: () => ({}),
+  shouldReload: false,
+  loader: async ({ params, context }) => {
+    const list = await context.queryClient.ensureQueryData(
+      orpc.list.getList.queryOptions({ input: { listId: params.id } }),
+    );
+
+    let db = dbs.get(list.id);
+    if (!db) {
+      db = await initListDb({ listId: list.id });
+      dbs.set(list.id, db);
+    }
+    return { list, db };
+  },
+});
+
+function RouteComponent() {
+  const { db } = useLoaderData({ from: "/_app/list/$id/" });
+
+  return (
+    <DbProvider db={db}>
+      <Provider>
+        <HydrateListAtoms>
+          <ListPage />
+        </HydrateListAtoms>
+      </Provider>
+    </DbProvider>
+  );
+}
+
+function HydrateListAtoms({ children }: { children: React.ReactNode }) {
+  const db = useDb();
+  useHydrateAtoms([[dbAtom, db]] as any);
+  return children;
+}
+
+function ListPage() {
+  return (
+    <>
+      <AppHeader>
+        <div className="flex items-center gap-2">
+          <ProjectSelector />
+          {/* <ListSettings /> */}
+        </div>
+        <UserAvatarDropdown />
+      </AppHeader>
+      <div className="sticky top-0 z-10 flex items-center justify-center bg-background/80 pb-2 backdrop-blur-md">
+        <div className="grid w-full max-w-7xl grid-cols-[1fr_auto] items-center justify-start gap-x-4 gap-y-1 px-4 pt-2 sm:grid-cols-[auto_1fr_auto]">
+          <SortingHeader />
+          <SearchInput className="max-sm:col-span-2 max-sm:row-start-2 sm:max-w-52" />
+          <HeaderMenu />
+        </div>
+      </div>
+      <div className="flex w-full flex-col items-center">
+        <ItemsList />
+        <TmdbSearchResults />
+      </div>
+    </>
+  );
+}
+
+function HeaderMenu({ className }: { className?: string }) {
+  const isSelectionMode = useAtomValue(isSelectionModeAtom);
+  const isRandomizedItem = !!useAtomValue(randomizedItemAtom);
+
+  const clearSelectedItems = useSetAtom(clearSelectedItemsAtom);
+  const selectAllItems = useSetAtom(selectAllAtom);
+  const selectRandomFromSelectedItems = useSetAtom(selectRandomFromSelectedItemsAtom);
+  const clearRandomizedItem = useSetAtom(clearRandomizedItemAtom);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild className={cn("shrink-0", className)}>
+        <Button variant="outline" size="icon">
+          <EllipsisVertical />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        {isSelectionMode ? (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              clearSelectedItems();
+            }}
+          >
+            <SquareDashed /> Clear selection
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              selectAllItems();
+            }}
+          >
+            <SquareDashedMousePointerIcon /> Select all
+          </DropdownMenuItem>
+        )}
+        {isSelectionMode && !isRandomizedItem && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              selectRandomFromSelectedItems();
+            }}
+          >
+            <ShuffleIcon /> Select random
+          </DropdownMenuItem>
+        )}
+        {isRandomizedItem && (
+          <DropdownMenuItem
+            onClick={(e) => {
+              e.preventDefault();
+              clearRandomizedItem();
+            }}
+          >
+            <CheckIcon /> Clear randomized
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SortingHeader({ className }: { className?: string }) {
+  const { sortBy, sortOrder } = useSearch({ from: "/_app/list/$id/" });
+
+  return (
+    <div className={cn("flex items-center gap-1", className)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline">
+            {sortByIcon[sortBy]}
+            <span>{sortByLabel[sortBy]}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <SortingOption sortBy="duration" />
+          <SortingOption sortBy="createdAt" />
+          <SortingOption sortBy="rating" />
+          <SortingOption sortBy="priority" />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="outline" size="icon" asChild>
+        <Link to="." search={(prev) => ({ ...prev, sortOrder: sortOrder === "asc" ? "desc" : "asc" })}>
+          {sortOrderIcon[sortOrder]}
+        </Link>
+      </Button>
+      <FilterButton />
+    </div>
+  );
+}
+
+const sortOrderIcon: Record<SortingOptions["sortOrder"], React.ReactNode> = {
+  asc: <ArrowUpIcon />,
+  desc: <ArrowDownIcon />,
+};
+
+const sortByIcon: Record<SortingOptions["sortBy"], React.ReactNode> = {
+  duration: <Clock4Icon />,
+  rating: <StarIcon />,
+  createdAt: <CalendarIcon />,
+  priority: <HashIcon />,
+};
+
+const sortByLabel: Record<SortingOptions["sortBy"], string> = {
+  duration: "Duration",
+  rating: "Rating",
+  createdAt: "Date Added",
+  priority: "Priority",
+};
+
+type SortingByOptionProps = {
+  sortBy: SortingOptions["sortBy"];
+};
+function SortingOption({ sortBy }: SortingByOptionProps) {
+  return (
+    <DropdownMenuItem asChild className="w-full justify-between">
+      <Link to="." search={(prev) => ({ ...prev, sortBy })}>
+        <div className="flex items-center gap-2">
+          {sortByIcon[sortBy]}
+          <span>{sortByLabel[sortBy]}</span>
+        </div>
+      </Link>
+    </DropdownMenuItem>
+  );
+}
+
+function FilterButton() {
+  const { priority } = useSearch({ from: "/_app/list/$id/" });
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="icon"
+          className={priority === "any" ? undefined : priorityColors[priority].text}
+        >
+          {priority === "any" ? <HashIcon /> : priorityColors[priority].icon}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem asChild>
+          <Link to="." search={(prev) => ({ ...prev, priority: "high" })} className={priorityColors.high.text}>
+            {priorityColors.high.icon}
+            High
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="." search={(prev) => ({ ...prev, priority: "normal" })} className={priorityColors.normal.text}>
+            {priorityColors.normal.icon}
+            Normal
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="." search={(prev) => ({ ...prev, priority: "low" })} className={priorityColors.low.text}>
+            {priorityColors.low.icon}
+            Low
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="." search={(prev) => ({ ...prev, priority: "any" })}>
+            <HashIcon /> Any
+          </Link>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SearchInput({ className }: { className?: string }) {
+  const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
+
+  return (
+    <Input
+      placeholder="Search..."
+      className={className}
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+    />
+  );
+}
+
+function useOrderedAndFilteredItems() {
+  const { sortBy, sortOrder, priority } = useSearch({ from: "/_app/list/$id/" });
+  const searchQuery = useAtomValue(searchQueryAtom);
+  const randomizedItem = useAtomValue(randomizedItemAtom);
+
+  const { data: items } = useDbQuery({
+    parameters: [sortBy, sortOrder, priority, searchQuery, randomizedItem] as const,
+    queryFn: (db, [sortBy, sortOrder, priority, searchQuery, randomizedItem]) => {
+      let query = db
+        .selectFrom("item")
+        .selectAll()
+        .orderBy(sql`(id = ${randomizedItem}) desc`)
+        .orderBy("watchedAt", (ob) => ob.nullsFirst().desc())
+        .orderBy(sortBy, sortOrder);
+      if (priority !== "any") {
+        query = query.where("priority", "=", getPriorityValue(priority));
+      }
+
+      if (searchQuery) {
+        query = query.where("title", "like", `%${searchQuery}%`);
+      }
+
+      return query;
+    },
+  });
+
+  return items;
+}
+
+function ItemsList() {
+  const orderedAndFilteredItems = useOrderedAndFilteredItems();
+
+  return (
+    <>
+      {/* {items && <EditItemDialog items={items} listId={listId} />} */}
+      <div className="flex w-full max-w-7xl flex-wrap justify-center gap-4 px-4 pt-2 pb-20 md:grid md:grid-cols-2 xl:grid-cols-3">
+        {orderedAndFilteredItems.map((item) => (
+          <ListItemCard key={item.id} item={item} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+type SearchResultItem = ORPCOutputs["search"]["search"][number];
+
+function TmdbSearchResults() {
+  const db = useDb();
+  const searchQuery = useAtomValue(searchQueryAtom);
+  const throttledQuery = useThrottle(searchQuery, 300);
+
+  const { data: alreadyAddedTmdbIds } = useDbQuery({
+    queryFn: (db) => db.selectFrom("item").select("tmdbId").where("tmdbId", "is not", null),
+    mapData: (data) => new Set(data.map((x) => x.tmdbId)),
+  });
+
+  const { data: searchResults, isLoading } = useQuery(
+    orpc.search.search.queryOptions({
+      input: { q: throttledQuery },
+      enabled: !!throttledQuery,
+      placeholderData: keepPreviousData,
+    }),
+  );
+
+  const addItem = (item: SearchResultItem) => {
+    db.db.executeKysely((db) =>
+      db.insertInto("item").values({
+        id: generateId(),
+        tmdbId: item.tmdbId,
+        type: item.type,
+        title: item.title,
+        posterUrl: item.posterUrl,
+        releaseDate: new Date(item.releaseDate).getTime(),
+        priority: 0,
+        overview: item.overview,
+        rating: item.voteAverage,
+        createdAt: Date.now(),
+      }),
+    );
+  };
+
+  if (!throttledQuery) {
+    return null;
+  }
+
+  const filteredResults = searchResults?.filter((item) => !alreadyAddedTmdbIds.has(item.tmdbId)) ?? [];
+
+  if (filteredResults.length === 0 && !isLoading) {
+    return null;
+  }
+
+  return (
+    <div className="flex w-full flex-col items-center border-border border-t bg-muted/30 pt-4">
+      <div className="w-full max-w-7xl px-4">
+        <h2 className="mb-4 font-medium text-muted-foreground text-sm">Add from TMDB</h2>
+        <div className="flex w-full flex-wrap justify-center gap-4 pb-8 md:grid md:grid-cols-2 xl:grid-cols-3">
+          {filteredResults.map((item) => (
+            <TmdbSearchResultCard key={item.tmdbId} item={item} onAdd={() => addItem(item)} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type TmdbSearchResultCardProps = {
+  item: SearchResultItem;
+  onAdd: () => void;
+};
+
+function TmdbSearchResultCard({ item, onAdd }: TmdbSearchResultCardProps) {
+  return (
+    <button
+      onClick={onAdd}
+      type="button"
+      className="group relative grid w-full cursor-pointer grid-cols-3 items-stretch overflow-hidden rounded-md border border-border border-dashed bg-card shadow-xs"
+    >
+      {item.posterUrl && (
+        <img
+          className="pointer-events-none absolute inset-0 h-full w-full object-fill opacity-30 blur-3xl"
+          draggable={false}
+          src={item.posterUrl}
+          alt={item.title}
+        />
+      )}
+      <div className="relative aspect-2/3 w-full self-center overflow-hidden">
+        {item.posterUrl && (
+          <img
+            className="h-full w-full select-none object-cover"
+            draggable={false}
+            src={item.posterUrl}
+            alt={item.title}
+          />
+        )}
+        {item.voteAverage > 0 && <VoteAverage className="absolute top-2 left-2" voteAverage={item.voteAverage} />}
+      </div>
+
+      <div className="col-span-2 flex flex-col justify-between p-4">
+        <div className="flex flex-col gap-2">
+          <span className="truncate text-start font-semibold">{item.title}</span>
+          <p className="flex flex-wrap gap-x-4 gap-y-2 text-muted-foreground text-sm">
+            {!!item.releaseDate && (
+              <span className="flex items-center gap-1">
+                <CalendarIcon className="size-4!" /> {format(new Date(item.releaseDate), "y")}
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
+}

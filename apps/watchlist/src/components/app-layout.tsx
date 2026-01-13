@@ -34,7 +34,11 @@ type ProjectSelectorProps = {
 export function ProjectSelector({ showCreate = true }: ProjectSelectorProps) {
   const lists = useSuspenseQuery(orpc.list.getLists.queryOptions());
 
-  const selectedListId = useMatch({ from: "/_app/list/$id", shouldThrow: false, select: (m) => m.loaderData?.list.id });
+  const selectedListId = useMatch({
+    from: "/_app/list/$id/",
+    shouldThrow: false,
+    select: (m) => m.loaderData?.list.id,
+  });
   const selectedList = useMemo(() => {
     return lists.data?.find((list) => list.id === selectedListId);
   }, [lists.data, selectedListId]);
