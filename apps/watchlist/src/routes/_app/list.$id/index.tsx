@@ -13,6 +13,7 @@ import {
   Clock4Icon,
   EllipsisVertical,
   HashIcon,
+  SettingsIcon,
   ShuffleIcon,
   SquareDashed,
   SquareDashedMousePointerIcon,
@@ -46,6 +47,7 @@ import {
   selectAllAtom,
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
+import { ListSettingsSheet } from "./-/list-settings";
 
 const dbs = new Map<string, SyncedDb<ListDb>>();
 
@@ -94,7 +96,7 @@ function ListPage() {
       <AppHeader>
         <div className="flex items-center gap-2">
           <ProjectSelector />
-          {/* <ListSettings /> */}
+          <ListSettings />
         </div>
         <UserAvatarDropdown />
       </AppHeader>
@@ -444,5 +446,15 @@ function TmdbSearchResultCard({ item, onAdd }: TmdbSearchResultCardProps) {
         </div>
       </div>
     </button>
+  );
+}
+
+function ListSettings() {
+  return (
+    <ListSettingsSheet asChild>
+      <Button variant="ghost" size="icon" className="size-10 rounded-full">
+        <SettingsIcon className="size-6! text-gray-400" />
+      </Button>
+    </ListSettingsSheet>
   );
 }

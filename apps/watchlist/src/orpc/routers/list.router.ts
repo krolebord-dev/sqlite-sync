@@ -45,6 +45,32 @@ export const getList = protectedProcedure
     return context.list;
   });
 
+export const getListWithMembers = protectedProcedure
+  .input(z.object({ listId: z.string() }))
+  .use(canAccessList, (input) => input.listId)
+  .handler(async ({ context, input }) => {
+    const { list } = context;
+    const listId = input.listId;
+
+    // Get members
+    const members = await db
+      .selectFrom("user_to_list as utl")
+      .innerJoin("user as u", "utl.userId", "u.id")
+      .where("utl.listId", "=", listId)
+      .select(["u.id", "u.name", "u.email"])
+      .execute();
+
+    return {
+      id: list.id,
+      name: list.name,
+      members: members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+      })),
+    };
+  });
+
 export const createList = protectedProcedure
   .input(z.object({ name: z.string() }))
   .handler(async ({ context, input }) => {
@@ -55,8 +81,65 @@ export const createList = protectedProcedure
     return { success: true, listId };
   });
 
+export const editList = protectedProcedure
+  .input(z.object({ listId: z.string(), newName: z.string() }))
+  .use(canAccessList, (input) => input.listId)
+  .handler(async ({ context, input }) => {
+    const { list } = context;
+    await db.updateTable("list").set({ name: input.newName }).where("id", "=", list.id).execute();
+    return { success: true, id: list.id, name: input.newName };
+  });
+
+export const inviteUser = protectedProcedure
+  .input(z.object({ listId: z.string(), email: z.email() }))
+  .use(canAccessList, (input) => input.listId)
+  .handler(async ({ context, input, errors }) => {
+    const { list } = context;
+    const listId = list.id;
+
+    // Find or create user by email
+    const now = new Date().toISOString();
+    let user = await db.selectFrom("user").where("email", "=", input.email).selectAll().executeTakeFirst();
+
+    if (user) {
+      const existingMember = await db
+        .selectFrom("user_to_list")
+        .where("userId", "=", user.id)
+        .where("listId", "=", listId)
+        .selectAll()
+        .executeTakeFirst();
+
+      if (existingMember) {
+        throw errors.BAD_REQUEST();
+      }
+    }
+
+    if (!user) {
+      const userId = crypto.randomUUID();
+      await db
+        .insertInto("user")
+        .values({
+          id: userId,
+          name: input.email.split("@")[0],
+          email: input.email,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .execute();
+
+      user = await db.selectFrom("user").where("id", "=", userId).selectAll().executeTakeFirstOrThrow();
+    }
+
+    await db.insertInto("user_to_list").values({ userId: user.id, listId }).execute();
+
+    return { success: true };
+  });
+
 export const listRouter = {
   getLists,
   getList,
+  getListWithMembers,
   createList,
+  editList,
+  inviteUser,
 };
