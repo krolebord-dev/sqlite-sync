@@ -10,11 +10,12 @@ import { generateId, type TypedEvent } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
 
-type SyncedDbOptions = {
+type SyncedDbOptions<Props = never> = {
   dbId: string;
   clearOnInit?: boolean;
   crdtTables: MemoryDbCrdtTableConfig[];
   worker: Worker;
+  workerProps: Props;
 };
 
 const defaultLogger: Logger = (type, message, level = "info") => {
@@ -35,7 +36,7 @@ const defaultLogger: Logger = (type, message, level = "info") => {
   }
 };
 
-export async function createSyncedDb<Database>(options: SyncedDbOptions) {
+export async function createSyncedDb<Database, Props = never>(options: SyncedDbOptions<Props>) {
   validateDbId(options.dbId);
 
   const perf = startPerformanceLogger(defaultLogger);
@@ -50,6 +51,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
       clientId: generateId(),
       dbId: options.dbId,
       clearOnInit: options.clearOnInit,
+      props: options.workerProps as never,
     },
     broadcastChannels,
   });
@@ -74,6 +76,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions) {
       }
       throw new Error("Memory DB migrations are not implemented");
     },
+    migrateEvents: (events) => events,
   };
   const { crdtStorage } = await createMemoryDb({
     migrator: memoryDbMigrator,

@@ -4,4 +4,5 @@ export type {
   EventsPushRequest,
   EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";
-export { startDbWorker } from "./worker-db/db-worker";
+export { createWsRemoteSource } from "./web-socket/ws-remote-source";
+export { getWorkerConfig, startDbWorker } from "./worker-db/db-worker";

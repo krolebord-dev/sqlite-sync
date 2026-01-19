@@ -1,6 +1,7 @@
+export { jsonSafeParse } from "../utils";
 export {
   type ExtractSyncServerRequest,
   type SyncServerMessage,
   type SyncServerRequest,
-  syncServerRequestSchema,
+  syncServerZodSchema,
 } from "./server-common";

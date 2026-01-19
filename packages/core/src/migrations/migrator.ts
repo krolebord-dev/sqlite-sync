@@ -284,7 +284,8 @@ export function createMigrator({
     });
   };
 
-  const migrateEvent = <Event extends MigratableEvent>(event: Event, targetVersion: number): Event | null => {
+  const migrateEvent = <Event extends MigratableEvent>(event: Event, targetVersion?: number): Event | null => {
+    targetVersion ??= latestSchemaVersion;
     if (targetVersion > schemaVersion.current) {
       throw new Error(
         `Event schema version ${event.schema_version} is greater than current schema version ${schemaVersion.current}`,
@@ -328,6 +329,12 @@ export function createMigrator({
     return event;
   };
 
+  const migrateEvents = <Event extends MigratableEvent>(events: Event[], targetVersion?: number): Event[] => {
+    return events
+      .map((event) => migrateEvent(event, targetVersion ?? latestSchemaVersion))
+      .filter((event): event is NonNullable<typeof event> => event !== null);
+  };
+
   return {
     latestSchemaVersion,
     get currentSchemaVersion() {
@@ -347,6 +354,7 @@ export function createMigrator({
       }
     },
     migrateEvent,
+    migrateEvents,
   };
 }
 

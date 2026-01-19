@@ -263,14 +263,8 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
-      // Migrate events to latest schema version and filter out nulls (dropped events)
-      const migratedEvents = eventsBatch.events
-        .map((event) => {
-          return migrator.migrateEvent(event, migrator.currentSchemaVersion);
-        })
-        .filter((event): event is NonNullable<typeof event> => event !== null);
+      const migratedEvents = migrator.migrateEvents(eventsBatch.events);
 
-      // Only push if there are events after migration
       if (migratedEvents.length > 0) {
         try {
           await retryAsPromised(

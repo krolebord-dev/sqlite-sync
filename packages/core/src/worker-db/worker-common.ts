@@ -89,10 +89,11 @@ export const createBroadcastChannels = (prefix: string): WorkerBroadcastChannels
   };
 };
 
-export type WorkerConfig = {
+export type WorkerConfig<Props = any> = {
   dbId: string;
   clientId: string;
   clearOnInit?: boolean;
+  props: Props;
 };
 
 export type WorkerInitMessage = {

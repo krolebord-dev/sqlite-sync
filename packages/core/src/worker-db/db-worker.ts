@@ -232,7 +232,7 @@ function createRemoteSource({ kvStore, clientId, crdtStorage, migrator, remoteFa
   });
 }
 
-async function getConfig(): Promise<WorkerConfig> {
+export async function getWorkerConfig<Props = never>(): Promise<WorkerConfig<Props>> {
   let configSet = false;
   const responsePromise = createDeferredPromise<WorkerConfig>();
 
@@ -258,10 +258,11 @@ type WorkerOptions = {
   migrations: Migrations;
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
+  workerConfig?: WorkerConfig;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {
-  const config = await getConfig();
+  const config = opts.workerConfig ?? (await getWorkerConfig());
 
   await navigator.locks.request(`${syncDbWorkerLockName}-${config.dbId}`, { mode: "exclusive" }, async (lock) => {
     if (!lock) {
