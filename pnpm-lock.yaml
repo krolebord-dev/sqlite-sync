@@ -201,6 +201,12 @@ importers:
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      partyserver:
+        specifier: ^0.0.75
+        version: 0.0.75(@cloudflare/workers-types@4.20260103.0)
+      partysocket:
+        specifier: ^1.1.6
+        version: 1.1.6
       react:
         specifier: ^19.2.3
         version: 19.2.3

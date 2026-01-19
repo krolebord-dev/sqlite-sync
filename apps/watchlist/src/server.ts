@@ -1,8 +1,9 @@
+import { routePartykitRequest } from "partyserver";
 import { apiHandler } from "./api/api-handler";
 import { orpcHandler } from "./orpc/orpc-router";
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/rpc")) {
@@ -22,6 +23,16 @@ export default {
       return apiHandler(request);
     }
 
+    const partykitRequest = await routePartykitRequest(request, env as unknown as Record<string, unknown>, {
+      prefix: "list-db",
+      locationHint: "weur",
+    });
+    if (partykitRequest) {
+      return partykitRequest;
+    }
+
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
+
+export { ListDbServer } from "./lib/list-db/list-db-durable-object";

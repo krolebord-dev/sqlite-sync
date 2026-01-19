@@ -13,11 +13,14 @@ import {
   Clock4Icon,
   EllipsisVertical,
   HashIcon,
+  Loader2,
   SettingsIcon,
   ShuffleIcon,
   SquareDashed,
   SquareDashedMousePointerIcon,
   StarIcon,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
 import { Button } from "@/components/ui/button";
@@ -28,7 +31,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { DbProvider, initListDb, useDb, useDbQuery } from "@/lib/list-db/list-db";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/lib/list-db/list-db";
 import type { ListDb } from "@/lib/list-db/migrations";
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
@@ -98,7 +102,10 @@ function ListPage() {
           <ProjectSelector />
           <ListSettings />
         </div>
-        <UserAvatarDropdown />
+        <div className="flex items-center gap-2">
+          <OnlineStatusIndicator />
+          <UserAvatarDropdown />
+        </div>
       </AppHeader>
       <div className="sticky top-0 z-10 flex items-center justify-center bg-background/80 pb-2 backdrop-blur-md">
         <div className="grid w-full max-w-7xl grid-cols-[1fr_auto] items-center justify-start gap-x-4 gap-y-1 px-4 pt-2 sm:grid-cols-[auto_1fr_auto]">
@@ -173,6 +180,56 @@ function HeaderMenu({ className }: { className?: string }) {
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+const onlineStatusConfig = {
+  online: {
+    label: "Online",
+    icon: <Wifi className="size-4" />,
+    className: "text-emerald-500",
+  },
+  pending: {
+    label: "Connecting",
+    icon: <Loader2 className="size-4 animate-spin" />,
+    className: "text-amber-500",
+  },
+  offline: {
+    label: "Offline",
+    icon: <WifiOff className="size-4" />,
+    className: "text-rose-500",
+  },
+} as const;
+
+function OnlineStatusIndicator() {
+  const { workerDb } = useDb();
+  const { remoteState } = useDbState();
+  const status = onlineStatusConfig[remoteState ?? "offline"];
+
+  const toggleOnlineStatus = () => {
+    if (remoteState === "online") {
+      workerDb.goOffline();
+    } else {
+      workerDb.goOnline();
+    }
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn("h-9 w-9", status.className)}
+          aria-label={`Sync status: ${status.label}`}
+          onClick={toggleOnlineStatus}
+        >
+          {status.icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>{status.label}</TooltipContent>
+    </Tooltip>
   );
 }
 

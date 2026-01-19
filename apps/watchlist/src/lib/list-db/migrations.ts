@@ -1,5 +1,9 @@
 import { createMigrations } from "@sqlite-sync/core";
 
+export type ListDbProps = {
+  listId: string;
+};
+
 export type ListItem = {
   id: string;
   type: "movie" | "tv";

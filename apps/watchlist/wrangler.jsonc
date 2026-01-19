@@ -30,6 +30,20 @@
       "migrations_dir": "migrations"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "ListDbServer",
+        "name": "ListDbServer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["ListDbServer"],
+      "tag": "v1"
+    }
+  ],
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
