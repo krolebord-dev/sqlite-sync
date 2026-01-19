@@ -103,9 +103,9 @@ export const createSQLiteCrdtApplyFunction = ({
     return applyCrdtEvent;
   }
 
-  const savepoint = db.prepare("savepoint apply_crdt_event;");
-  const rollbackToSavepoint = db.prepare("rollback to savepoint apply_crdt_event;");
-  const releaseSavepoint = db.prepare("release savepoint apply_crdt_event;");
+  const savepoint = db.prepare("savepoint apply_crdt_event;", { loggerLevel: "system" });
+  const rollbackToSavepoint = db.prepare("rollback to savepoint apply_crdt_event;", { loggerLevel: "system" });
+  const releaseSavepoint = db.prepare("release savepoint apply_crdt_event;", { loggerLevel: "system" });
 
   return (event: PendingCrdtEvent) => {
     savepoint.execute([]);

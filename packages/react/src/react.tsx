@@ -1,4 +1,4 @@
-import type { SyncedDb, WorkerState } from "@sqlite-sync/core";
+import type { SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
 import { createContext, use, useCallback, useMemo, useSyncExternalStore } from "react";
@@ -9,8 +9,8 @@ type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, Database,
   mapData?: (data: TResult[]) => TMapResult;
 };
 
-export function createDbContext<Database>() {
-  const dbContext = createContext<SyncedDb<Database> | null>(null);
+export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
+  const dbContext = createContext<SyncedDb<Schema["~schema"]> | null>(null);
 
   const useDb = () => {
     const db = use(dbContext);
@@ -20,7 +20,7 @@ export function createDbContext<Database>() {
     return db;
   };
 
-  const DbProvider = ({ children, db }: { children: React.ReactNode; db: SyncedDb<Database> }) => {
+  const DbProvider = ({ children, db }: { children: React.ReactNode; db: SyncedDb<Schema["~schema"]> }) => {
     return <dbContext.Provider value={db}>{children}</dbContext.Provider>;
   };
 
@@ -28,7 +28,7 @@ export function createDbContext<Database>() {
     parameters,
     queryFn,
     mapData,
-  }: UseDbQueryOptions<TParams, Database, TResult, TMapResult>) => {
+  }: UseDbQueryOptions<TParams, Schema["~schema"], TResult, TMapResult>) => {
     const db = useDb();
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: parameters is a dependency of the query

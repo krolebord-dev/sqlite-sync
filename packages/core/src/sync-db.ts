@@ -1,21 +1,22 @@
 import { validateDbId } from "./db-id";
 import { deserializeHLC, HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
-import { createMemoryDb, type MemoryDbCrdtTableConfig } from "./memory-db/memory-db";
+import { createMemoryDb } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import type { SyncDbMigrator } from "./migrations/migrator";
+import type { SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
 import { generateId, type TypedEvent } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
 
-type SyncedDbOptions<Props = undefined> = {
+type SyncedDbOptions<Database, Props = undefined> = {
   dbId: string;
   clearOnInit?: boolean;
-  crdtTables: MemoryDbCrdtTableConfig[];
   worker: Worker;
   workerProps: Props;
+  syncDbSchema: SyncDbSchema<Database>;
 };
 
 const defaultLogger: Logger = (type, message, level = "info") => {
@@ -36,7 +37,7 @@ const defaultLogger: Logger = (type, message, level = "info") => {
   }
 };
 
-export async function createSyncedDb<Database, Props = undefined>(options: SyncedDbOptions<Props>) {
+export async function createSyncedDb<Database, Props = undefined>(options: SyncedDbOptions<Database, Props>) {
   validateDbId(options.dbId);
 
   const perf = startPerformanceLogger(defaultLogger);
@@ -83,7 +84,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     reactiveDb: reactiveDb,
     hlcCounter,
     tabId,
-    crdtTables: options.crdtTables,
+    crdtTables: options.syncDbSchema.tablesConfig,
   });
 
   const pullSyncId = createStoredValue({

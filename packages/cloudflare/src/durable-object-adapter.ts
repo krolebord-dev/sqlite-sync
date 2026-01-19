@@ -9,8 +9,8 @@ import {
   createCrdtSyncProducer,
   createStoredValue,
   jsonSafeParse,
-  type Migrations,
   type PersistedCrdtEvent,
+  type SyncDbSchema,
 } from "@sqlite-sync/core";
 import {
   type ExtractSyncServerRequest,
@@ -28,18 +28,20 @@ type AdapterDb = {
   [updateLogTableName]: CrdtUpdateLogItem;
 };
 
+export type AdapterMode = "store-event-log-only" | "apply-events";
+
 function createDurableObjectCrdtStorage<Database>({
   storage,
-  migrations,
+  syncDbSchema,
   crdtEventsTable = "crdt_events",
   batchSize = 50,
   mode,
 }: {
   storage: DurableObjectStorage;
-  migrations: Migrations;
+  syncDbSchema: SyncDbSchema<Database>;
   crdtEventsTable: string;
   batchSize?: number;
-  mode: "store-event-log-only" | "apply-events";
+  mode: AdapterMode;
 }): {
   crdtStorage: CrdtStorage;
   sqlExecutor: KyselyExecutor<Database>;
@@ -52,7 +54,7 @@ function createDurableObjectCrdtStorage<Database>({
     initialValue: getLatestSyncId(sqlExecutor),
   });
 
-  const migrator = createMigrator(storage, migrations);
+  const migrator = createMigrator(mode, storage, syncDbSchema.migrations);
 
   let handleCrdtEventApply: (event: PersistedCrdtEvent) => void = () => {};
 

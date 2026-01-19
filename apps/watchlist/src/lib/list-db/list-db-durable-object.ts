@@ -1,11 +1,6 @@
 import { durableObjectAdapter, type RemoteHandler } from "@sqlite-sync/cloudflare";
-import type { PersistedCrdtEvent } from "@sqlite-sync/core";
 import { type Connection, Server } from "partyserver";
-import { type ListDb, migrations } from "./migrations";
-
-type EventLogDbSchema = {
-  crdt_events: PersistedCrdtEvent;
-} & ListDb;
+import { syncDbSchema } from "./migrations";
 
 export class ListDbServer extends Server<Env> {
   static options = {
@@ -16,9 +11,9 @@ export class ListDbServer extends Server<Env> {
   private remoteHandler: RemoteHandler = null!;
 
   onStart(): void | Promise<void> {
-    const { crdtStorage } = durableObjectAdapter.createCrdtStorage<EventLogDbSchema>({
+    const { crdtStorage } = durableObjectAdapter.createCrdtStorage({
       crdtEventsTable: "crdt_events",
-      migrations,
+      syncDbSchema,
       storage: this.ctx.storage,
       mode: "apply-events",
     });

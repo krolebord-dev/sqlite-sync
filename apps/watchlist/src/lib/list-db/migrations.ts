@@ -1,4 +1,4 @@
-import { createMigrations } from "@sqlite-sync/core";
+import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
 
 export type ListDbProps = {
   listId: string;
@@ -20,11 +20,7 @@ export type ListItem = {
   createdAt: number;
 };
 
-export type ListDb = {
-  item: ListItem;
-};
-
-export const migrations = createMigrations((b) => ({
+const migrations = createMigrations((b) => ({
   0: {
     steps: [
       b.createTable("_item", (t) =>
@@ -47,3 +43,12 @@ export const migrations = createMigrations((b) => ({
     ],
   },
 }));
+
+export type ListDb = (typeof syncDbSchema)["~schema"];
+
+export const syncDbSchema = createSyncDbSchema({
+  migrations,
+})
+  .addTable<ListItem>()
+  .withConfig({ baseTableName: "_item", crdtTableName: "item" })
+  .build();

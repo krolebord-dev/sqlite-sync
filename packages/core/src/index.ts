@@ -2,7 +2,6 @@
 
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
-
 // HLC (Hybrid Logical Clock)
 export {
   compareHLC,
@@ -15,11 +14,7 @@ export {
 export { type DatabaseIntrospection, introspectDb, type TableMetadata } from "./introspection";
 // Logger
 export { type Logger, type LogLevel, startPerformanceLogger } from "./logger";
-export {
-  createMemoryDb,
-  type MemoryDbCrdtTableConfig,
-} from "./memory-db/memory-db";
-
+export { createMemoryDb } from "./memory-db/memory-db";
 // Memory DB
 export {
   createSQLiteReactiveDb,
@@ -41,6 +36,12 @@ export {
   createSQLiteCrdtApplyFunction,
   type PendingCrdtEvent,
 } from "./sqlite-crdt/apply-crdt-event";
+// CRDT Schema
+export {
+  type CreateCrdtSchemaOptions,
+  createSyncDbSchema,
+  type SyncDbSchema,
+} from "./sqlite-crdt/crdt-schema";
 export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {

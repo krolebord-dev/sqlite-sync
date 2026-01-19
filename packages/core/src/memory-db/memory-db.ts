@@ -3,6 +3,7 @@ import { type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
 import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
+import type { CrdtTableConfig } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage, type EventUpdate, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
 import { type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
@@ -12,17 +13,12 @@ import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { generateId } from "../utils";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
-export type MemoryDbCrdtTableConfig = {
-  baseTableName: string;
-  crdtTableName: string;
-};
-
 type MemoryDbOptions<Database> = {
   migrator: SyncDbMigrator;
   reactiveDb: SQLiteReactiveDb<Database>;
   hlcCounter: HLCCounter;
   tabId: string;
-  crdtTables: MemoryDbCrdtTableConfig[];
+  crdtTables: CrdtTableConfig[];
 };
 
 export async function createMemoryDb<Database>({

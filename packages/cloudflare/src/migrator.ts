@@ -1,14 +1,29 @@
-import { createMigrator as createBaseMigrator, createStoredValue, type Migrations } from "@sqlite-sync/core";
+import {
+  createMigrator as createBaseMigrator,
+  createStoredValue,
+  type Migrations,
+  type StoredValue,
+} from "@sqlite-sync/core";
+import type { AdapterMode } from "./durable-object-adapter";
 
-export function createMigrator(storage: DurableObjectStorage, migrations: Migrations) {
+export function createMigrator(mode: AdapterMode, storage: DurableObjectStorage, migrations: Migrations) {
   const schemaVersion = createStoredValue<number>({
     initialValue: storage.kv.get("schema-version") ?? -1,
     saveToStorage: (val) => storage.kv.put("schema-version", val),
   });
 
+  const readonlySchemaVersion: StoredValue<number> = {
+    get current() {
+      return baseMigrator.latestSchemaVersion;
+    },
+    set current(_: number) {
+      throw new Error("Cannot set schema version in apply-events mode");
+    },
+  };
+
   const baseMigrator = createBaseMigrator({
     migrations,
-    schemaVersion,
+    schemaVersion: mode === "apply-events" ? schemaVersion : readonlySchemaVersion,
   });
 
   return {

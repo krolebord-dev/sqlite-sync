@@ -1,4 +1,4 @@
-import { createMigrations } from "@sqlite-sync/core";
+import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
 
 export const migrations = createMigrations((b) => ({
   0: {
@@ -13,3 +13,17 @@ export const migrations = createMigrations((b) => ({
     ],
   },
 }));
+
+export const syncDbSchema = createSyncDbSchema({
+  migrations,
+})
+  .addTable<Todo>()
+  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
+  .build();
+
+export type Todo = {
+  id: string;
+  title: string;
+  completed: boolean;
+  tombstone?: boolean;
+};

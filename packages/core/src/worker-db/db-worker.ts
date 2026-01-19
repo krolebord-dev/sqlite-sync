@@ -1,8 +1,9 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import type { Logger } from "../logger";
-import { createMigrator, type Migrations, type SyncDbMigrator } from "../migrations/migrator";
+import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
 import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
+import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import {
   type CrdtStorage,
   createCrdtStorage,
@@ -82,7 +83,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const migrator = createMigrator({
-    migrations: opts.migrations,
+    migrations: opts.syncDbSchema.migrations,
     schemaVersion: kvStore.createNumberStoredValue("schema-version", -1),
   });
   migrator.migrateDbToLatest({
@@ -254,7 +255,7 @@ export async function getWorkerConfig<Props = never>(): Promise<WorkerConfig<Pro
 }
 
 type WorkerOptions = {
-  migrations: Migrations;
+  syncDbSchema: SyncDbSchema;
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
   workerConfig?: WorkerConfig;

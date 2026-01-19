@@ -1,12 +1,12 @@
 import { createWsRemoteSource, getWorkerConfig, startDbWorker } from "@sqlite-sync/core/worker";
 import { PartySocket } from "partysocket";
-import { type ListDbProps, migrations } from "./migrations";
+import { type ListDbProps, syncDbSchema } from "./migrations";
 
 const workerConfig = await getWorkerConfig<ListDbProps>();
 
 await startDbWorker({
   workerConfig,
-  migrations,
+  syncDbSchema,
   createRemoteSource: createWsRemoteSource({
     createWebSocket: () =>
       new PartySocket({
