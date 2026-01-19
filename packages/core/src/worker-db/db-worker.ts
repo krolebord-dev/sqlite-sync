@@ -2,7 +2,7 @@ import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import type { Logger } from "../logger";
 import { createMigrator, type Migrations, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
-import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
+import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
 import {
   type CrdtStorage,
   createCrdtStorage,
@@ -99,12 +99,11 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
     migrator,
-    applyCrdtEventMutations: (event) =>
-      applyCrdtEventMutations({
-        db,
-        event,
-        updateLogTableName: "crdt_update_log",
-      }),
+    handleCrdtEventApply: createSQLiteCrdtApplyFunction({
+      db,
+      updateLogTableName: "crdt_update_log",
+      wrapInSavepoint: true,
+    }),
     persistEvents: (events) => persistEvents(db, events),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),

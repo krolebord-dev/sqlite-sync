@@ -2,7 +2,7 @@ import { createMigrator as createBaseMigrator, createStoredValue, type Migration
 
 export function createMigrator(storage: DurableObjectStorage, migrations: Migrations) {
   const schemaVersion = createStoredValue<number>({
-    initialValue: storage.kv.get("schema-version") ?? 0,
+    initialValue: storage.kv.get("schema-version") ?? -1,
     saveToStorage: (val) => storage.kv.put("schema-version", val),
   });
 
@@ -16,9 +16,9 @@ export function createMigrator(storage: DurableObjectStorage, migrations: Migrat
     migrateDbToLatest: () => {
       baseMigrator.migrateDbToLatest({
         startTransaction: (callback) => {
-          storage.transactionSync(() =>
-            callback({ execute: (sql, parameters) => storage.sql.exec(sql, ...parameters) }),
-          );
+          storage.transactionSync(() => {
+            return callback({ execute: (sql, parameters) => storage.sql.exec(sql, ...parameters) });
+          });
         },
       });
     },

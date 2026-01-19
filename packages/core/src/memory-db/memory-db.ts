@@ -2,7 +2,7 @@ import type { Kysely } from "kysely";
 import { type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
-import { applyCrdtEventMutations } from "../sqlite-crdt/apply-crdt-event";
+import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
 import { createCrdtStorage, type EventUpdate, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
 import { type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
@@ -92,12 +92,11 @@ export async function createMemoryDb<Database>({
     persistEvents: (events) => persistEvents(db, events),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
     migrator,
-    applyCrdtEventMutations: (event) =>
-      applyCrdtEventMutations({
-        db,
-        event,
-        updateLogTableName: "crdt_update_log",
-      }),
+    handleCrdtEventApply: createSQLiteCrdtApplyFunction({
+      db,
+      updateLogTableName: "crdt_update_log",
+      wrapInSavepoint: true,
+    }),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),
   });
 

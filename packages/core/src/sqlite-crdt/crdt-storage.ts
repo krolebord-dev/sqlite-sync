@@ -41,7 +41,7 @@ type DbSyncerStorage = {
   persistEvents: (events: PersistedCrdtEvent[]) => void;
   getEventsBatch: (options: GetEventsOptions) => PersistedCrdtEvent[];
   updateEvent: (syncId: number, update: EventUpdate) => void;
-  applyCrdtEventMutations: (event: PersistedCrdtEvent) => void;
+  handleCrdtEventApply: (event: PersistedCrdtEvent) => void;
 };
 
 export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
@@ -128,7 +128,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         event.payload = migratedEvent.payload;
 
         try {
-          storage.applyCrdtEventMutations(event);
+          storage.handleCrdtEventApply(event);
           event.status = "applied";
         } catch (error) {
           console.error("Error applying enqueued CRDT event", error);

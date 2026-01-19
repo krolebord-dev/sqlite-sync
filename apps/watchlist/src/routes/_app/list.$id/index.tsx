@@ -434,13 +434,15 @@ function TmdbSearchResults() {
     );
   };
 
+  const removeItem = (tmdbId: number) => {
+    db.db.executeKysely((db) => db.deleteFrom("item").where("tmdbId", "=", tmdbId));
+  };
+
   if (!throttledQuery) {
     return null;
   }
 
-  const filteredResults = searchResults?.filter((item) => !alreadyAddedTmdbIds.has(item.tmdbId)) ?? [];
-
-  if (filteredResults.length === 0 && !isLoading) {
+  if (!searchResults || (searchResults.length === 0 && !isLoading)) {
     return null;
   }
 
@@ -449,9 +451,17 @@ function TmdbSearchResults() {
       <div className="w-full max-w-7xl px-4">
         <h2 className="mb-4 font-medium text-muted-foreground text-sm">Add from TMDB</h2>
         <div className="flex w-full flex-wrap justify-center gap-4 pb-8 md:grid md:grid-cols-2 xl:grid-cols-3">
-          {filteredResults.map((item) => (
-            <TmdbSearchResultCard key={item.tmdbId} item={item} onAdd={() => addItem(item)} />
-          ))}
+          {searchResults.map((item) => {
+            const alreadyAdded = alreadyAddedTmdbIds.has(item.tmdbId);
+            return (
+              <TmdbSearchResultCard
+                alreadyAdded={alreadyAddedTmdbIds.has(item.tmdbId)}
+                key={item.tmdbId}
+                item={item}
+                onClick={() => (alreadyAdded ? removeItem(item.tmdbId) : addItem(item))}
+              />
+            );
+          })}
         </div>
       </div>
     </div>
@@ -460,13 +470,14 @@ function TmdbSearchResults() {
 
 type TmdbSearchResultCardProps = {
   item: SearchResultItem;
-  onAdd: () => void;
+  alreadyAdded: boolean;
+  onClick: () => void;
 };
 
-function TmdbSearchResultCard({ item, onAdd }: TmdbSearchResultCardProps) {
+function TmdbSearchResultCard({ item, alreadyAdded, onClick }: TmdbSearchResultCardProps) {
   return (
     <button
-      onClick={onAdd}
+      onClick={onClick}
       type="button"
       className="group relative grid w-full cursor-pointer grid-cols-3 items-stretch overflow-hidden rounded-md border border-border border-dashed bg-card shadow-xs"
     >
@@ -488,6 +499,11 @@ function TmdbSearchResultCard({ item, onAdd }: TmdbSearchResultCardProps) {
           />
         )}
         {item.voteAverage > 0 && <VoteAverage className="absolute top-2 left-2" voteAverage={item.voteAverage} />}
+        {alreadyAdded && (
+          <p className="absolute top-2 right-2 flex size-8 select-none items-center justify-center rounded-full bg-primary text-white">
+            <CheckIcon />
+          </p>
+        )}
       </div>
 
       <div className="col-span-2 flex flex-col justify-between p-4">

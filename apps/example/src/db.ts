@@ -25,6 +25,7 @@ export async function initDb() {
     worker,
     crdtTables: [{ baseTableName: "_todo", crdtTableName: "todo" }],
     clearOnInit: window.location.search.includes("clear"),
+    workerProps: undefined,
   });
 
   return db;

@@ -10,154 +10,227 @@ export type PendingCrdtEvent = {
   payload: string;
 };
 
-type ApplyCrdtParams = {
-  updateLogTableName: string;
+export const createSQLiteCrdtApplyFunction = ({
+  db,
+  updateLogTableName,
+  wrapInSavepoint = false,
+}: {
   db: SQLiteTransactionWrapper<any>;
-  event: PendingCrdtEvent;
-};
-
-type ApplyCrdtContext = {
-  db: SQLiteTransactionWrapper<unknown>;
   updateLogTableName: string;
-  event: PendingCrdtEvent;
-  eventPayload: Record<string, unknown>;
-  meta: CrdtUpdateLogPayload | null;
-};
-
-export function applyCrdtEventMutations({ db, event, updateLogTableName }: ApplyCrdtParams) {
-  const eventPayload = JSON.parse(event.payload);
-
-  const [metaRow] = db.executePrepared(
-    "get-item-crdt-meta",
-    {
-      item_id: event.item_id,
-      dataset: event.dataset,
+  wrapInSavepoint: boolean;
+}) => {
+  const applyCrdtEvent = createCrdtApplyFunction({
+    getCrdtUpdateLog(opts) {
+      const [metaRow] = db.executePrepared(
+        "get-item-crdt-meta",
+        {
+          item_id: opts.itemId,
+          dataset: opts.dataset,
+        },
+        (db, params) => {
+          return (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
+            .selectFrom(updateLogTableName as "table")
+            .select("payload")
+            .where("item_id", "=", params("item_id"))
+            .where("dataset", "=", params("dataset"));
+        },
+        { loggerLevel: "system" },
+      );
+      const meta = metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
+      return meta;
     },
-    (db, params) => {
-      return (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
-        .selectFrom(updateLogTableName as "table")
-        .select("payload")
-        .where("item_id", "=", params("item_id"))
-        .where("dataset", "=", params("dataset"));
+    insertCrdtUpdateLog(opts) {
+      db.executePrepared(
+        "insert-crdt-update-log",
+        {
+          item_id: opts.itemId,
+          dataset: opts.dataset,
+          payload: opts.payload,
+        },
+        (db, params) =>
+          (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>).insertInto(updateLogTableName as "table").values({
+            item_id: params("item_id"),
+            dataset: params("dataset"),
+            payload: params("payload"),
+          }),
+        { loggerLevel: "system" },
+      );
     },
-    { loggerLevel: "system" },
-  );
-
-  const meta = metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
-
-  // TODO Check primary key / unique constraints
-
-  const context: ApplyCrdtContext = {
-    db: db as SQLiteTransactionWrapper<unknown>,
-    updateLogTableName,
-    event,
-    meta,
-    eventPayload,
-  };
-
-  switch (event.type) {
-    case "item-created": {
-      applyItemCreated(context);
-      break;
-    }
-    case "item-updated": {
-      applyItemUpdated(context);
-      break;
-    }
-    default:
-      event.type satisfies never;
-  }
-}
-
-function applyItemCreated(context: ApplyCrdtContext) {
-  if (context.meta) {
-    // Item already exists
-    applyItemUpdated(context);
-    return;
-  }
-
-  // TODO SQL sanitization
-
-  context.eventPayload.tombstone = false;
-  const keys = Array.from(Object.keys(context.eventPayload));
-  context.db.execute(
-    {
-      sql: `insert into ${context.event.dataset} (${keys.join(",")}) values (${keys.map(() => "?").join(",")})`,
-      parameters: keys.map((key) => context.eventPayload[key]),
+    updateCrdtUpdateLog(opts) {
+      db.executePrepared(
+        "update-crdt-update-log",
+        {
+          item_id: opts.itemId,
+          dataset: opts.dataset,
+          payload: opts.payload,
+        },
+        (db, params) =>
+          (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
+            .updateTable(updateLogTableName as "table")
+            .set({
+              payload: params("payload"),
+            })
+            .where("item_id", "=", params("item_id"))
+            .where("dataset", "=", params("dataset")),
+        { loggerLevel: "system" },
+      );
     },
-    { loggerLevel: "system" },
-  );
-
-  const newUpdateLog = Object.fromEntries(keys.map((key) => [key, context.event.timestamp]));
-  insertCrdtUpdateLog(context, newUpdateLog);
-}
-
-function insertCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, string>) {
-  context.db.executePrepared(
-    "insert-crdt-update-log",
-    {
-      item_id: context.event.item_id,
-      dataset: context.event.dataset,
-      payload: JSON.stringify(log),
+    insertItem(opts) {
+      const insertPayload = {} as Record<string, unknown>;
+      for (const key of Object.keys(opts.payload)) {
+        insertPayload[key] = key;
+      }
+      db.executePrepared(
+        `crdt-insert-item-${opts.dataset}`,
+        opts.payload,
+        (db) => db.insertInto(opts.dataset).values(insertPayload),
+        { loggerLevel: "system" },
+      );
     },
-    (db, params) =>
-      (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>).insertInto(context.updateLogTableName as "table").values({
-        item_id: params("item_id"),
-        dataset: params("dataset"),
-        payload: params("payload"),
-      }),
-    { loggerLevel: "system" },
-  );
-}
-
-function applyItemUpdated(context: ApplyCrdtContext) {
-  const meta = context.meta;
-  if (!meta) {
-    throw new Error(`Item ${context.event.item_id} in dataset ${context.event.dataset} not found`);
-  }
-
-  const keys = Array.from(Object.keys(context.eventPayload)).filter((key) => {
-    const lastUpdateTimestamp = meta[key];
-    if (!lastUpdateTimestamp) {
-      return true;
-    }
-
-    const currentUpdateTimestamp = context.event.timestamp;
-    return currentUpdateTimestamp > lastUpdateTimestamp;
+    updateItem(opts) {
+      const keys = Array.from(Object.keys(opts.payload));
+      db.execute(
+        {
+          sql: `update ${opts.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+          parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
+        },
+        { loggerLevel: "system" },
+      );
+    },
   });
 
-  if (keys.length > 0) {
-    context.db.execute(
-      {
-        sql: `update ${context.event.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
-        parameters: [...keys.map((key) => context.eventPayload[key]), context.event.item_id],
-      },
-      { loggerLevel: "system" },
-    );
-
-    keys.forEach((key) => {
-      meta[key] = context.event.timestamp;
-    });
-    updateCrdtUpdateLog(context, meta);
+  if (!wrapInSavepoint) {
+    return applyCrdtEvent;
   }
-}
 
-function updateCrdtUpdateLog(context: ApplyCrdtContext, log: Record<string, string>) {
-  context.db.executePrepared(
-    "update-crdt-update-log",
-    {
-      item_id: context.event.item_id,
-      dataset: context.event.dataset,
-      payload: JSON.stringify(log),
-    },
-    (db, params) =>
-      (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
-        .updateTable(context.updateLogTableName as "table")
-        .set({
-          payload: params("payload"),
-        })
-        .where("item_id", "=", params("item_id"))
-        .where("dataset", "=", params("dataset")),
-    { loggerLevel: "system" },
-  );
+  const savepoint = db.prepare("savepoint apply_crdt_event;");
+  const rollbackToSavepoint = db.prepare("rollback to savepoint apply_crdt_event;");
+  const releaseSavepoint = db.prepare("release savepoint apply_crdt_event;");
+
+  return (event: PendingCrdtEvent) => {
+    savepoint.execute([]);
+    try {
+      applyCrdtEvent(event);
+      releaseSavepoint.execute([]);
+    } catch (error) {
+      rollbackToSavepoint.execute([]);
+      throw error;
+    }
+  };
+};
+
+type CreateCrdtApplyOpts = {
+  getCrdtUpdateLog: (opts: { itemId: string; dataset: string }) => CrdtUpdateLogPayload | null;
+  insertItem: (opts: { dataset: string; payload: Record<string, unknown> }) => void;
+  insertCrdtUpdateLog: (opts: { dataset: string; itemId: string; payload: string }) => void;
+  updateItem: (opts: { dataset: string; itemId: string; payload: Record<string, unknown> }) => void;
+  updateCrdtUpdateLog: (opts: { dataset: string; itemId: string; payload: string }) => void;
+};
+
+export function createCrdtApplyFunction({
+  getCrdtUpdateLog,
+  insertItem,
+  insertCrdtUpdateLog,
+  updateItem,
+  updateCrdtUpdateLog,
+}: CreateCrdtApplyOpts) {
+  type ItemCreatedOpts = {
+    event: PendingCrdtEvent;
+    meta: CrdtUpdateLogPayload | null;
+  };
+  const applyItemCreated = ({ event, meta }: ItemCreatedOpts) => {
+    if (meta) {
+      // Item already exists
+      applyItemUpdated({ event, meta });
+      return;
+    }
+
+    const eventPayload = JSON.parse(event.payload);
+
+    eventPayload.tombstone = false;
+    insertItem({ dataset: event.dataset, payload: eventPayload });
+
+    const newUpdateLog = {} as Record<string, string>;
+    for (const key of Object.keys(eventPayload)) {
+      newUpdateLog[key] = event.timestamp;
+    }
+
+    insertCrdtUpdateLog({
+      dataset: event.dataset,
+      itemId: event.item_id,
+      payload: JSON.stringify(newUpdateLog),
+    });
+  };
+
+  type ItemUpdatedOpts = {
+    event: PendingCrdtEvent;
+    meta: CrdtUpdateLogPayload;
+  };
+  const applyItemUpdated = ({ event, meta }: ItemUpdatedOpts) => {
+    if (!meta) {
+      throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
+    }
+    const eventPayload = JSON.parse(event.payload);
+
+    const updatePayload = {} as Record<string, unknown>;
+    let hasUpdates = false;
+
+    for (const [key, value] of Object.entries(eventPayload)) {
+      const lastUpdateTimestamp = meta[key];
+      const currentUpdateTimestamp = event.timestamp;
+
+      if (!lastUpdateTimestamp || !currentUpdateTimestamp || currentUpdateTimestamp > lastUpdateTimestamp) {
+        updatePayload[key] = value;
+        meta[key] = currentUpdateTimestamp;
+        hasUpdates = true;
+      }
+    }
+
+    if (!hasUpdates) {
+      return;
+    }
+
+    updateItem({
+      dataset: event.dataset,
+      itemId: event.item_id,
+      payload: updatePayload,
+    });
+    updateCrdtUpdateLog({
+      dataset: event.dataset,
+      itemId: event.item_id,
+      payload: JSON.stringify(meta),
+    });
+  };
+
+  return (event: PendingCrdtEvent) => {
+    const meta = getCrdtUpdateLog({
+      itemId: event.item_id,
+      dataset: event.dataset,
+    });
+
+    // TODO Check primary key / unique constraints
+
+    switch (event.type) {
+      case "item-created": {
+        applyItemCreated({
+          event,
+          meta,
+        });
+        break;
+      }
+      case "item-updated": {
+        if (!meta) {
+          throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
+        }
+
+        applyItemUpdated({
+          event,
+          meta,
+        });
+        break;
+      }
+      default:
+        event.type satisfies never;
+    }
+  };
 }

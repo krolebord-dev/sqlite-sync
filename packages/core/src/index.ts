@@ -36,7 +36,11 @@ export {
 } from "./migrations/migrator";
 export { applyMemoryDbSchema, applyWorkerDbSchema } from "./migrations/system-schema";
 // CRDT
-export { applyCrdtEventMutations, type PendingCrdtEvent } from "./sqlite-crdt/apply-crdt-event";
+export {
+  createCrdtApplyFunction,
+  createSQLiteCrdtApplyFunction,
+  type PendingCrdtEvent,
+} from "./sqlite-crdt/apply-crdt-event";
 export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {

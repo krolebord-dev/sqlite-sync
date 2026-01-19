@@ -10,7 +10,7 @@ import { generateId, type TypedEvent } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
 
-type SyncedDbOptions<Props = never> = {
+type SyncedDbOptions<Props = undefined> = {
   dbId: string;
   clearOnInit?: boolean;
   crdtTables: MemoryDbCrdtTableConfig[];
@@ -36,7 +36,7 @@ const defaultLogger: Logger = (type, message, level = "info") => {
   }
 };
 
-export async function createSyncedDb<Database, Props = never>(options: SyncedDbOptions<Props>) {
+export async function createSyncedDb<Database, Props = undefined>(options: SyncedDbOptions<Props>) {
   validateDbId(options.dbId);
 
   const perf = startPerformanceLogger(defaultLogger);

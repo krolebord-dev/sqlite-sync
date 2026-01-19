@@ -1,7 +1,10 @@
 import {
   applyKyselyEventsBatchFilters,
   type CrdtStorage,
+  type CrdtUpdateLogItem,
+  type CrdtUpdateLogPayload,
   crdtSchema,
+  createCrdtApplyFunction,
   createCrdtStorage,
   createCrdtSyncProducer,
   createStoredValue,
@@ -18,8 +21,11 @@ import {
 import { createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
 import { createMigrator, type SyncDbMigrator } from "./migrator";
 
+const updateLogTableName = "__crdt_update_log";
+
 type AdapterDb = {
   crdtEvents: PersistedCrdtEvent;
+  [updateLogTableName]: CrdtUpdateLogItem;
 };
 
 function createDurableObjectCrdtStorage<Database>({
@@ -27,11 +33,13 @@ function createDurableObjectCrdtStorage<Database>({
   migrations,
   crdtEventsTable = "crdt_events",
   batchSize = 50,
+  mode,
 }: {
   storage: DurableObjectStorage;
   migrations: Migrations;
   crdtEventsTable: string;
   batchSize?: number;
+  mode: "store-event-log-only" | "apply-events";
 }): {
   crdtStorage: CrdtStorage;
   sqlExecutor: KyselyExecutor<Database>;
@@ -40,17 +48,72 @@ function createDurableObjectCrdtStorage<Database>({
   const sqlExecutor = createKyselyExecutor<AdapterDb>(storage.sql);
   sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, crdtEventsTable));
 
-  const migrator = createMigrator(storage, migrations);
-  migrator.migrateDbToLatest();
-
   const syncId = createStoredValue({
     initialValue: getLatestSyncId(sqlExecutor),
   });
 
+  const migrator = createMigrator(storage, migrations);
+
+  let handleCrdtEventApply: (event: PersistedCrdtEvent) => void = () => {};
+
+  if (mode === "apply-events") {
+    sqlExecutor.executeKysely((db) => crdtSchema.crdtUpdateLogTable(db.schema, updateLogTableName));
+    migrator.migrateDbToLatest();
+
+    const baseApply = createCrdtApplyFunction({
+      getCrdtUpdateLog(opts) {
+        const [metaRow] = sqlExecutor.executeKysely((db) =>
+          db
+            .selectFrom(updateLogTableName)
+            .select("payload")
+            .where("item_id", "=", opts.itemId)
+            .where("dataset", "=", opts.dataset),
+        ).rows;
+        return metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
+      },
+      insertCrdtUpdateLog(opts) {
+        sqlExecutor.executeKysely((db) =>
+          db.insertInto(updateLogTableName).values({
+            item_id: opts.itemId,
+            dataset: opts.dataset,
+            payload: opts.payload,
+          }),
+        );
+      },
+      updateCrdtUpdateLog(opts) {
+        sqlExecutor.executeKysely((db) =>
+          db
+            .updateTable(updateLogTableName)
+            .set({
+              payload: opts.payload,
+            })
+            .where("item_id", "=", opts.itemId)
+            .where("dataset", "=", opts.dataset),
+        );
+      },
+      insertItem(opts) {
+        sqlExecutor.executeKysely((db) => db.insertInto(opts.dataset as any).values(opts.payload));
+      },
+      updateItem(opts) {
+        const keys = Array.from(Object.keys(opts.payload));
+        sqlExecutor.execute({
+          sql: `update ${opts.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+          parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
+        });
+      },
+    });
+
+    handleCrdtEventApply = (event) => {
+      storage.transactionSync(() => {
+        baseApply(event);
+      });
+    };
+  }
+
   const crdtStorage = createCrdtStorage({
     syncId,
     migrator: migrator,
-    applyCrdtEventMutations: () => {},
+    handleCrdtEventApply,
     persistEvents: (events) => {
       storage.transactionSync(() => {
         for (const event of events) {

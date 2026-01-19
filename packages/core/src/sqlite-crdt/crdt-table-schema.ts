@@ -1,7 +1,7 @@
 import type { SchemaModule } from "kysely";
 import type { TableMetadata } from "../introspection";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { applyCrdtEventMutations, type PendingCrdtEvent } from "./apply-crdt-event";
+import { createSQLiteCrdtApplyFunction, type PendingCrdtEvent } from "./apply-crdt-event";
 
 export type CrdtEventType = "item-created" | "item-updated";
 
@@ -72,6 +72,12 @@ export function registerCrdtFunctions({
   getTableSchema: (dataset: string) => TableMetadata;
   updateLogTableName: string;
 }) {
+  const applyCrdtEventMutations = createSQLiteCrdtApplyFunction({
+    db,
+    updateLogTableName,
+    wrapInSavepoint: false,
+  });
+
   db.createScalarFunction({
     name: "handle_item_created",
     deterministic: false,
@@ -88,12 +94,7 @@ export function registerCrdtFunctions({
         payload: payloadRaw,
       };
 
-      applyCrdtEventMutations({
-        db,
-        event,
-        updateLogTableName,
-      });
-
+      applyCrdtEventMutations(event);
       onEventApplied(event);
       return undefined;
     },
@@ -136,11 +137,7 @@ export function registerCrdtFunctions({
         return;
       }
 
-      applyCrdtEventMutations({
-        db,
-        event,
-        updateLogTableName,
-      });
+      applyCrdtEventMutations(event);
       onEventApplied(event);
       return undefined;
     },
@@ -160,11 +157,7 @@ export function registerCrdtFunctions({
         payload: JSON.stringify({ tombstone: 1 }),
       };
 
-      applyCrdtEventMutations({
-        db,
-        event,
-        updateLogTableName,
-      });
+      applyCrdtEventMutations(event);
       onEventApplied(event);
       return undefined;
     },

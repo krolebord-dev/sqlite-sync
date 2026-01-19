@@ -20,6 +20,7 @@ export class EventLogServer extends Server<Env> {
       crdtEventsTable: "crdt_events",
       migrations,
       storage: this.ctx.storage,
+      mode: "store-event-log-only",
     });
 
     this.remoteHandler = durableObjectAdapter.createRemoteHandler({
