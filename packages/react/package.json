@@ -23,6 +23,7 @@
   "exports": {
     ".": {
       "@sqlite-sync/source": "./src/index.ts",
+      "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }

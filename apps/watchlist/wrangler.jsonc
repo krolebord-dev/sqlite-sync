@@ -47,6 +47,6 @@
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/rpc/*", "/api/*"]
+    "run_worker_first": ["/rpc/*", "/api/*", "/list-db/*"]
   }
 }

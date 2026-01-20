@@ -22,16 +22,19 @@
   "exports": {
     ".": {
       "@sqlite-sync/source": "./src/index.ts",
+      "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./worker": {
       "@sqlite-sync/source": "./src/worker.ts",
+      "workerd": "./src/worker.ts",
       "types": "./dist/worker.d.ts",
       "import": "./dist/worker.js"
     },
     "./server": {
       "@sqlite-sync/source": "./src/server/index.ts",
+      "workerd": "./src/server/index.ts",
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     }
