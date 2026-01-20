@@ -29,10 +29,10 @@ import {
   DynamicMenuSubContent,
   DynamicMenuSubTrigger,
 } from "@/components/ui/dynamic-menu-content";
-import { useDb } from "@/lib/list-db/list-db";
-import type { ListDb, ListItem } from "@/lib/list-db/migrations";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/utils/format-duration";
+import { useDb } from "@/list-db/list-db";
+import type { ListDb, ListItem } from "@/list-db/migrations";
 import { editItemAtom, randomizedItemAtom, selectedItemsAtom, toggleItemSelectionAtom } from "./list-atoms";
 
 export function ListItemCard({ item }: { item: ListItem }) {

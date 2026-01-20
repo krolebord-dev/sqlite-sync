@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
-import { useDbQuery } from "@/lib/list-db/list-db";
 import { useListId } from "@/lib/use-list";
 import { formatDuration } from "@/lib/utils/format-duration";
+import { useDbQuery } from "@/list-db/list-db";
 import { orpc } from "@/orpc/orpc-client";
 
 type ListSettingsSheetProps = {

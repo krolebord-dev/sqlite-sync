@@ -35,4 +35,4 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-export { ListDbServer } from "./lib/list-db/list-db-server";
+export { ListDbServer } from "./list-db/list-db-server";

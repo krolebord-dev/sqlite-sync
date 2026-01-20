@@ -1,7 +1,7 @@
 import type { SyncedDb } from "@sqlite-sync/core";
 import { atom } from "jotai";
 import { z } from "zod";
-import type { ListDb } from "@/lib/list-db/migrations";
+import type { ListDb } from "@/list-db/migrations";
 
 export const itemsFilterSchema = z.object({
   sortBy: z.enum(["duration", "rating", "createdAt", "priority"]).default("createdAt"),

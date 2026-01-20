@@ -32,10 +32,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/lib/list-db/list-db";
-import type { ListDb } from "@/lib/list-db/migrations";
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
+import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/list-db/list-db";
+import type { ListDb } from "@/list-db/migrations";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { priorityColors } from "./-/common";
 import { getPriorityValue, ListItemCard, VoteAverage } from "./-/item-card";
