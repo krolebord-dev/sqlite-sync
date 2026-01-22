@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: path.resolve(rootDir, "index.html"),
         sqliteBatchInserts: path.resolve(rootDir, "sqlite-batch-inserts/index.html"),
+        sqliteTransactionOverhead: path.resolve(rootDir, "sqlite-transaction-overhead/index.html"),
       },
     },
   },
