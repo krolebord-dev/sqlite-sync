@@ -58,6 +58,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
   private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
   private preparedStatementsMap = new Map<string, TypedStatement<Record<string, unknown>, unknown>>();
+  private preparedRawStatementsMap = new Map<string, PreparedStatement<SqlValue[], unknown>>();
 
   constructor(opts: SqliteWrapperOptions) {
     this.db = opts.db;
@@ -97,7 +98,46 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   executeTransaction<T>(callback: (db: SQLiteTransactionWrapper<TDatabase>) => T): T {
-    return this.ensureDb.transaction(() => callback(this));
+    const transaction = this.beginTransaction();
+    try {
+      const result = callback(this);
+      transaction.commit();
+      return result;
+    } catch (error) {
+      transaction.rollback();
+      throw error;
+    }
+  }
+
+  beginTransaction() {
+    this.executePreparedRaw({
+      key: "$begin-transaction",
+      sql: "begin",
+      meta: {
+        loggerLevel: "system",
+      },
+    });
+
+    return {
+      commit: () => {
+        this.executePreparedRaw({
+          key: "$commit-transaction",
+          sql: "commit",
+          meta: {
+            loggerLevel: "system",
+          },
+        });
+      },
+      rollback: () => {
+        this.executePreparedRaw({
+          key: "$rollback-transaction",
+          sql: "rollback",
+          meta: {
+            loggerLevel: "system",
+          },
+        });
+      },
+    };
   }
 
   prepare<TParams extends SqlValue[], TResult>(sql: string, opts?: QueryMetaOpts) {
@@ -187,6 +227,26 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return statement.execute(params);
   }
 
+  executePreparedRaw<TParams extends SqlValue[], TResult>({
+    key,
+    sql,
+    params,
+    meta,
+  }: {
+    key: string;
+    sql: string;
+    params?: TParams;
+    meta?: QueryMetaOpts;
+  }) {
+    let statement = this.preparedRawStatementsMap.get(key) as PreparedStatement<TParams, TResult> | undefined;
+    if (!statement) {
+      statement = this.prepare(sql, meta);
+      this.preparedRawStatementsMap.set(key, statement as PreparedStatement<any[], unknown>);
+    }
+
+    return statement.execute((params ?? []) as TParams);
+  }
+
   sql<T = unknown>(templateOrString: TemplateStringsArray | string, ...parameters: unknown[]) {
     if (typeof templateOrString === "string") {
       return this.execute<T>({
@@ -255,6 +315,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     });
     this.preparedStatements.splice(0);
     this.preparedStatementsMap.clear();
+    this.preparedRawStatementsMap.clear();
   }
 
   close() {
