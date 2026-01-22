@@ -19,11 +19,6 @@ export type WorkerState = {
   remoteState: "online" | "offline" | "pending";
 };
 
-export type PushTabEventsResponse = {
-  firstEventSyncId: number;
-  lastEventSyncId: number;
-};
-
 export type GetSnapshotResponse = {
   file: Uint8Array<ArrayBufferLike>;
   syncId: number;

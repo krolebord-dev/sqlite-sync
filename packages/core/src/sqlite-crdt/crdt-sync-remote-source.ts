@@ -223,17 +223,14 @@ export const createCrdtSyncRemoteSource = ({
       afterSyncId = response.nextSyncId;
 
       if (response.events) {
-        storage.enqueueEvents(
+        storage.enqueueRemoteEvents(
           response.events.map((x) => {
             if (x.schema_version > migrator.currentSchemaVersion) {
               throw new Error(
                 `Event schema version ${x.schema_version} is greater than current schema version ${migrator.currentSchemaVersion}`,
               );
             }
-            return {
-              ...x,
-              origin: "remote",
-            };
+            return x;
           }),
         );
       }
@@ -289,25 +286,13 @@ export const createCrdtSyncRemoteSource = ({
       }
 
       pushSyncId.current = eventsBatch.nextSyncId;
-      pendingEventsCount = Math.max(0, pendingEventsCount - eventsBatch.events.length);
       if (!eventsBatch.hasMore) {
         break;
       }
     }
   });
 
-  let pendingEventsCount = 0;
-  storage.addEventListener("event-applied", (event) => {
-    if (event.payload.origin === "remote") {
-      return;
-    }
-    pendingEventsCount++;
-    if (pendingEventsCount >= bufferSize) {
-      startPushingEvents();
-    }
-  });
-
-  storage.addEventListener("event-processing-done", () => {
+  storage.addEventListener("events-applied", () => {
     startPushingEvents();
   });
 

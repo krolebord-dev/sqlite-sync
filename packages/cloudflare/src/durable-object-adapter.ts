@@ -8,6 +8,7 @@ import {
   createCrdtStorage,
   createCrdtSyncProducer,
   createStoredValue,
+  HLCCounter,
   jsonSafeParse,
   type PersistedCrdtEvent,
   type SyncDbSchema,
@@ -38,7 +39,7 @@ function createDurableObjectCrdtStorage<Database>({
   mode,
 }: {
   storage: DurableObjectStorage;
-  syncDbSchema: SyncDbSchema<Database>;
+  syncDbSchema: SyncDbSchema<unknown, Database>;
   crdtEventsTable: string;
   batchSize?: number;
   mode: AdapterMode;
@@ -48,6 +49,7 @@ function createDurableObjectCrdtStorage<Database>({
   migrator: SyncDbMigrator;
 } {
   const sqlExecutor = createKyselyExecutor<AdapterDb>(storage.sql);
+
   sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, crdtEventsTable));
 
   const syncId = createStoredValue({
@@ -112,17 +114,14 @@ function createDurableObjectCrdtStorage<Database>({
     };
   }
 
+  const hlc = new HLCCounter("root", () => Date.now());
+
   const crdtStorage = createCrdtStorage({
     syncId,
+    hlc,
     migrator: migrator,
     handleCrdtEventApply,
-    persistEvents: (events) => {
-      storage.transactionSync(() => {
-        for (const event of events) {
-          sqlExecutor.executeKysely((db) => db.insertInto(crdtEventsTable as "crdtEvents").values(event));
-        }
-      });
-    },
+    transaction: (callback) => storage.transactionSync(callback),
     getEventsBatch: (opts) => {
       return sqlExecutor.executeKysely((db) =>
         applyKyselyEventsBatchFilters(db.selectFrom(crdtEventsTable as "crdtEvents").selectAll(), {
@@ -130,6 +129,9 @@ function createDurableObjectCrdtStorage<Database>({
           limit: opts.limit ?? batchSize,
         }),
       ).rows;
+    },
+    persistEvent: (event) => {
+      sqlExecutor.executeKysely((db) => db.insertInto(crdtEventsTable as "crdtEvents").values(event));
     },
     updateEvent: (syncId, event) =>
       sqlExecutor.executeKysely((db) =>
@@ -240,7 +242,7 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    crdtStorage.enqueueEvents(request.events.map((event) => ({ ...event, origin: request.nodeId })));
+    crdtStorage.enqueueLocalEvents(request.events.map((event) => ({ ...event, origin: request.nodeId })));
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,

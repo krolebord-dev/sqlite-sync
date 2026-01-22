@@ -1,17 +1,37 @@
+import { deserializeHLC, type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
 import type { CrdtEventOrigin, CrdtEventStatus, CrdtEventType, PersistedCrdtEvent } from "./crdt-table-schema";
 import type { StoredValue } from "./stored-value";
 
 type LocalCrdtEvent = {
-  schema_version: number;
   type: CrdtEventType;
-  timestamp: string;
   dataset: string;
   item_id: string;
   payload: string;
-  origin: CrdtEventOrigin;
+  timestamp: string;
+  schema_version: number;
 };
+
+export type OwnCrdtEvent = {
+  type: CrdtEventType;
+  dataset: string;
+  item_id: string;
+  payload: string;
+  timestamp?: undefined;
+  schema_version?: undefined;
+};
+
+type RemoteCrdtEvent = {
+  type: CrdtEventType;
+  dataset: string;
+  item_id: string;
+  payload: string;
+  timestamp: string;
+  schema_version: number;
+};
+
+type EnqueuedCrdtEvent = LocalCrdtEvent | OwnCrdtEvent | RemoteCrdtEvent;
 
 export type GetEventsOptions = {
   afterSyncId?: number;
@@ -35,46 +55,120 @@ export type EventUpdate = {
   payload: string;
 };
 
+type StorageHLC = Pick<HLCCounter, "getNextHLC" | "mergeHLC">;
+
 type DbSyncerStorage = {
   syncId: StoredValue<number>;
   migrator: SyncDbMigrator;
-  persistEvents: (events: PersistedCrdtEvent[]) => void;
+  persistEvent: (events: PersistedCrdtEvent) => void;
   getEventsBatch: (options: GetEventsOptions) => PersistedCrdtEvent[];
   updateEvent: (syncId: number, update: EventUpdate) => void;
   handleCrdtEventApply: (event: PersistedCrdtEvent) => void;
+  hlc: StorageHLC;
+  transaction?: (callback: () => void) => void;
 };
 
 export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
 
+export const crdtEventOrigin = {
+  local: "local",
+  own: "own",
+  remote: "remote",
+};
+
+type EventsAppliedPayload = {
+  eventsCount: number;
+  syncId: number;
+};
+
 export function createCrdtStorage(storage: DbSyncerStorage) {
+  const transaction = storage.transaction ?? ((callback) => callback());
   const eventTarget = createTypedEventTarget<{
-    "event-applied": PersistedCrdtEvent;
-    "event-processing-done": undefined;
+    "events-applied": EventsAppliedPayload;
   }>();
 
-  const enqueueEvents = (events: LocalCrdtEvent[]) => {
-    const firstEventSyncId = storage.syncId.current + 1;
-    storage.persistEvents(
-      events.map((x) => ({
-        schema_version: x.schema_version,
-        timestamp: x.timestamp,
-        type: x.type,
-        dataset: x.dataset,
-        item_id: x.item_id,
-        origin: x.origin,
-        payload: x.payload,
-        sync_id: ++storage.syncId.current,
-        status: "pending",
-      })),
-    );
-    const lastEventSyncId = storage.syncId.current;
+  const enqueueEvents = (origin: CrdtEventOrigin, events: EnqueuedCrdtEvent[]) => {
+    if (events.length === 0) {
+      return;
+    }
+
+    transaction(() => {
+      for (const event of events) {
+        storage.persistEvent({
+          schema_version: event.schema_version ?? storage.migrator.currentSchemaVersion,
+          timestamp: event.timestamp ?? serializeHLC(storage.hlc.getNextHLC()),
+          type: event.type,
+          dataset: event.dataset,
+          item_id: event.item_id,
+          origin: origin,
+          payload: event.payload,
+          sync_id: ++storage.syncId.current,
+          status: "pending",
+        });
+      }
+    });
 
     processEnqueuedEvents();
+  };
 
-    return {
-      firstEventSyncId,
-      lastEventSyncId,
+  const enqueueLocalEvents = (events: LocalCrdtEvent[]) => {
+    enqueueEvents("local", events);
+  };
+
+  const enqueueOwnEvents = (events: OwnCrdtEvent[]) => {
+    enqueueEvents("own", events);
+  };
+
+  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]) => {
+    enqueueEvents("remote", events);
+  };
+
+  const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction = false }: { wrapInTransaction?: boolean } = {}) => {
+    const persistedEvent: PersistedCrdtEvent = {
+      schema_version: storage.migrator.currentSchemaVersion,
+      timestamp: serializeHLC(storage.hlc.getNextHLC()),
+      type: event.type,
+      dataset: event.dataset,
+      item_id: event.item_id,
+      origin: "own",
+      payload: event.payload,
+      sync_id: ++storage.syncId.current,
+      status: "pending",
     };
+
+    if (wrapInTransaction) {
+      transaction(() => {
+        storage.persistEvent(persistedEvent);
+        processPersistedEvent(persistedEvent);
+      });
+    } else {
+      storage.persistEvent(persistedEvent);
+      processPersistedEvent(persistedEvent);
+    }
+
+    dispatchEventsApplied({
+      eventsCount: 1,
+      syncId: persistedEvent.sync_id,
+    });
+  };
+
+  let pendingDispatchPayload: EventsAppliedPayload | null = null;
+  const dispatchEventsApplied = (payload: EventsAppliedPayload) => {
+    if (!pendingDispatchPayload) {
+      pendingDispatchPayload = payload;
+      Promise.resolve().then(() => {
+        if (!pendingDispatchPayload) {
+          return;
+        }
+
+        const payload = pendingDispatchPayload;
+        pendingDispatchPayload = null;
+        eventTarget.dispatchEvent("events-applied", payload);
+      });
+    } else {
+      pendingDispatchPayload.eventsCount += payload.eventsCount;
+      pendingDispatchPayload.syncId = Math.max(pendingDispatchPayload.syncId, payload.syncId);
+    }
   };
 
   const getEventsBatch = (options: GetEventsOptions): GetEventsBatch => {
@@ -89,12 +183,63 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     };
   };
 
-  const processEnqueuedEvents = ensureSingletonExecution(async () => {
-    await Promise.resolve();
+  const processPersistedEvent = (event: PersistedCrdtEvent) => {
+    if (event.status !== "pending") {
+      throw new Error(`Event ${event.sync_id} is not pending`);
+    }
 
+    try {
+      // Migrate event to latest schema version
+      const migratedEvent = storage.migrator.migrateEvent(event, storage.migrator.latestSchemaVersion);
+
+      if (migratedEvent === null) {
+        // Event was dropped during migration (e.g., table was deleted)
+        event.status = "skipped";
+        storage.updateEvent(event.sync_id, {
+          status: event.status,
+          schema_version: storage.migrator.latestSchemaVersion,
+          type: event.type,
+          dataset: event.dataset,
+          item_id: event.item_id,
+          payload: event.payload,
+        });
+        return event;
+      }
+
+      // Update event with migrated values
+      event.schema_version = migratedEvent.schema_version;
+      event.type = migratedEvent.type;
+      event.dataset = migratedEvent.dataset;
+      event.item_id = migratedEvent.item_id;
+      event.payload = migratedEvent.payload;
+
+      storage.handleCrdtEventApply(event);
+      event.status = "applied";
+
+      if (event.origin === "local" || event.origin === "remote") {
+        storage.hlc.mergeHLC(deserializeHLC(event.timestamp));
+      }
+    } catch (error) {
+      console.error("Error applying enqueued CRDT event", error);
+      event.status = "failed";
+    } finally {
+      storage.updateEvent(event.sync_id, {
+        status: event.status,
+        schema_version: event.schema_version,
+        type: event.type,
+        dataset: event.dataset,
+        item_id: event.item_id,
+        payload: event.payload,
+      });
+    }
+  };
+
+  const processEnqueuedEvents = ensureSingletonExecution(async () => {
     let hasMore = true;
     while (hasMore) {
-      const batch = getEventsBatch({ status: "pending", limit: 50 });
+      await Promise.resolve();
+
+      const batch = getEventsBatch({ status: "pending", limit: 100 });
       const events = batch.events;
       hasMore = batch.hasMore;
 
@@ -103,57 +248,27 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
 
       for (const event of events) {
-        // Migrate event to latest schema version
-        const migratedEvent = storage.migrator.migrateEvent(event, storage.migrator.latestSchemaVersion);
-
-        if (migratedEvent === null) {
-          // Event was dropped during migration (e.g., table was deleted)
-          event.status = "skipped";
-          storage.updateEvent(event.sync_id, {
-            status: event.status,
-            schema_version: storage.migrator.latestSchemaVersion,
-            type: event.type,
-            dataset: event.dataset,
-            item_id: event.item_id,
-            payload: event.payload,
-          });
-          continue;
-        }
-
-        // Update event with migrated values
-        event.schema_version = migratedEvent.schema_version;
-        event.type = migratedEvent.type;
-        event.dataset = migratedEvent.dataset;
-        event.item_id = migratedEvent.item_id;
-        event.payload = migratedEvent.payload;
-
-        try {
-          storage.handleCrdtEventApply(event);
-          event.status = "applied";
-        } catch (error) {
-          console.error("Error applying enqueued CRDT event", error);
-          event.status = "failed";
-        } finally {
-          storage.updateEvent(event.sync_id, {
-            status: event.status,
-            schema_version: event.schema_version,
-            type: event.type,
-            dataset: event.dataset,
-            item_id: event.item_id,
-            payload: event.payload,
-          });
-          eventTarget.dispatchEvent("event-applied", event);
-        }
+        transaction(() => {
+          processPersistedEvent(event);
+        });
       }
+
+      dispatchEventsApplied({
+        eventsCount: events.length,
+        syncId: events[events.length - 1].sync_id,
+      });
     }
-    eventTarget.dispatchEvent("event-processing-done", undefined);
   });
 
   return {
-    enqueueEvents,
+    enqueueLocalEvents,
+    enqueueOwnEvents,
+    enqueueRemoteEvents,
+    applyOwnEvent,
+    getEventsBatch,
+
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
-    dispatchEvent: eventTarget.dispatchEvent,
-    getEventsBatch,
+    //dispatchEvent: eventTarget.dispatchEvent,
   };
 }

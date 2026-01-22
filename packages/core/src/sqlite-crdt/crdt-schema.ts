@@ -16,7 +16,9 @@ export interface CreateCrdtSchemaOptions {
 }
 
 // biome-ignore lint/complexity/noBannedTypes: required generic
-class CrdtSchemaBuilder<DB = {}> implements SyncDbSchema<DB> {
+class CrdtSchemaBuilder<ClientDB = {}, ServerDB = {}, MutationsDB = {}>
+  implements SyncDbSchema<ClientDB, ServerDB, MutationsDB>
+{
   constructor(private config: CreateCrdtSchemaOptions) {}
 
   get tablesConfig() {
@@ -27,7 +29,18 @@ class CrdtSchemaBuilder<DB = {}> implements SyncDbSchema<DB> {
     return this.config.migrations;
   }
 
-  get "~schema"() {
+  get "~clientSchema"() {
+    console.warn("~clientSchema should not be accessed on the client");
+    return null as any;
+  }
+
+  get "~serverSchema"() {
+    console.warn("~serverSchema should not be accessed on the server");
+    return null as any;
+  }
+
+  get "~mutationsSchema"() {
+    console.warn("~mutationsSchema should not be accessed on the client");
     return null as any;
   }
 
@@ -40,31 +53,29 @@ class CrdtSchemaBuilder<DB = {}> implements SyncDbSchema<DB> {
       crdtTableName: CrdtTable;
     }) => {
       this.config.tables.push({ baseTableName, crdtTableName });
-      return new CrdtSchemaBuilder<DB & { [K in CrdtTable]: Table } & { [K in BaseTable]: ReadonlyTable<Table> }>(
-        this.config,
-      );
+      return new CrdtSchemaBuilder<
+        ClientDB & { [K in CrdtTable]: Table } & { [K in BaseTable]: ReadonlyTable<Table> },
+        ServerDB & { [K in BaseTable]: ReadonlyTable<Table> },
+        MutationsDB & { [K in BaseTable]: Table }
+      >(this.config);
     };
 
     return { withConfig };
   }
 
   build() {
-    return this as SyncDbSchema<DB>;
+    return this as SyncDbSchema<ClientDB, ServerDB, MutationsDB>;
   }
 }
 
 // biome-ignore lint/complexity/noBannedTypes: required generic
-export interface SyncDbSchema<DB = {}> {
+export interface SyncDbSchema<ClientDB = {}, ServerDB = {}, MutationsDB = {}> {
   get tablesConfig(): CrdtTableConfig[];
   get migrations(): Migrations;
-  "~schema": DB;
+  "~clientSchema": ClientDB;
+  "~serverSchema": ServerDB;
+  "~mutationsSchema": MutationsDB;
 }
-
-export type InferCrdtSchema<Schema extends SyncDbSchema> = Prettify<Schema["~schema"]>;
-
-type Prettify<T> = {
-  [K in keyof T]: T[K];
-} & {};
 
 type ReadonlyTable<Table extends Record<string, unknown>> = {
   [K in keyof Table]: ColumnType<Table[K], never, never>;

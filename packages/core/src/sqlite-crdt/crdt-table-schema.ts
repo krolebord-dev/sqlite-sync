@@ -1,13 +1,13 @@
 import type { SchemaModule } from "kysely";
 import type { TableMetadata } from "../introspection";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { createSQLiteCrdtApplyFunction, type PendingCrdtEvent } from "./apply-crdt-event";
+import type { CrdtStorage } from "./crdt-storage";
 
 export type CrdtEventType = "item-created" | "item-updated";
 
 export type CrdtEventStatus = "pending" | "applied" | "failed" | "skipped";
 
-export type CrdtEventOrigin = "remote" | (string & {});
+export type CrdtEventOrigin = "remote" | "own" | "local";
 
 export type PersistedCrdtEvent = {
   schema_version: number;
@@ -61,23 +61,13 @@ function createCrdtUpdateLogTableQuery(schema: SchemaModule, tableName: string) 
 
 export function registerCrdtFunctions({
   db,
-  onEventApplied,
-  getNextTimestamp,
+  storage,
   getTableSchema,
-  updateLogTableName,
 }: {
   db: SQLiteDbWrapper<any>;
-  onEventApplied: (event: PendingCrdtEvent) => void;
-  getNextTimestamp: () => string;
+  storage: CrdtStorage;
   getTableSchema: (dataset: string) => TableMetadata;
-  updateLogTableName: string;
 }) {
-  const applyCrdtEventMutations = createSQLiteCrdtApplyFunction({
-    db,
-    updateLogTableName,
-    wrapInSavepoint: false,
-  });
-
   db.createScalarFunction({
     name: "handle_item_created",
     deterministic: false,
@@ -86,16 +76,17 @@ export function registerCrdtFunctions({
     callback: (dataset: string, payloadRaw: string) => {
       const payload = JSON.parse(payloadRaw) as { id: string };
 
-      const event: PendingCrdtEvent = {
-        timestamp: getNextTimestamp(),
-        type: "item-created",
-        dataset,
-        item_id: payload.id,
-        payload: payloadRaw,
-      };
-
-      applyCrdtEventMutations(event);
-      onEventApplied(event);
+      storage.applyOwnEvent(
+        {
+          type: "item-created",
+          dataset,
+          item_id: payload.id,
+          payload: payloadRaw,
+        },
+        {
+          wrapInTransaction: false,
+        },
+      );
       return undefined;
     },
   });
@@ -111,34 +102,34 @@ export function registerCrdtFunctions({
       const newPayload = JSON.parse(newPayloadRaw);
 
       let hasDiff = false;
-      const payload = Object.fromEntries(
-        tableSchema.columns
-          .map((column) => {
-            const oldValue = oldPayload[column.name];
-            const newValue = newPayload[column.name];
-            if (oldValue === newValue) {
-              return null as unknown as [string, unknown];
-            }
-            hasDiff = true;
-            return [column.name, newValue] as const;
-          })
-          .filter(Boolean),
-      );
+      const updatePayload = {} as Record<string, unknown>;
 
-      const event: PendingCrdtEvent = {
-        timestamp: getNextTimestamp(),
-        type: "item-updated",
-        dataset,
-        item_id: oldPayload.id,
-        payload: JSON.stringify(payload),
-      };
+      for (const column of tableSchema.columns) {
+        const oldValue = oldPayload[column.name];
+        const newValue = newPayload[column.name];
+        if (oldValue === newValue) {
+          continue;
+        }
+        hasDiff = true;
+        updatePayload[column.name] = newValue;
+      }
 
       if (!hasDiff) {
         return;
       }
 
-      applyCrdtEventMutations(event);
-      onEventApplied(event);
+      storage.applyOwnEvent(
+        {
+          type: "item-updated",
+          dataset,
+          item_id: oldPayload.id,
+          payload: JSON.stringify(updatePayload),
+        },
+        {
+          wrapInTransaction: false,
+        },
+      );
+
       return undefined;
     },
   });
@@ -149,16 +140,18 @@ export function registerCrdtFunctions({
     directOnly: false,
     innocuous: false,
     callback: (dataset: string, itemId: string) => {
-      const event: PendingCrdtEvent = {
-        timestamp: getNextTimestamp(),
-        type: "item-updated",
-        dataset,
-        item_id: itemId,
-        payload: JSON.stringify({ tombstone: 1 }),
-      };
+      storage.applyOwnEvent(
+        {
+          type: "item-updated",
+          dataset,
+          item_id: itemId,
+          payload: JSON.stringify({ tombstone: 1 }),
+        },
+        {
+          wrapInTransaction: false,
+        },
+      );
 
-      applyCrdtEventMutations(event);
-      onEventApplied(event);
       return undefined;
     },
   });

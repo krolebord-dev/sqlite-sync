@@ -1,5 +1,4 @@
-import type { Kysely } from "kysely";
-import { type HLCCounter, serializeHLC } from "../hlc";
+import type { HLCCounter } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
 import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
@@ -10,14 +9,12 @@ import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filte
 import { makeCrdtTable } from "../sqlite-crdt/make-crdt-table";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { generateId } from "../utils";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
 type MemoryDbOptions<Database> = {
   migrator: SyncDbMigrator;
   reactiveDb: SQLiteReactiveDb<Database>;
   hlcCounter: HLCCounter;
-  tabId: string;
   crdtTables: CrdtTableConfig[];
 };
 
@@ -25,7 +22,6 @@ export async function createMemoryDb<Database>({
   migrator,
   reactiveDb: _reactiveDb,
   hlcCounter,
-  tabId,
   crdtTables,
 }: MemoryDbOptions<Database>) {
   const reactiveDb = _reactiveDb as unknown as SQLiteReactiveDb<MemoryDbSchema>;
@@ -44,56 +40,24 @@ export async function createMemoryDb<Database>({
     initialValue: 0,
   });
 
-  const pendingLocalEvents: PersistedCrdtEvent[] = [];
-  registerCrdtFunctions({
-    db,
-    getTableSchema: (dataset: string) => db.dbSchema[dataset],
-    getNextTimestamp: () => serializeHLC(hlcCounter.getNextHLC()),
-    updateLogTableName: "crdt_update_log",
-    onEventApplied: (event) => {
-      const persistedEvent: PersistedCrdtEvent = {
-        ...event,
-        schema_version: migrator.currentSchemaVersion,
-        origin: tabId,
-        sync_id: ++localSyncId.current,
-        status: "applied" as const,
-      };
-      enqueueCrdtEvent(db, persistedEvent);
-      pendingLocalEvents.push(persistedEvent);
-    },
-  });
-  db.createScalarFunction({
-    name: "gen_id",
-    callback: () => generateId(),
-    deterministic: false,
-    directOnly: false,
-    innocuous: true,
-  });
-
-  reactiveDb.addEventListener("transaction-rolled-back", () => {
-    pendingLocalEvents.length = 0;
-  });
-  reactiveDb.addEventListener("transaction-committed", () => {
-    const appliedEvents = pendingLocalEvents.splice(0);
-    queueMicrotask(() => {
-      for (const event of appliedEvents) {
-        crdtStorage.dispatchEvent("event-applied", event);
-      }
-      crdtStorage.dispatchEvent("event-processing-done", undefined);
-    });
-  });
-
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
-    persistEvents: (events) => persistEvents(db, events),
+    hlc: hlcCounter,
+    persistEvent: (event) => persistEvent(db, event),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
     migrator,
     handleCrdtEventApply: createSQLiteCrdtApplyFunction({
       db,
       updateLogTableName: "crdt_update_log",
-      wrapInSavepoint: true,
     }),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),
+    transaction: (callback) => db.executeTransaction(callback),
+  });
+
+  registerCrdtFunctions({
+    db,
+    storage: crdtStorage,
+    getTableSchema: (dataset: string) => db.dbSchema[dataset],
   });
 
   return {
@@ -101,34 +65,24 @@ export async function createMemoryDb<Database>({
   };
 }
 
-function enqueueCrdtEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {
+function persistEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {
   db.executePrepared(
-    "enqueue-crdt-events",
+    "persist-crdt-event",
     event,
     (db, params) =>
-      (db as unknown as Kysely<MemoryDbSchema>).insertInto("persisted_crdt_events").values({
-        schema_version: params("schema_version"),
-        status: params("status"),
-        sync_id: params("sync_id"),
+      db.insertInto("persisted_crdt_events").values({
         type: params("type"),
-        timestamp: params("timestamp"),
         dataset: params("dataset"),
         item_id: params("item_id"),
         payload: params("payload"),
+        schema_version: params("schema_version"),
+        sync_id: params("sync_id"),
+        status: params("status"),
+        timestamp: params("timestamp"),
         origin: params("origin"),
       }),
     { loggerLevel: "system" },
   );
-}
-
-function persistEvents(db: SQLiteDbWrapper<MemoryDbSchema>, events: PersistedCrdtEvent[]) {
-  db.executeTransaction((db) => {
-    const chunkSize = 100;
-    for (let i = 0; i < events.length; i += chunkSize) {
-      const chunk = events.slice(i, i + chunkSize);
-      db.executeKysely((db) => db.insertInto("persisted_crdt_events").values(chunk), { loggerLevel: "system" });
-    }
-  });
 }
 
 function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOptions) {
