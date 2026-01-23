@@ -172,13 +172,14 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   };
 
   const getEventsBatch = (options: GetEventsOptions): GetEventsBatch => {
+    const limit = options.limit ?? 50;
     const events = storage.getEventsBatch({
       ...options,
-      limit: options.limit ?? 50,
+      limit,
     });
     return {
       events,
-      hasMore: events.length === options.limit,
+      hasMore: events.length === limit,
       nextSyncId: events[events.length - 1]?.sync_id ?? options.afterSyncId ?? 0,
     };
   };

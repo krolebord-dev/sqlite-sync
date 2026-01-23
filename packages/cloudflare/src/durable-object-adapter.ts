@@ -171,7 +171,6 @@ function createDurableObjectRemoteHandler({
   broadcastPayload: (payload: string) => void;
 }): RemoteHandler {
   createCrdtSyncProducer({
-    bufferSize,
     storage: crdtStorage,
     broadcastEvents: (chunk) => {
       broadcastPayload(
@@ -242,7 +241,7 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    crdtStorage.enqueueLocalEvents(request.events.map((event) => ({ ...event, origin: request.nodeId })));
+    crdtStorage.enqueueLocalEvents(request.events);
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,

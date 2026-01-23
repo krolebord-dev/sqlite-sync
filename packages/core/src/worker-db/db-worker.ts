@@ -119,7 +119,6 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   createCrdtSyncProducer({
-    bufferSize: 500,
     storage: crdtStorage,
     broadcastEvents: (chunk) => {
       broadcastChannels.responses.postMessage({

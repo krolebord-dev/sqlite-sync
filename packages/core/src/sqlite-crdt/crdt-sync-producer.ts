@@ -1,7 +1,6 @@
 import type { CrdtStorage } from "./crdt-storage";
 
 type CrdtSyncProducer = {
-  bufferSize: number;
   storage: CrdtStorage;
   broadcastEvents: (request: { newSyncId: number }) => void;
 };
