@@ -7,4 +7,3 @@ if (!rootElement) {
 }
 
 renderSqliteTransactionOverheadShell(rootElement);
-

@@ -41,9 +41,6 @@ export class EventLogServer extends Server<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return (
-      (await routePartykitRequest(request, env as unknown as Record<string, unknown>)) ||
-      new Response("Not Found", { status: 404 })
-    );
+    return (await routePartykitRequest(request, env)) || new Response("Not Found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
