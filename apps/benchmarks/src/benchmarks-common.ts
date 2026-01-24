@@ -15,7 +15,7 @@ export const noopLogger: Logger = () => {};
 export async function createBenchmarkDb<TSchema>(): Promise<SQLiteDbWrapper<TSchema>> {
   const sqlite3 = await sqlite3InitModule();
   const db = new SQLiteDbWrapper<TSchema>({
-    db: new sqlite3.oo1.DB({ filename: ":memory:" }),
+    db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
     sqlite3,
     logger: noopLogger,
     loggerPrefix: "benchmarks",

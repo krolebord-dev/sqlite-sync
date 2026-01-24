@@ -37,7 +37,7 @@ export class SQLiteReactiveDb<Database> {
     this.logger = logger;
 
     this.db = new SQLiteDbWrapper({
-      db: new sqlite3.oo1.DB({ filename: ":memory:" }),
+      db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
       logger: this.logger,
       loggerPrefix: "memory",
       sqlite3,

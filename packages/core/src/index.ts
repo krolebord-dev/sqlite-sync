@@ -60,7 +60,6 @@ export {
   type CrdtUpdateLogPayload,
   crdtSchema,
   type PersistedCrdtEvent,
-  registerCrdtFunctions,
 } from "./sqlite-crdt/crdt-table-schema";
 export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";

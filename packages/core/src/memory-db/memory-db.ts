@@ -4,9 +4,9 @@ import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-s
 import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
 import type { CrdtTableConfig } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage, type EventUpdate, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
-import { type PersistedCrdtEvent, registerCrdtFunctions } from "../sqlite-crdt/crdt-table-schema";
+import type { PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
-import { makeCrdtTable } from "../sqlite-crdt/make-crdt-table";
+import { makeCrdtTable, registerCrdtFunctions } from "../sqlite-crdt/make-crdt-table";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
@@ -55,9 +55,8 @@ export async function createMemoryDb<Database>({
   });
 
   registerCrdtFunctions({
-    db,
+    reactiveDb,
     storage: crdtStorage,
-    getTableSchema: (dataset: string) => db.dbSchema[dataset],
   });
 
   return {

@@ -34,7 +34,7 @@ type SqliteWrapperOptions = {
   logger?: Logger;
   loggerPrefix?: string;
   sqlite3: Sqlite3Static;
-  db: SQLiteDatabase;
+  db: () => SQLiteDatabase;
 };
 
 export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
@@ -61,7 +61,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   private preparedRawStatementsMap = new Map<string, PreparedStatement<SqlValue[], unknown>>();
 
   constructor(opts: SqliteWrapperOptions) {
-    this.db = opts.db;
+    this.db = opts.db();
     this.sqlite3 = opts.sqlite3;
     this.logger = opts.logger;
     this.loggerPrefix = opts.loggerPrefix;
@@ -107,6 +107,11 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       transaction.rollback();
       throw error;
     }
+  }
+
+  isInTransaction() {
+    // TODO: Awaiting upstream fix: https://github.com/sqlite/sqlite-wasm/pull/143
+    return (this.sqlite3.capi as any).sqlite3_get_autocommit(this.ensureDb) === 0;
   }
 
   beginTransaction() {

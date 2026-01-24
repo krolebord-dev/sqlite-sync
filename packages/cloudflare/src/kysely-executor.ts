@@ -21,11 +21,12 @@ export type KyselyExecutor<TDatabase> = {
   executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
     factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
   ): ExecuteResult<TResult>;
+  transaction: (callback: (tx: Pick<KyselyExecutor<TDatabase>, "execute" | "executeKysely">) => void) => void;
 };
 
-export function createKyselyExecutor<TDatabase>(db: SqlStorage): KyselyExecutor<TDatabase> {
+export function createKyselyExecutor<TDatabase>(db: DurableObjectStorage): KyselyExecutor<TDatabase> {
   const execute = <TResult = unknown>(query: ExecuteParams): ExecuteResult<TResult> => {
-    const rows = db.exec(query.sql, ...query.parameters).toArray();
+    const rows = db.sql.exec(query.sql, ...query.parameters).toArray();
     return { rows: rows as TResult[] };
   };
 
@@ -36,8 +37,15 @@ export function createKyselyExecutor<TDatabase>(db: SqlStorage): KyselyExecutor<
     return execute(query);
   };
 
-  return {
+  const transaction = (callback: (tx: Pick<KyselyExecutor<TDatabase>, "execute" | "executeKysely">) => void) => {
+    db.transactionSync(() => callback(executor));
+  };
+
+  const executor = {
     execute,
     executeKysely,
+    transaction,
   };
+
+  return executor;
 }

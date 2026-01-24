@@ -48,7 +48,7 @@ function createDurableObjectCrdtStorage<Database>({
   sqlExecutor: KyselyExecutor<Database>;
   migrator: SyncDbMigrator;
 } {
-  const sqlExecutor = createKyselyExecutor<AdapterDb>(storage.sql);
+  const sqlExecutor = createKyselyExecutor<AdapterDb>(storage);
 
   sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, crdtEventsTable));
 
@@ -56,7 +56,7 @@ function createDurableObjectCrdtStorage<Database>({
     initialValue: getLatestSyncId(sqlExecutor),
   });
 
-  const migrator = createMigrator(mode, storage, syncDbSchema.migrations);
+  const migrator = createMigrator(mode, storage.kv, sqlExecutor, syncDbSchema.migrations);
 
   let handleCrdtEventApply: (event: PersistedCrdtEvent) => void = () => {};
 
@@ -108,7 +108,7 @@ function createDurableObjectCrdtStorage<Database>({
     });
 
     handleCrdtEventApply = (event) => {
-      storage.transactionSync(() => {
+      sqlExecutor.transaction(() => {
         baseApply(event);
       });
     };
@@ -121,7 +121,7 @@ function createDurableObjectCrdtStorage<Database>({
     hlc,
     migrator: migrator,
     handleCrdtEventApply,
-    transaction: (callback) => storage.transactionSync(callback),
+    transaction: (callback) => sqlExecutor.transaction(callback),
     getEventsBatch: (opts) => {
       return sqlExecutor.executeKysely((db) =>
         applyKyselyEventsBatchFilters(db.selectFrom(crdtEventsTable as "crdtEvents").selectAll(), {

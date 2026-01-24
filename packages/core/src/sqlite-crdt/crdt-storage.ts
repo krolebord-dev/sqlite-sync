@@ -77,7 +77,6 @@ export const crdtEventOrigin = {
 };
 
 type EventsAppliedPayload = {
-  eventsCount: number;
   syncId: number;
 };
 
@@ -123,7 +122,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueEvents("remote", events);
   };
 
-  const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction = false }: { wrapInTransaction?: boolean } = {}) => {
+  const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {
     const persistedEvent: PersistedCrdtEvent = {
       schema_version: storage.migrator.currentSchemaVersion,
       timestamp: serializeHLC(storage.hlc.getNextHLC()),
@@ -145,30 +144,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       storage.persistEvent(persistedEvent);
       processPersistedEvent(persistedEvent);
     }
-
-    dispatchEventsApplied({
-      eventsCount: 1,
-      syncId: persistedEvent.sync_id,
-    });
   };
 
-  let pendingDispatchPayload: EventsAppliedPayload | null = null;
-  const dispatchEventsApplied = (payload: EventsAppliedPayload) => {
-    if (!pendingDispatchPayload) {
-      pendingDispatchPayload = payload;
-      Promise.resolve().then(() => {
-        if (!pendingDispatchPayload) {
-          return;
-        }
-
-        const payload = pendingDispatchPayload;
-        pendingDispatchPayload = null;
-        eventTarget.dispatchEvent("events-applied", payload);
-      });
-    } else {
-      pendingDispatchPayload.eventsCount += payload.eventsCount;
-      pendingDispatchPayload.syncId = Math.max(pendingDispatchPayload.syncId, payload.syncId);
-    }
+  const dispatchEventsApplied = () => {
+    eventTarget.dispatchEvent("events-applied", {
+      syncId: storage.syncId.current,
+    });
   };
 
   const getEventsBatch = (options: GetEventsOptions): GetEventsBatch => {
@@ -254,22 +235,19 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         });
       }
 
-      dispatchEventsApplied({
-        eventsCount: events.length,
-        syncId: events[events.length - 1].sync_id,
-      });
+      dispatchEventsApplied();
     }
   });
 
   return {
+    getEventsBatch,
     enqueueLocalEvents,
     enqueueOwnEvents,
     enqueueRemoteEvents,
     applyOwnEvent,
-    getEventsBatch,
+    dispatchEventsApplied,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
-    //dispatchEvent: eventTarget.dispatchEvent,
   };
 }

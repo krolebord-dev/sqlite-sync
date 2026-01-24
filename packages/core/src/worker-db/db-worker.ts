@@ -60,7 +60,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
-    db: new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
+    db: () => new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
     logger: logger,
     loggerPrefix: "worker",
     sqlite3,
