@@ -1,19 +1,65 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { sql } from "kysely";
-import { CheckIcon, MailIcon, PenIcon } from "lucide-react";
-import { useState } from "react";
+import { CheckIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useListId } from "@/lib/use-list";
 import { formatDuration } from "@/lib/utils/format-duration";
-import { useDbQuery } from "@/list-db/list-db";
+import { importSchema, transformImportItem } from "@/lib/utils/import-json";
+import { useDb, useDbQuery } from "@/list-db/list-db";
+import { useListOrpc } from "@/list-db/list-orpc-context";
 import { orpc } from "@/orpc/orpc-client";
+
+type ImportResult = {
+  imported: number;
+  skipped: number;
+};
+
+async function importItemsFromJson(db: ReturnType<typeof useDb>, file: File): Promise<ImportResult> {
+  const text = await file.text();
+  const json = JSON.parse(text);
+
+  const parseResult = importSchema.safeParse(json);
+  if (!parseResult.success) {
+    throw new Error("Invalid JSON format. Please check the file structure.");
+  }
+
+  const items = parseResult.data;
+
+  if (items.length === 0) {
+    throw new Error("No items found in the file.");
+  }
+
+  const existingTmdbIds = db.db.executeKysely((db) => db.selectFrom("item").select("tmdbId")).rows.map((x) => x.tmdbId);
+
+  const existingSet = new Set(existingTmdbIds);
+
+  const itemsToImport = items.filter((item) => !existingSet.has(item.tmdbId));
+  const skippedCount = items.length - itemsToImport.length;
+
+  if (itemsToImport.length === 0) {
+    return { imported: 0, skipped: items.length };
+  }
+
+  const dbItems = itemsToImport.map(transformImportItem);
+  db.db.executeTransaction((db) => {
+    for (const item of dbItems) {
+      db.executeKysely((db) => db.insertInto("item").values(item));
+    }
+  });
+
+  return { imported: itemsToImport.length, skipped: skippedCount };
+}
 
 type ListSettingsSheetProps = {
   children: React.ReactNode;
@@ -37,6 +83,9 @@ export function ListSettingsSheet({ children, asChild }: ListSettingsSheetProps)
 }
 
 function ListSettingsForm() {
+  const db = useDb();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const { data: listStats } = useDbQuery({
     queryFn: (db) => {
       return db
@@ -60,23 +109,103 @@ function ListSettingsForm() {
     orpc.list.getListWithMembers.queryOptions({ input: { listId: listId! }, enabled: !!listId }),
   );
 
+  const importMutation = useMutation({
+    mutationFn: (file: File) => importItemsFromJson(db, file),
+    onSuccess: (result) => {
+      if (result.imported === 0) {
+        toast.info(`All ${result.skipped} items already exist in your list.`);
+      } else if (result.skipped > 0) {
+        toast.success(`Imported ${result.imported} items. ${result.skipped} duplicates skipped.`);
+      } else {
+        toast.success(`Successfully imported ${result.imported} items.`);
+      }
+    },
+    onError: (error) => {
+      if (error instanceof SyntaxError) {
+        toast.error("Invalid JSON file. Please check the file format.");
+      } else if (error instanceof Error) {
+        toast.error(error.message);
+      } else {
+        toast.error("Failed to import items. Please try again.");
+      }
+    },
+  });
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    e.target.value = "";
+    importMutation.mutate(file);
+  };
+
   return (
     <div className="flex h-full flex-col justify-between gap-12 px-4">
       <div className="flex flex-col gap-12">
         {list ? <ListNameForm listId={list.id} name={list.name} /> : <Skeleton className="h-8 w-full" />}
         {list ? <ListUsers listId={list.id} users={list.members} /> : <Skeleton className="h-8 w-full" />}
+        <AiSuggestionsToggle />
       </div>
-      {!!listStats && (
-        <div className="flex flex-col pb-6 text-gray-500">
-          <p>
-            Watched: {listStats.watchedCount} / {listStats.count}
-          </p>
-          <p>
-            Duration: {formatDuration(listStats.watchedDuration)} / {formatDuration(listStats.totalDuration)}
-          </p>
-          <p>Average rating: {Math.round(listStats.averageRating)}</p>
-        </div>
-      )}
+      <div className="flex flex-col gap-4 pb-6">
+        {!!listStats && (
+          <div className="flex flex-col text-gray-500">
+            <p>
+              Watched: {listStats.watchedCount} / {listStats.count}
+            </p>
+            <p>
+              Duration: {formatDuration(listStats.watchedDuration)} / {formatDuration(listStats.totalDuration)}
+            </p>
+            <p>Average rating: {Math.round(listStats.averageRating)}</p>
+          </div>
+        )}
+        <Button
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={importMutation.isPending}
+          className="w-full"
+        >
+          <UploadIcon className="mr-2 size-4" />
+          {importMutation.isPending ? "Importing..." : "Import from JSON"}
+        </Button>
+        <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
+      </div>
+    </div>
+  );
+}
+
+function AiSuggestionsToggle() {
+  const listOrpc = useListOrpc();
+
+  const { data, isLoading } = useQuery(listOrpc.listSettings.getAiSuggestionsEnabled.queryOptions());
+
+  const queryClient = useQueryClient();
+  const mutation = useMutation(
+    listOrpc.listSettings.setAiSuggestionsEnabled.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getAiSuggestionsEnabled.key() });
+      },
+    }),
+  );
+
+  const handleCheckedChange = (checked: boolean) => {
+    mutation.mutate({ enabled: checked });
+  };
+
+  if (isLoading) {
+    return <Skeleton className="h-6 w-full" />;
+  }
+
+  return (
+    <div className="flex items-start gap-4">
+      <Label htmlFor="ai-suggestions" className="cursor-pointer">
+        Auto suggest tags
+      </Label>
+      <Switch
+        id="ai-suggestions"
+        checked={data?.enabled ?? true}
+        onCheckedChange={handleCheckedChange}
+        disabled={mutation.isPending}
+      />
     </div>
   );
 }

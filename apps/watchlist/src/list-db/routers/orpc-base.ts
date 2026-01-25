@@ -5,6 +5,7 @@ import type { ListSyncDbSchema } from "../migrations";
 export interface ORPCContext {
   env: Env;
   syncDb: ServerSyncDb<ListSyncDbSchema>;
+  kv: SyncKvStorage;
 }
 
 export const orpcErrors = {
