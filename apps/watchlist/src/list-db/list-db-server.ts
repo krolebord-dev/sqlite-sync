@@ -38,7 +38,9 @@ export class ListDbServer extends Server<Env> {
     });
 
     syncDb.addEventListener("event-applied", (event) => {
-      this.onEventApplied(event.payload);
+      this.onEventApplied(event.payload).catch((error) => {
+        console.error("Error applying event", event, error);
+      });
     });
   }
 
@@ -66,9 +68,9 @@ export class ListDbServer extends Server<Env> {
     return super.onRequest(request);
   }
 
-  onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
+  async onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
     if (event.type === "item-created" && event.dataset === "_item") {
-      this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
+      await this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
     }
   }
 }
