@@ -46,15 +46,15 @@ const AppListIdIndexRoute = AppListIdIndexRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof AppIndexRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
-  '/': typeof AppIndexRoute
-  '/list/$id': typeof AppListIdIndexRoute
+  '/list/$id/': typeof AppListIdIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof AppIndexRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
-  '/': typeof AppIndexRoute
   '/list/$id': typeof AppListIdIndexRoute
 }
 export interface FileRoutesById {
@@ -68,9 +68,9 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/magic-link-verify' | '/sign-in' | '/' | '/list/$id'
+  fullPaths: '/' | '/magic-link-verify' | '/sign-in' | '/list/$id/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/magic-link-verify' | '/sign-in' | '/' | '/list/$id'
+  to: '/' | '/magic-link-verify' | '/sign-in' | '/list/$id'
   id:
     | '__root__'
     | '/_app'
@@ -91,14 +91,14 @@ declare module '@tanstack/react-router' {
     '/_auth': {
       id: '/_auth'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof AuthRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app': {
       id: '/_app'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof AppRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -126,7 +126,7 @@ declare module '@tanstack/react-router' {
     '/_app/list/$id/': {
       id: '/_app/list/$id/'
       path: '/list/$id'
-      fullPath: '/list/$id'
+      fullPath: '/list/$id/'
       preLoaderRoute: typeof AppListIdIndexRouteImport
       parentRoute: typeof AppRouteRoute
     }

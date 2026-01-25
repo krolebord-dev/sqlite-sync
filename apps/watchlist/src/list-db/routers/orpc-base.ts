@@ -1,6 +1,11 @@
-import { os } from "@orpc/server";
+import { isDefinedError, os } from "@orpc/server";
+import type { ServerSyncDb } from "@sqlite-sync/cloudflare";
+import type { ListSyncDbSchema } from "../migrations";
 
-export interface ORPCContext {}
+export interface ORPCContext {
+  env: Env;
+  syncDb: ServerSyncDb<ListSyncDbSchema>;
+}
 
 export const orpcErrors = {
   UNAUTHORIZED: {},
@@ -10,4 +15,30 @@ export const orpcErrors = {
 
 const osBase = os.$context<ORPCContext>().errors(orpcErrors);
 
-export const listProcedure = osBase;
+type ErrorCodes = keyof (typeof osBase)["~orpc"]["errorMap"];
+
+const loggingMiddleware = osBase.middleware(async ({ next, path }) => {
+  const time = performance.now();
+  try {
+    const result = await next();
+
+    const duration = performance.now() - time;
+    console.log(`--- ORPC ${path.join(".")} ${Math.round(duration)}ms`);
+
+    return result;
+  } catch (error) {
+    const duration = performance.now() - time;
+
+    if (isDefinedError(error)) {
+      const errorCode = (error as { code: ErrorCodes }).code;
+      console.warn(`--- ORPC ${path.join(".")} ${Math.round(duration)}ms ${errorCode}`);
+    } else {
+      console.error(`--- ORPC Error ${path.join(".")}`);
+      console.error(error);
+    }
+
+    throw error;
+  }
+});
+
+export const listProcedure = osBase.use(loggingMiddleware);

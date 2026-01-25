@@ -1,7 +1,9 @@
 import type { SyncedDb } from "@sqlite-sync/core";
+import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
+  AlertCircleIcon,
   CalendarIcon,
   CheckIcon,
   Clock4Icon,
@@ -10,10 +12,12 @@ import {
   EyeOffIcon,
   FlameIcon,
   HashIcon,
+  LoaderCircleIcon,
   MinusIcon,
   PencilIcon,
   PlusIcon,
   SkullIcon,
+  StarsIcon,
   ThumbsUpIcon,
   TrashIcon,
 } from "lucide-react";
@@ -29,9 +33,11 @@ import {
   DynamicMenuSubContent,
   DynamicMenuSubTrigger,
 } from "@/components/ui/dynamic-menu-content";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/utils/format-duration";
 import { useDb } from "@/list-db/list-db";
+import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
 import { editItemAtom, randomizedItemAtom, selectedItemsAtom, toggleItemSelectionAtom } from "./list-atoms";
 
@@ -42,6 +48,12 @@ export function ListItemCard({ item }: { item: ListItem }) {
   const isRandomizedItem = useIsRandomizedItem(item.id);
 
   const toggleItemSelection = useSetAtom(toggleItemSelectionAtom);
+
+  const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
+  const maxTags = 6;
+  const visibleTags = tags.slice(0, maxTags);
+  const hiddenTags = tags.slice(maxTags);
+  const remainingTagCount = hiddenTags.length;
 
   return (
     <ContextMenu>
@@ -123,17 +135,34 @@ export function ListItemCard({ item }: { item: ListItem }) {
                   </span>
                 )}
               </p>
-              {/* {item.tags && item.tags.length > 0 && (
+              {tags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {item.tags.map((tag) => (
-                    <span key={tag.id} className="rounded-full border border-border bg-card px-2 py-0.5 text-xs">
-                      {tag.name}
+                  {visibleTags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full border border-border bg-card/80 px-2 py-0.5 text-foreground text-xs"
+                    >
+                      {tag}
                     </span>
                   ))}
+                  {remainingTagCount > 0 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className="cursor-default select-none rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground text-xs"
+                          title={hiddenTags.join(", ")}
+                        >
+                          +{remainingTagCount}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6}>{hiddenTags.join(", ")}</TooltipContent>
+                    </Tooltip>
+                  )}
                 </div>
-              )} */}
+              )}
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex items-center justify-end gap-2">
+              <ProcessingStatusIndicator status={item.processingStatus} />
               {!isWatched && (
                 <Button variant="ghost" size="icon" onClick={() => setWatchedMutation(db, item.id, true)}>
                   <CheckIcon />
@@ -168,6 +197,7 @@ function ListItemMenuContent({ type, item }: ListItemMenuContentProps) {
       <DeleteMenuItem item={item} />
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
+      <AiSuggestTagsMenuItem item={item} />
       {/* <ReindexMenuItem item={item} /> */}
     </DynamicMenuContent>
   );
@@ -357,6 +387,27 @@ function EditMenuItem({ item }: ItemMenuActioProps) {
   );
 }
 
+function AiSuggestTagsMenuItem({ item }: ItemMenuActioProps) {
+  const listDbOrpc = useListOrpc();
+  const db = useDb();
+  const suggestTagsMutation = useMutation(
+    listDbOrpc.aiSuggestions.suggestTags.mutationOptions({
+      onMutate: () => {
+        db.db.executeKysely((db) =>
+          db.updateTable("item").set({ processingStatus: "pending" }).where("id", "=", item.id),
+        );
+      },
+    }),
+  );
+
+  return (
+    <DynamicMenuItem onClick={() => suggestTagsMutation.mutate({ itemId: item.id })}>
+      <StarsIcon />
+      Suggest Tags
+    </DynamicMenuItem>
+  );
+}
+
 export function VoteAverage({ voteAverage, className }: { voteAverage: number; className: string }) {
   const { border, text } = getScoreStyles(voteAverage);
   return (
@@ -391,4 +442,23 @@ function getScoreStyles(voteAverage: number) {
     border: "border-red-500",
     text: "text-red-500",
   };
+}
+
+function ProcessingStatusIndicator({ status }: { status: string }) {
+  if (status === "idle") {
+    return null;
+  }
+
+  if (status === "pending") {
+    return <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <AlertCircleIcon className="size-5 text-destructive" />
+      </TooltipTrigger>
+      <TooltipContent>{status}</TooltipContent>
+    </Tooltip>
+  );
 }

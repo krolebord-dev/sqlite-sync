@@ -1,7 +1,9 @@
-import { durableObjectAdapter, type RemoteHandler } from "@sqlite-sync/cloudflare";
+import { createRouterClient, type RouterClient } from "@orpc/server";
+import { durableObjectAdapter, type RemoteHandler, type TypedPersistedCrdtEvent } from "@sqlite-sync/cloudflare";
 import { type Connection, Server } from "partyserver";
-import { listOrpcHandler } from "./list-db-router";
+import { listDbOrpcRouter, listOrpcHandler } from "./list-db-router";
 import { syncDbSchema } from "./migrations";
+import type { ORPCContext } from "./routers/orpc-base";
 
 export class ListDbServer extends Server<Env> {
   static options = {
@@ -10,20 +12,35 @@ export class ListDbServer extends Server<Env> {
 
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private remoteHandler: RemoteHandler = null!;
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
+  private context: ORPCContext = null!;
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
+  private orpc: RouterClient<typeof listDbOrpcRouter> = null!;
 
   onStart(): void | Promise<void> {
-    const { crdtStorage } = durableObjectAdapter.createCrdtStorage({
-      crdtEventsTable: "crdt_events",
+    const { syncDb, remoteHandler } = durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
-      storage: this.ctx.storage,
       mode: "apply-events",
-    });
-
-    this.remoteHandler = durableObjectAdapter.createRemoteHandler({
-      crdtStorage,
+      crdtEventsTable: "crdt_events",
+      storage: this.ctx.storage,
       broadcastPayload: (payload) => {
         this.broadcast(payload);
       },
+    });
+
+    this.remoteHandler = remoteHandler;
+    this.context = {
+      env: this.env,
+      syncDb,
+    };
+    this.orpc = createRouterClient(listDbOrpcRouter, {
+      context: this.context,
+    });
+
+    syncDb.addEventListener("event-applied", (event) => {
+      this.onEventApplied(event.payload).catch((error) => {
+        console.error("Error applying event", event, error);
+      });
     });
   }
 
@@ -41,7 +58,7 @@ export class ListDbServer extends Server<Env> {
   async onRequest(request: Request): Promise<Response> {
     const { matched, response } = await listOrpcHandler.handle(request, {
       prefix: `/list-db/list-db-server/${this.name}/rpc`,
-      context: {},
+      context: this.context,
     });
 
     if (matched) {
@@ -49,5 +66,11 @@ export class ListDbServer extends Server<Env> {
     }
 
     return super.onRequest(request);
+  }
+
+  async onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
+    if (event.type === "item-created" && event.dataset === "_item") {
+      await this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
+    }
   }
 }
