@@ -5,11 +5,17 @@ import {
   type StoredValue,
 } from "@sqlite-sync/core";
 import type { AdapterMode } from "./durable-object-adapter";
+import type { KyselyExecutor } from "./kysely-executor";
 
-export function createMigrator(mode: AdapterMode, storage: DurableObjectStorage, migrations: Migrations) {
+export function createMigrator(
+  mode: AdapterMode,
+  kv: SyncKvStorage,
+  sqlExecutor: KyselyExecutor<any>,
+  migrations: Migrations,
+) {
   const schemaVersion = createStoredValue<number>({
-    initialValue: storage.kv.get("schema-version") ?? -1,
-    saveToStorage: (val) => storage.kv.put("schema-version", val),
+    initialValue: kv.get("schema-version") ?? -1,
+    saveToStorage: (val) => kv.put("schema-version", val),
   });
 
   const readonlySchemaVersion: StoredValue<number> = {
@@ -31,8 +37,14 @@ export function createMigrator(mode: AdapterMode, storage: DurableObjectStorage,
     migrateDbToLatest: () => {
       baseMigrator.migrateDbToLatest({
         startTransaction: (callback) => {
-          storage.transactionSync(() => {
-            return callback({ execute: (sql, parameters) => storage.sql.exec(sql, ...parameters) });
+          sqlExecutor.transaction(() => {
+            return callback({
+              execute: (sql, parameters) =>
+                sqlExecutor.execute({
+                  sql,
+                  parameters,
+                }),
+            });
           });
         },
       });

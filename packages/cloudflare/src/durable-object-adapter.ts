@@ -1,16 +1,24 @@
 import {
   applyKyselyEventsBatchFilters,
+  type CrdtEventOrigin,
+  type CrdtEventStatus,
+  type CrdtEventType,
   type CrdtStorage,
+  type CrdtStorageMutator,
   type CrdtUpdateLogItem,
   type CrdtUpdateLogPayload,
   crdtSchema,
   createCrdtApplyFunction,
   createCrdtStorage,
+  createCrdtStorageMutator,
   createCrdtSyncProducer,
   createStoredValue,
+  createTypedEventTarget,
+  HLCCounter,
   jsonSafeParse,
   type PersistedCrdtEvent,
   type SyncDbSchema,
+  type TypedEventTarget,
 } from "@sqlite-sync/core";
 import {
   type ExtractSyncServerRequest,
@@ -19,7 +27,7 @@ import {
   syncServerZodSchema,
 } from "@sqlite-sync/core/server";
 import { createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
-import { createMigrator, type SyncDbMigrator } from "./migrator";
+import { createMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
 
@@ -30,33 +38,63 @@ type AdapterDb = {
 
 export type AdapterMode = "store-event-log-only" | "apply-events";
 
-function createDurableObjectCrdtStorage<Database>({
+export type TypedPersistedCrdtEvent<Schema extends SyncDbSchema> = {
+  schema_version: number;
+  sync_id: number;
+  status: CrdtEventStatus;
+  type: CrdtEventType;
+  timestamp: string;
+  origin: CrdtEventOrigin;
+  dataset: keyof Schema[`~mutationsSchema`];
+  item_id: string;
+  payload: string;
+};
+
+type ServerSyncDbEvents<Schema extends SyncDbSchema> = {
+  "event-applied": TypedPersistedCrdtEvent<Schema>;
+};
+
+export type ServerSyncDb<Schema extends SyncDbSchema> = Pick<
+  KyselyExecutor<Schema[`~serverSchema`]>,
+  "execute" | "executeKysely"
+> &
+  CrdtStorageMutator<Schema[`~mutationsSchema`]> &
+  Pick<TypedEventTarget<ServerSyncDbEvents<Schema>>, "addEventListener" | "removeEventListener">;
+
+function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   storage,
   syncDbSchema,
   crdtEventsTable = "crdt_events",
   batchSize = 50,
   mode,
+  broadcastPayload,
 }: {
   storage: DurableObjectStorage;
-  syncDbSchema: SyncDbSchema<Database>;
+  syncDbSchema: Schema;
   crdtEventsTable: string;
   batchSize?: number;
   mode: AdapterMode;
+  broadcastPayload: (payload: string) => void;
 }): {
-  crdtStorage: CrdtStorage;
-  sqlExecutor: KyselyExecutor<Database>;
-  migrator: SyncDbMigrator;
+  syncDb: ServerSyncDb<Schema>;
+  remoteHandler: RemoteHandler;
 } {
-  const sqlExecutor = createKyselyExecutor<AdapterDb>(storage.sql);
+  const eventTarget = createTypedEventTarget<ServerSyncDbEvents<Schema>>();
+  const sqlExecutor = createKyselyExecutor<AdapterDb>(storage);
+
   sqlExecutor.executeKysely((db) => crdtSchema.persistedEventsTable(db.schema, crdtEventsTable));
 
   const syncId = createStoredValue({
     initialValue: getLatestSyncId(sqlExecutor),
   });
 
-  const migrator = createMigrator(mode, storage, syncDbSchema.migrations);
+  const migrator = createMigrator(mode, storage.kv, sqlExecutor, syncDbSchema.migrations);
 
-  let handleCrdtEventApply: (event: PersistedCrdtEvent) => void = () => {};
+  let handleCrdtEventApply: (event: PersistedCrdtEvent) => void = (event) => {
+    queueMicrotask(() => {
+      eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
+    });
+  };
 
   if (mode === "apply-events") {
     sqlExecutor.executeKysely((db) => crdtSchema.crdtUpdateLogTable(db.schema, updateLogTableName));
@@ -106,23 +144,24 @@ function createDurableObjectCrdtStorage<Database>({
     });
 
     handleCrdtEventApply = (event) => {
-      storage.transactionSync(() => {
+      sqlExecutor.transaction(() => {
         baseApply(event);
+      });
+
+      queueMicrotask(() => {
+        eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
       });
     };
   }
 
+  const hlc = new HLCCounter("root", () => Date.now());
+
   const crdtStorage = createCrdtStorage({
     syncId,
+    hlc,
     migrator: migrator,
     handleCrdtEventApply,
-    persistEvents: (events) => {
-      storage.transactionSync(() => {
-        for (const event of events) {
-          sqlExecutor.executeKysely((db) => db.insertInto(crdtEventsTable as "crdtEvents").values(event));
-        }
-      });
-    },
+    transaction: (callback) => sqlExecutor.transaction(callback),
     getEventsBatch: (opts) => {
       return sqlExecutor.executeKysely((db) =>
         applyKyselyEventsBatchFilters(db.selectFrom(crdtEventsTable as "crdtEvents").selectAll(), {
@@ -130,6 +169,9 @@ function createDurableObjectCrdtStorage<Database>({
           limit: opts.limit ?? batchSize,
         }),
       ).rows;
+    },
+    persistEvent: (event) => {
+      sqlExecutor.executeKysely((db) => db.insertInto(crdtEventsTable as "crdtEvents").values(event));
     },
     updateEvent: (syncId, event) =>
       sqlExecutor.executeKysely((db) =>
@@ -147,10 +189,27 @@ function createDurableObjectCrdtStorage<Database>({
       ),
   });
 
-  return {
+  const remoteHandler = createDurableObjectRemoteHandler({
+    bufferSize: batchSize,
     crdtStorage,
-    sqlExecutor: sqlExecutor as unknown as KyselyExecutor<Database>,
-    migrator,
+    broadcastPayload,
+  });
+
+  const syncDbMutator = createCrdtStorageMutator<Schema[`~mutationsSchema`]>({
+    storage: crdtStorage,
+  });
+
+  const syncDbExecutor = sqlExecutor as unknown as KyselyExecutor<Schema[`~serverSchema`]>;
+  const syncDb: ServerSyncDb<Schema> = {
+    ...syncDbExecutor,
+    ...syncDbMutator,
+    addEventListener: eventTarget.addEventListener,
+    removeEventListener: eventTarget.removeEventListener,
+  };
+
+  return {
+    syncDb,
+    remoteHandler,
   };
 }
 
@@ -169,7 +228,6 @@ function createDurableObjectRemoteHandler({
   broadcastPayload: (payload: string) => void;
 }): RemoteHandler {
   createCrdtSyncProducer({
-    bufferSize,
     storage: crdtStorage,
     broadcastEvents: (chunk) => {
       broadcastPayload(
@@ -240,7 +298,7 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    crdtStorage.enqueueEvents(request.events.map((event) => ({ ...event, origin: request.nodeId })));
+    crdtStorage.enqueueLocalEvents(request.events);
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,
@@ -267,5 +325,4 @@ function getLatestSyncId(executor: KyselyExecutor<any>) {
 
 export const durableObjectAdapter = {
   createCrdtStorage: createDurableObjectCrdtStorage,
-  createRemoteHandler: createDurableObjectRemoteHandler,
 };

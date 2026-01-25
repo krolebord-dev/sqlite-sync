@@ -10,7 +10,7 @@ type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, Database,
 };
 
 export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
-  const dbContext = createContext<SyncedDb<Schema["~schema"]> | null>(null);
+  const dbContext = createContext<SyncedDb<Schema["~clientSchema"]> | null>(null);
 
   const useDb = () => {
     const db = use(dbContext);
@@ -20,7 +20,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
     return db;
   };
 
-  const DbProvider = ({ children, db }: { children: React.ReactNode; db: SyncedDb<Schema["~schema"]> }) => {
+  const DbProvider = ({ children, db }: { children: React.ReactNode; db: SyncedDb<Schema["~clientSchema"]> }) => {
     return <dbContext.Provider value={db}>{children}</dbContext.Provider>;
   };
 
@@ -28,7 +28,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
     parameters,
     queryFn,
     mapData,
-  }: UseDbQueryOptions<TParams, Schema["~schema"], TResult, TMapResult>) => {
+  }: UseDbQueryOptions<TParams, Schema["~clientSchema"], TResult, TMapResult>) => {
     const db = useDb();
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: parameters is a dependency of the query

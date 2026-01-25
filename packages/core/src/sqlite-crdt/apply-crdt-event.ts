@@ -13,11 +13,9 @@ export type PendingCrdtEvent = {
 export const createSQLiteCrdtApplyFunction = ({
   db,
   updateLogTableName,
-  wrapInSavepoint = false,
 }: {
   db: SQLiteTransactionWrapper<any>;
   updateLogTableName: string;
-  wrapInSavepoint: boolean;
 }) => {
   const applyCrdtEvent = createCrdtApplyFunction({
     getCrdtUpdateLog(opts) {
@@ -99,24 +97,7 @@ export const createSQLiteCrdtApplyFunction = ({
     },
   });
 
-  if (!wrapInSavepoint) {
-    return applyCrdtEvent;
-  }
-
-  const savepoint = db.prepare("savepoint apply_crdt_event;", { loggerLevel: "system" });
-  const rollbackToSavepoint = db.prepare("rollback to savepoint apply_crdt_event;", { loggerLevel: "system" });
-  const releaseSavepoint = db.prepare("release savepoint apply_crdt_event;", { loggerLevel: "system" });
-
-  return (event: PendingCrdtEvent) => {
-    savepoint.execute([]);
-    try {
-      applyCrdtEvent(event);
-      releaseSavepoint.execute([]);
-    } catch (error) {
-      rollbackToSavepoint.execute([]);
-      throw error;
-    }
-  };
+  return applyCrdtEvent;
 };
 
 type CreateCrdtApplyOpts = {

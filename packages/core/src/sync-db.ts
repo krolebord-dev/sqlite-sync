@@ -1,5 +1,5 @@
 import { validateDbId } from "./db-id";
-import { deserializeHLC, HLCCounter } from "./hlc";
+import { HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
@@ -83,7 +83,6 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     migrator: memoryDbMigrator,
     reactiveDb: reactiveDb,
     hlcCounter,
-    tabId,
     crdtTables: options.syncDbSchema.tablesConfig,
   });
 
@@ -118,12 +117,6 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     },
   });
   tabRemoteSource.goOnline();
-
-  crdtStorage.addEventListener("event-applied", (event) => {
-    if (event.payload.origin === "remote") {
-      hlcCounter.mergeHLC(deserializeHLC(event.payload.timestamp));
-    }
-  });
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 

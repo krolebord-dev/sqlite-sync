@@ -11,20 +11,18 @@ export class EventLogServer extends Server<Env> {
   private remoteHandler: RemoteHandler = null!;
 
   onStart(): void | Promise<void> {
-    const { crdtStorage } = durableObjectAdapter.createCrdtStorage({
+    const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
+      batchSize: 100,
       crdtEventsTable: "crdt_events",
       syncDbSchema,
       storage: this.ctx.storage,
       mode: "store-event-log-only",
-    });
-
-    this.remoteHandler = durableObjectAdapter.createRemoteHandler({
-      bufferSize: 100,
-      crdtStorage,
       broadcastPayload: (payload) => {
         this.broadcast(payload);
       },
     });
+
+    this.remoteHandler = remoteHandler;
   }
 
   onMessage(connection: Connection, message: string) {
@@ -41,9 +39,6 @@ export class EventLogServer extends Server<Env> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return (
-      (await routePartykitRequest(request, env as unknown as Record<string, unknown>)) ||
-      new Response("Not Found", { status: 404 })
-    );
+    return (await routePartykitRequest(request, env)) || new Response("Not Found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

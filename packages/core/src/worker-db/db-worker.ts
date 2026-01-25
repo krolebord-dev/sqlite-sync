@@ -60,7 +60,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
-    db: new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
+    db: () => new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
     logger: logger,
     loggerPrefix: "worker",
     sqlite3,
@@ -100,18 +100,25 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const crdtStorage = createCrdtStorage({
     syncId: localSyncId,
     migrator,
+    hlc: {
+      getNextHLC() {
+        throw new Error("Worker DB should not call getNextHLC");
+      },
+      mergeHLC() {
+        return;
+      },
+    },
+    transaction: (callback) => db.executeTransaction(callback),
     handleCrdtEventApply: createSQLiteCrdtApplyFunction({
       db,
       updateLogTableName: "crdt_update_log",
-      wrapInSavepoint: true,
     }),
-    persistEvents: (events) => persistEvents(db, events),
+    persistEvent: (event) => persistEvent(db, event),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),
   });
 
   createCrdtSyncProducer({
-    bufferSize: 500,
     storage: crdtStorage,
     broadcastEvents: (chunk) => {
       broadcastChannels.responses.postMessage({
@@ -157,13 +164,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     postState,
     pushTabEvents: (request) => {
-      crdtStorage.enqueueEvents(
-        request.events.map((event) => ({
-          ...event,
-          schema_version: migrator.currentSchemaVersion,
-          origin: request.nodeId,
-        })),
-      );
+      crdtStorage.enqueueLocalEvents(request.events);
       return {
         ok: true,
       };
@@ -287,14 +288,24 @@ function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {
   return result[0]?.sync_id ?? 0;
 }
 
-function persistEvents(db: SQLiteDbWrapper<WorkerDbSchema>, events: PersistedCrdtEvent[]) {
-  db.executeTransaction((db) => {
-    const chunkSize = 100;
-    for (let i = 0; i < events.length; i += chunkSize) {
-      const chunk = events.slice(i, i + chunkSize);
-      db.executeKysely((db) => db.insertInto("worker.crdt_events").values(chunk), { loggerLevel: "system" });
-    }
-  });
+function persistEvent(db: SQLiteDbWrapper<WorkerDbSchema>, event: PersistedCrdtEvent) {
+  db.executePrepared(
+    "persist-crdt-event",
+    event,
+    (db, params) =>
+      db.insertInto("worker.crdt_events").values({
+        type: params("type"),
+        dataset: params("dataset"),
+        item_id: params("item_id"),
+        payload: params("payload"),
+        schema_version: params("schema_version"),
+        sync_id: params("sync_id"),
+        status: params("status"),
+        timestamp: params("timestamp"),
+        origin: params("origin"),
+      }),
+    { loggerLevel: "system" },
+  );
 }
 
 function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOptions) {

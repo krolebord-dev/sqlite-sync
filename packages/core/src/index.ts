@@ -43,6 +43,7 @@ export {
   type SyncDbSchema,
 } from "./sqlite-crdt/crdt-schema";
 export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";
+export { type CrdtStorageMutator, createCrdtStorageMutator } from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {
   type CrdtSyncRemoteSource,
@@ -59,7 +60,6 @@ export {
   type CrdtUpdateLogPayload,
   crdtSchema,
   type PersistedCrdtEvent,
-  registerCrdtFunctions,
 } from "./sqlite-crdt/crdt-table-schema";
 export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
@@ -89,6 +89,7 @@ export {
   jsonSafeParse,
   TypedBroadcastChannel,
   TypedEvent,
+  type TypedEventTarget,
   tryCatch,
   tryCatchAsync,
 } from "./utils";
@@ -103,7 +104,6 @@ export {
   isWorkerNotificationMessage,
   isWorkerRequestMessage,
   isWorkerResponseMessage,
-  type PushTabEventsResponse,
   syncDbWorkerLockName,
   type WorkerBroadcastChannels,
   type WorkerConfig,

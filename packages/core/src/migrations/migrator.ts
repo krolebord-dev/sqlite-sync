@@ -219,11 +219,9 @@ function buildMigrationEventTransformer(steps: MigrationStep[]): MigrationEventT
   return Object.fromEntries(entries);
 }
 
-export function createMigrations(
-  buildMigrations: (builder: typeof migrationSteps) => Record<number, { steps: MigrationStep[] }>,
-) {
+export function createMigrations(buildMigrations: (builder: typeof migrationSteps) => Record<number, MigrationStep[]>) {
   const migrations: Record<number, RawMigrationStep> = Object.fromEntries(
-    Object.entries(buildMigrations(migrationSteps)).map(([version, { steps }]) => {
+    Object.entries(buildMigrations(migrationSteps)).map(([version, steps]) => {
       const versionNumber = Number(version);
 
       if (Number.isNaN(versionNumber)) {
