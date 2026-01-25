@@ -34,20 +34,31 @@ function parsePriority(priority: string): number {
   }
 }
 
+function parseDate(dateString: string | null): number | null {
+  if (!dateString) return null;
+  const timestamp = new Date(dateString).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function parseDateRequired(dateString: string | null, fallback: number): number {
+  const result = parseDate(dateString);
+  return result ?? fallback;
+}
+
 export function transformImportItem(item: ImportItem): ListItem {
   return {
     id: generateId(),
     tmdbId: item.tmdbId,
     type: item.type.toLowerCase() as "movie" | "tv",
     title: item.title,
-    releaseDate: item.releaseDate ? new Date(item.releaseDate).getTime() : null,
+    releaseDate: parseDate(item.releaseDate),
     priority: parsePriority(item.priority),
     overview: item.overview,
     rating: item.rating,
     duration: parseDuration(item.duration),
     episodeCount: item.episodes,
-    watchedAt: item.watchedAt ? new Date(item.watchedAt).getTime() : null,
-    createdAt: item.addedAt ? new Date(item.addedAt).getTime() : Date.now(),
+    watchedAt: parseDate(item.watchedAt),
+    createdAt: parseDateRequired(item.addedAt, Date.now()),
     tags: JSON.stringify(item.tags),
     processingStatus: "idle" as const,
     posterUrl: item.posterUrl,
