@@ -177,14 +177,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       if (migratedEvent === null) {
         // Event was dropped during migration (e.g., table was deleted)
         event.status = "skipped";
-        storage.updateEvent(event.sync_id, {
-          status: event.status,
-          schema_version: storage.migrator.latestSchemaVersion,
-          type: event.type,
-          dataset: event.dataset,
-          item_id: event.item_id,
-          payload: event.payload,
-        });
+        event.schema_version = storage.migrator.latestSchemaVersion;
         return event;
       }
 
