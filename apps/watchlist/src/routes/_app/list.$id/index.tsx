@@ -1,5 +1,5 @@
 import { generateId, type SyncedDb } from "@sqlite-sync/core";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useLoaderData, useSearch } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { Provider, useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -35,7 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
 import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/list-db/list-db";
-import { ListDbOrpcProvider, useListOrpc } from "@/list-db/list-orpc-context";
+import { ListDbOrpcProvider } from "@/list-db/list-orpc-context";
 import type { ListDb } from "@/list-db/migrations";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { priorityColors } from "./-/common";
@@ -98,28 +98,12 @@ function HydrateListAtoms({ children }: { children: React.ReactNode }) {
 }
 
 function ListPage() {
-  const listDbOrpc = useListOrpc();
-  const testListDbOrpcMutation = useMutation(
-    listDbOrpc.aiSuggestions.hello.mutationOptions({
-      onSuccess: (result) => {
-        console.log("list-db orpc result", result);
-      },
-    }),
-  );
-
-  const handleListDbOrpcTest = () => {
-    testListDbOrpcMutation.mutate("world");
-  };
-
   return (
     <>
       <AppHeader>
         <div className="flex items-center gap-2">
           <ProjectSelector />
           <ListSettings />
-          <Button variant="outline" onClick={handleListDbOrpcTest}>
-            Test list-db oRPC
-          </Button>
         </div>
         <div className="flex items-center gap-2">
           <OnlineStatusIndicator />
@@ -449,6 +433,8 @@ function TmdbSearchResults() {
         overview: item.overview,
         rating: item.voteAverage,
         createdAt: Date.now(),
+        tags: "[]",
+        processingStatus: "idle",
       }),
     );
   };

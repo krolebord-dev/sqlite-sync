@@ -23,7 +23,7 @@ export default {
       return apiHandler(request);
     }
 
-    const partykitRequest = await routePartykitRequest(request, env as unknown as Record<string, unknown>, {
+    const partykitRequest = await routePartykitRequest(request, env, {
       prefix: "list-db",
       locationHint: "weur",
     });
