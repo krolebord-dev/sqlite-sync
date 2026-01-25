@@ -32,6 +32,7 @@ export class ListDbServer extends Server<Env> {
     this.context = {
       env: this.env,
       syncDb,
+      kv: this.ctx.storage.kv,
     };
     this.orpc = createRouterClient(listDbOrpcRouter, {
       context: this.context,
@@ -70,7 +71,10 @@ export class ListDbServer extends Server<Env> {
 
   async onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
     if (event.type === "item-created" && event.dataset === "_item") {
-      await this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
+      const aiSuggestionsEnabled = this.ctx.storage.kv.get<boolean>("settings:ai-suggestions-enabled");
+      if (aiSuggestionsEnabled !== false) {
+        await this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
+      }
     }
   }
 }
