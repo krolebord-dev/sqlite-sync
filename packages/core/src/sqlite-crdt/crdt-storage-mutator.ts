@@ -51,18 +51,21 @@ export function createCrdtStorageMutator<Database>({ storage }: { storage: CrdtS
     }
   };
 
-  const commitEvents = (events: CommitEventOptions<Database, keyof Database & string>[]) => {
-    for (const event of events) {
-      commitEvent(event);
-    }
+  const enqueueEvents = (events: CommitEventOptions<Database, keyof Database & string>[]) => {
+    storage.enqueueOwnEvents(events.map(mapToStorageEvent));
   };
 
-  const commitEvent = <Table extends keyof Database & string>(opts: CommitEventOptions<Database, Table>) => {
-    storage.applyOwnEvent(mapToStorageEvent(opts));
+  const createEvent = <Table extends keyof Database & string>(event: CommitEventOptions<Database, Table>) => {
+    return event;
+  };
+
+  const enqueueEvent = (event: CommitEventOptions<Database, keyof Database & string>) => {
+    storage.enqueueOwnEvents([mapToStorageEvent(event)]);
   };
 
   return {
-    commitEvents,
-    commitEvent,
+    enqueueEvents,
+    createEvent,
+    enqueueEvent,
   };
 }

@@ -89,6 +89,7 @@ export {
   jsonSafeParse,
   TypedBroadcastChannel,
   TypedEvent,
+  type TypedEventTarget,
   tryCatch,
   tryCatchAsync,
 } from "./utils";
