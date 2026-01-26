@@ -86,9 +86,9 @@ function ListSettingsForm() {
   const db = useDb();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: listStats } = useDbQuery({
-    queryFn: (db) => {
-      return db
+  const { data: listStats } = useDbQuery(
+    (db) =>
+      db
         .selectFrom("item")
         .select(({ fn }) => [
           fn.count<number>("id").as("count"),
@@ -98,10 +98,11 @@ function ListSettingsForm() {
             "watchedDuration",
           ),
           sql<number>`avg(${sql.ref("rating")})`.as("averageRating"),
-        ]);
+        ]),
+    {
+      mapData: ([listStats]) => listStats,
     },
-    mapData: ([listStats]) => listStats,
-  });
+  );
 
   const listId = useListId();
   const { data: list } = useQuery(

@@ -1,4 +1,5 @@
 import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
+import { BoundMap } from "../bound-map";
 import { type Logger, startPerformanceLogger } from "../logger";
 import { type PreparedStatement, SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createTypedEventTarget, type TypedEvent } from "../utils";
@@ -63,26 +64,40 @@ export class SQLiteReactiveDb<Database> {
     return db;
   }
 
+  private liveQueryStatements = new BoundMap<string, PreparedStatement<any[], unknown>>({
+    maxSize: 100,
+    onRemove(_, value) {
+      value.finalize();
+    },
+  });
+
   createLiveQuery<TResult>(query: { sql: string; parameters: readonly unknown[] }) {
-    const fetchRows = () =>
-      this.db.execute<TResult>({
-        sql: query.sql,
-        parameters: query.parameters ?? [],
-      }).rows;
+    const fetchRows = (parameters: readonly unknown[]) => {
+      let statement = this.liveQueryStatements.get(query.sql);
+      if (!statement) {
+        statement = this.db.prepare<any[], any>(query.sql);
+        this.liveQueryStatements.set(query.sql, statement);
+      }
+      return statement.execute(parameters as any) as TResult[];
+    };
 
     let rows: TResult[] | null = null;
 
     const getRows = () => {
       if (!rows) {
-        rows = fetchRows();
+        rows = fetchRows(query.parameters);
       }
       return rows;
     };
 
     let subscriber: (() => void) | null = null;
 
-    const refresh = () => {
-      rows = fetchRows();
+    let lastParameters: readonly unknown[] = query.parameters;
+    const refresh = (parameters?: readonly unknown[]) => {
+      if (parameters) {
+        lastParameters = parameters;
+      }
+      rows = fetchRows(lastParameters);
       subscriber?.();
     };
 

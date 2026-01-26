@@ -361,25 +361,22 @@ function useOrderedAndFilteredItems() {
   const searchQuery = useAtomValue(searchQueryAtom);
   const randomizedItem = useAtomValue(randomizedItemAtom);
 
-  const { data: items } = useDbQuery({
-    parameters: [sortBy, sortOrder, priority, searchQuery, randomizedItem] as const,
-    queryFn: (db, [sortBy, sortOrder, priority, searchQuery, randomizedItem]) => {
-      let query = db
-        .selectFrom("item")
-        .selectAll()
-        .orderBy(sql`(id = ${randomizedItem}) desc`)
-        .orderBy("watchedAt", (ob) => ob.nullsFirst().desc())
-        .orderBy(sortBy, sortOrder);
-      if (priority !== "any") {
-        query = query.where("priority", "=", getPriorityValue(priority));
-      }
+  const { data: items } = useDbQuery((db) => {
+    let query = db
+      .selectFrom("item")
+      .selectAll()
+      .orderBy(sql`(id = ${randomizedItem}) desc`)
+      .orderBy("watchedAt", (ob) => ob.nullsFirst().desc())
+      .orderBy(sortBy, sortOrder);
+    if (priority !== "any") {
+      query = query.where("priority", "=", getPriorityValue(priority));
+    }
 
-      if (searchQuery) {
-        query = query.where("title", "like", `%${searchQuery}%`);
-      }
+    if (searchQuery) {
+      query = query.where("title", "like", `%${searchQuery}%`);
+    }
 
-      return query;
-    },
+    return query;
   });
 
   return items;
@@ -407,10 +404,12 @@ function TmdbSearchResults() {
   const searchQuery = useAtomValue(searchQueryAtom);
   const throttledQuery = useThrottle(searchQuery, 300);
 
-  const { data: alreadyAddedTmdbIds } = useDbQuery({
-    queryFn: (db) => db.selectFrom("item").select("tmdbId").where("tmdbId", "is not", null),
-    mapData: (data) => new Set(data.map((x) => x.tmdbId)),
-  });
+  const { data: alreadyAddedTmdbIds } = useDbQuery(
+    (db) => db.selectFrom("item").select("tmdbId").where("tmdbId", "is not", null),
+    {
+      mapData: (data) => new Set(data.map((x) => x.tmdbId)),
+    },
+  );
 
   const { data: searchResults, isLoading } = useQuery(
     orpc.search.search.queryOptions({

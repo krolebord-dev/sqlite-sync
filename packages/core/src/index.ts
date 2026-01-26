@@ -1,5 +1,6 @@
 // Main exports
 
+export { BoundMap } from "./bound-map";
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
 // HLC (Hybrid Logical Clock)
