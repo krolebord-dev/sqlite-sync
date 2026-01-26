@@ -147,8 +147,8 @@ export class SQLiteReactiveDb<Database> {
       unsubscribe: () => {
         for (const table of readTables) {
           this.eventTarget.removeEventListener(`table:${table}`, notifyDataChange);
-          this.eventTarget.removeEventListener("any-table-changed", notifyDataChange);
         }
+        this.eventTarget.removeEventListener("any-table-changed", notifyDataChange);
       },
     };
   }
