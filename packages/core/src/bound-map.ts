@@ -28,7 +28,7 @@ export class BoundMap<K, V> {
   delete = (key: K) => {
     const value = this.onRemove ? this.map.get(key) : undefined;
     this.map.delete(key);
-    if (this.onRemove && value) {
+    if (this.onRemove && value !== undefined) {
       this.onRemove(key, value);
     }
   };
