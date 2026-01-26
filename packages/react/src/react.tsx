@@ -1,7 +1,7 @@
 import type { ExecuteParams, SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, use, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 
 type DbQueryParams<Database, TResult> =
   | Compilable<TResult>
@@ -48,21 +48,14 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
       sql,
       parameters,
     });
-
-    useEffect(() => {
-      const last = lastRef.current;
-
-      const sameQuery = last.db === db && last.sql === sql;
-      if (!sameQuery) {
-        lastRef.current = { db, sql, parameters };
-        return;
-      }
-
-      if (!parametersAreEqual(last.parameters, parameters)) {
-        lastRef.current = { db, sql, parameters };
-        liveQuery.refresh(parameters);
-      }
-    }, [db, sql, parameters, liveQuery]);
+    if (
+      lastRef.current.db === db &&
+      lastRef.current.sql === sql &&
+      !parametersAreEqual(lastRef.current.parameters, parameters)
+    ) {
+      liveQuery.refresh(parameters);
+    }
+    lastRef.current = { db, sql, parameters };
 
     const data = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
 
