@@ -10,7 +10,7 @@ await startDbWorker({
   createRemoteSource: createWsRemoteSource({
     createWebSocket: () =>
       new PartySocket({
-        host: "localhost:3000",
+        host: import.meta.env.VITE_APP_URL,
         prefix: "list-db",
         party: "list-db-server",
         room: `list-${workerConfig.props.listId}`,
