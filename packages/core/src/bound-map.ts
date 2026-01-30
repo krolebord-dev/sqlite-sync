@@ -14,7 +14,13 @@ export class BoundMap<K, V> {
   }
 
   set = (key: K, value: V) => {
-    this.map.set(key, value);
+    if (this.onRemove && this.map.has(key)) {
+      const old = this.map.get(key) as V;
+      this.map.set(key, value);
+      this.onRemove(key, old);
+    } else {
+      this.map.set(key, value);
+    }
     if (this.map.size > this.maxSize) {
       const firstKey = this.map.keys().next().value as K;
       this.delete(firstKey);
