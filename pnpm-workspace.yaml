@@ -12,3 +12,6 @@ onlyBuiltDependencies:
   - esbuild
   - sharp
   - workerd
+
+catalog:
+  '@sqlite.org/sqlite-wasm': ^3.51.2-build5
