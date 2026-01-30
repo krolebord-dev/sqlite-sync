@@ -1,6 +1,7 @@
 import { generateId, type SyncedDb } from "@sqlite-sync/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useLoaderData, useSearch } from "@tanstack/react-router";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
 import { Provider, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useHydrateAtoms } from "jotai/utils";
@@ -22,6 +23,7 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,7 +38,7 @@ import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
 import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/list-db/list-db";
 import { ListDbOrpcProvider } from "@/list-db/list-orpc-context";
-import type { ListDb } from "@/list-db/migrations";
+import type { ListDb, ListItem } from "@/list-db/migrations";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { priorityColors } from "./-/common";
 import { getPriorityValue, ListItemCard, VoteAverage } from "./-/item-card";
@@ -383,18 +385,120 @@ function useOrderedAndFilteredItems() {
 }
 
 function ItemsList() {
-  const orderedAndFilteredItems = useOrderedAndFilteredItems();
+  const orderedAndFilteredItems = useOrderedAndFilteredItems() ?? [];
 
-  return (
-    <>
-      {/* {items && <EditItemDialog items={items} listId={listId} />} */}
+  if (orderedAndFilteredItems.length === 100) {
+    return (
       <div className="flex w-full max-w-7xl flex-wrap justify-center gap-4 px-4 pt-2 pb-20 md:grid md:grid-cols-2 xl:grid-cols-3">
         {orderedAndFilteredItems.map((item) => (
           <ListItemCard key={item.id} item={item} />
         ))}
       </div>
-    </>
+    );
+  }
+
+  return <VirtualizedItemsList items={orderedAndFilteredItems} />;
+}
+
+function VirtualizedItemsList({ items }: { items: ListItem[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const containerWidth = useElementWidth(containerRef);
+  const containerTop = useElementDocumentTop(containerRef);
+
+  const columnCount = useMemo(() => {
+    if (containerWidth >= 1280) return 3;
+    if (containerWidth >= 768) return 2;
+    return 1;
+  }, [containerWidth]);
+
+  const estimateSize = useCallback(() => 260, []);
+  const measureElement = useCallback((el: HTMLElement) => el.getBoundingClientRect().height, []);
+  const getItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
+
+  const gapPx = 16;
+  const paddingX = 16;
+  const laneWidth = useMemo(() => {
+    const availableWidth = containerWidth - paddingX * 2;
+    if (columnCount <= 1) return availableWidth;
+    const totalGap = gapPx * (columnCount - 1);
+    return Math.max(0, (availableWidth - totalGap) / columnCount);
+  }, [columnCount, containerWidth]);
+  const rowVirtualizer = useWindowVirtualizer({
+    count: items.length,
+    estimateSize,
+    overscan: columnCount,
+    scrollMargin: containerTop,
+    measureElement,
+    getItemKey,
+    gap: gapPx,
+    lanes: columnCount,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const scrollMargin = rowVirtualizer.options.scrollMargin ?? 0;
+
+  return (
+    <div ref={containerRef} className="w-full max-w-7xl pt-2 pb-20">
+      <div className="relative w-full" style={{ height: rowVirtualizer.getTotalSize() }}>
+        {virtualItems.map((virtualItem) => {
+          const item = items[virtualItem.index];
+          if (!item) return null;
+          const laneOffset = paddingX + virtualItem.lane * (laneWidth + gapPx);
+
+          return (
+            <div
+              key={virtualItem.key}
+              ref={rowVirtualizer.measureElement}
+              data-index={virtualItem.index}
+              className="absolute top-0 left-0"
+              style={{
+                width: laneWidth,
+                transform: `translate3d(${laneOffset}px, ${virtualItem.start - scrollMargin}px, 0)`,
+              }}
+            >
+              <ListItemCard item={item} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
+}
+
+function useElementWidth(ref: React.RefObject<HTMLElement | null>) {
+  const [width, setWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const update = () => setWidth(el.getBoundingClientRect().width);
+    update();
+
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+
+  return width;
+}
+
+function useElementDocumentTop(ref: React.RefObject<HTMLElement | null>) {
+  const [top, setTop] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === "undefined") return;
+
+    const update = () => setTop(el.getBoundingClientRect().top + window.scrollY);
+    update();
+
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+
+  return top;
 }
 
 type SearchResultItem = ORPCOutputs["search"]["search"][number];
