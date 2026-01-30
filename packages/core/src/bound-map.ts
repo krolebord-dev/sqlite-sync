@@ -32,10 +32,12 @@ export class BoundMap<K, V> {
   };
 
   delete = (key: K) => {
-    const value = this.onRemove ? this.map.get(key) : undefined;
-    this.map.delete(key);
-    if (this.onRemove && value !== undefined) {
+    if (this.onRemove && this.map.has(key)) {
+      const value = this.map.get(key) as V;
+      this.map.delete(key);
       this.onRemove(key, value);
+    } else {
+      this.map.delete(key);
     }
   };
 
