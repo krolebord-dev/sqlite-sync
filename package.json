@@ -2,6 +2,7 @@
   "name": "sqlite-sync-monorepo",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.28.1",
   "scripts": {
     "dev": "pnpm --filter @sqlite-sync/example dev",
     "dev:server": "pnpm --filter @sqlite-sync/example dev:server",
