@@ -23,13 +23,13 @@ export function createMigrator(
       return baseMigrator.latestSchemaVersion;
     },
     set current(_: number) {
-      throw new Error("Cannot set schema version in apply-events mode");
+      throw new Error("Cannot set schema version in event-log mode");
     },
   };
 
   const baseMigrator = createBaseMigrator({
     migrations,
-    schemaVersion: mode === "apply-events" ? schemaVersion : readonlySchemaVersion,
+    schemaVersion: mode === "materialized" ? schemaVersion : readonlySchemaVersion,
   });
 
   return {

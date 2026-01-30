@@ -36,7 +36,7 @@ type AdapterDb = {
   [updateLogTableName]: CrdtUpdateLogItem;
 };
 
-export type AdapterMode = "store-event-log-only" | "apply-events";
+export type AdapterMode = "event-log" | "materialized";
 
 export type TypedPersistedCrdtEvent<Schema extends SyncDbSchema> = {
   schema_version: number;
@@ -96,7 +96,7 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     });
   };
 
-  if (mode === "apply-events") {
+  if (mode === "materialized") {
     sqlExecutor.executeKysely((db) => crdtSchema.crdtUpdateLogTable(db.schema, updateLogTableName));
     migrator.migrateDbToLatest();
 

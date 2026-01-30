@@ -61,7 +61,7 @@ Browser Tab (in-memory SQLite) ←→ Web Worker (OPFS-persisted SQLite) ←→ 
 - All mutations generate CRDT events via SQL triggers
 - Events use Hybrid Logical Clocks (HLC) for ordering
 - Events are conflict-free — no merge conflicts by design
-- Two persistence modes: event-only or materialized (events applied to data tables)
+- Two persistence modes: `event-log` (events only) or `materialized` (events applied to data tables)
 
 ## Common Commands
 
