@@ -6,7 +6,7 @@ export function applyKyselyEventsBatchFilters(
   query: SelectQueryBuilder<any, any, PersistedCrdtEvent>,
   opts: GetEventsOptions,
 ) {
-  if (opts.afterSyncId) {
+  if (opts.afterSyncId != null) {
     query = query.where("sync_id", ">", opts.afterSyncId);
   }
   if (opts.status) {

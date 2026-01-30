@@ -91,6 +91,9 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
   });
   const pushSyncId = createStoredValue({
     initialValue: 0,
+    saveToStorage: (syncId) => {
+      crdtStorage.compactEvents(syncId);
+    },
   });
   const tabRemoteSource = createCrdtSyncRemoteSource({
     bufferSize: 500,

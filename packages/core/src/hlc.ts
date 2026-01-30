@@ -4,6 +4,9 @@ export interface HLC {
   nodeId: string;
 }
 
+/** Maximum allowed clock drift (60 seconds) before capping to wall clock */
+const MAX_CLOCK_DRIFT_MS = 60_000;
+
 export class HLCCounter {
   private timestamp: number;
   private counter: number;
@@ -40,13 +43,27 @@ export class HLCCounter {
   }
 
   mergeHLC(hlc: HLC) {
-    if (this.timestamp === hlc.timestamp) {
+    const now = this.getTimestamp();
+    const maxTimestamp = Math.max(now, this.timestamp, hlc.timestamp);
+
+    if (maxTimestamp - now > MAX_CLOCK_DRIFT_MS) {
+      console.warn(`HLC drift too large (${maxTimestamp - now}ms), capping to wall clock`);
+      this.timestamp = now;
+      this.counter = 0;
+      return;
+    }
+
+    if (maxTimestamp === this.timestamp && maxTimestamp === hlc.timestamp) {
       this.counter = Math.max(this.counter, hlc.counter) + 1;
-    } else if (this.timestamp > hlc.timestamp) {
+    } else if (maxTimestamp === this.timestamp) {
       this.counter++;
-    } else {
+    } else if (maxTimestamp === hlc.timestamp) {
       this.timestamp = hlc.timestamp;
       this.counter = hlc.counter + 1;
+    } else {
+      // now is the largest
+      this.timestamp = now;
+      this.counter = 0;
     }
   }
 }

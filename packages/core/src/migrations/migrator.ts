@@ -323,6 +323,7 @@ export function createMigrator({
     event.item_id = crdtEvent.item_id;
     event.type = crdtEvent.type;
     event.payload = JSON.stringify(crdtEvent.payload);
+    event.schema_version = targetVersion;
 
     return event;
   };

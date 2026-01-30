@@ -203,3 +203,11 @@ export async function tryCatchAsync<T>(fn: () => Promise<T>): Promise<TryCatchRe
 export function jsonSafeParse<T>(json: string) {
   return tryCatch(() => JSON.parse(json) as T);
 }
+
+const safeIdentifierPattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+export function assertSafeIdentifier(identifier: string): string {
+  if (!safeIdentifierPattern.test(identifier)) {
+    throw new Error(`Unsafe SQL identifier: ${identifier}`);
+  }
+  return identifier;
+}

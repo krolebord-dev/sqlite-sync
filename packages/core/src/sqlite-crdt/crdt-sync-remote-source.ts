@@ -83,8 +83,11 @@ export const createCrdtSyncRemoteSource = ({
 
   const initRemote = ensureSingletonExecution(
     async () => {
+      if (remoteState.type === "pending") {
+        return;
+      }
       if (remoteState.type !== "offline") {
-        throw new Error("Remote source is not offline");
+        return;
       }
 
       if (!remoteFactory) {
@@ -97,7 +100,10 @@ export const createCrdtSyncRemoteSource = ({
 
       const factoryResult = await tryCatchAsync(async () => {
         return await remoteFactory?.({
-          onEventsAvailable: () => {
+          onEventsAvailable: (newSyncId: number) => {
+            if (newSyncId <= pullSyncId.current) {
+              return;
+            }
             pullEvents({ includeSelf: false });
           },
         });

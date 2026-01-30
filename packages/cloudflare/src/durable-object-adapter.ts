@@ -1,5 +1,6 @@
 import {
   applyKyselyEventsBatchFilters,
+  assertSafeIdentifier,
   type CrdtEventOrigin,
   type CrdtEventStatus,
   type CrdtEventType,
@@ -136,8 +137,10 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       },
       updateItem(opts) {
         const keys = Array.from(Object.keys(opts.payload));
+        const safeDataset = assertSafeIdentifier(opts.dataset);
+        const safeKeys = keys.map(assertSafeIdentifier);
         sqlExecutor.execute({
-          sql: `update ${opts.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+          sql: `update ${safeDataset} set ${safeKeys.map((key) => `${key} = ?`).join(",")} where id = ?`,
           parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
         });
       },

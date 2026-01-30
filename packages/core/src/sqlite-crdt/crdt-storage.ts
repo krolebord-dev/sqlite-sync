@@ -66,6 +66,8 @@ type DbSyncerStorage = {
   handleCrdtEventApply: (event: PersistedCrdtEvent) => void;
   hlc: StorageHLC;
   transaction?: (callback: () => void) => void;
+  deleteEventsBeforeSyncId?: (syncId: number) => void;
+  eventExistsByTimestamp?: (timestamp: string) => boolean;
 };
 
 export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
@@ -119,7 +121,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   };
 
   const enqueueRemoteEvents = (events: RemoteCrdtEvent[]) => {
-    enqueueEvents("remote", events);
+    if (storage.eventExistsByTimestamp) {
+      const deduplicated = events.filter((e) => !storage.eventExistsByTimestamp?.(e.timestamp));
+      enqueueEvents("remote", deduplicated);
+    } else {
+      enqueueEvents("remote", events);
+    }
   };
 
   const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {
@@ -212,8 +219,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   const processEnqueuedEvents = ensureSingletonExecution(async () => {
     let hasMore = true;
     while (hasMore) {
-      await Promise.resolve();
-
       const batch = getEventsBatch({ status: "pending", limit: 100 });
       const events = batch.events;
       hasMore = batch.hasMore;
@@ -232,6 +237,33 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
   });
 
+  const retryFailedEvents = () => {
+    const batch = getEventsBatch({ status: "failed", limit: 100 });
+    if (batch.events.length === 0) {
+      return;
+    }
+
+    for (const event of batch.events) {
+      event.status = "pending";
+      storage.updateEvent(event.sync_id, {
+        status: "pending",
+        schema_version: event.schema_version,
+        type: event.type,
+        dataset: event.dataset,
+        item_id: event.item_id,
+        payload: event.payload,
+      });
+    }
+
+    processEnqueuedEvents();
+  };
+
+  const compactEvents = (belowSyncId: number) => {
+    if (storage.deleteEventsBeforeSyncId) {
+      storage.deleteEventsBeforeSyncId(belowSyncId);
+    }
+  };
+
   return {
     getEventsBatch,
     enqueueLocalEvents,
@@ -239,6 +271,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueRemoteEvents,
     applyOwnEvent,
     dispatchEventsApplied,
+    retryFailedEvents,
+    compactEvents,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,

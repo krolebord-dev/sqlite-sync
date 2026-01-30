@@ -8,18 +8,31 @@ const pullEventsZodSchema = z.object({
   afterSyncId: z.number(),
   excludeNodeId: z.string().optional(),
 });
+const hlcTimestampPattern = /^\d{15}:[0-9a-z]{5}:.+$/;
+const safeIdentifierPattern = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
 const pushEventsZodSchema = z.object({
   type: z.literal("push-events"),
   requestId: z.string(),
   nodeId: z.string(),
   events: z.array(
     z.object({
-      schema_version: z.number(),
-      timestamp: z.string(),
+      schema_version: z.number().int().nonnegative(),
+      timestamp: z.string().regex(hlcTimestampPattern, "Invalid HLC timestamp format"),
       type: z.enum(["item-created", "item-updated"]),
-      dataset: z.string(),
-      item_id: z.string(),
-      payload: z.string(),
+      dataset: z.string().regex(safeIdentifierPattern, "Invalid dataset identifier"),
+      item_id: z.string().min(1),
+      payload: z.string().refine(
+        (val) => {
+          try {
+            JSON.parse(val);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: "Payload must be valid JSON" },
+      ),
     }),
   ),
 });

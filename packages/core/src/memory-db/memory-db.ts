@@ -52,6 +52,8 @@ export async function createMemoryDb<Database>({
     }),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),
     transaction: (callback) => db.executeTransaction(callback),
+    deleteEventsBeforeSyncId: (syncId) => deleteEventsBeforeSyncId(db, syncId),
+    eventExistsByTimestamp: (timestamp) => eventExistsByTimestamp(db, timestamp),
   });
 
   registerCrdtFunctions({
@@ -93,6 +95,25 @@ function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOpti
       }),
     { loggerLevel: "system" },
   ).rows;
+}
+
+function eventExistsByTimestamp(db: SQLiteDbWrapper<MemoryDbSchema>, timestamp: string): boolean {
+  const result = db.executeKysely(
+    (db) => db.selectFrom("persisted_crdt_events").select("sync_id").where("timestamp", "=", timestamp).limit(1),
+    { loggerLevel: "system" },
+  );
+  return result.rows.length > 0;
+}
+
+function deleteEventsBeforeSyncId(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number) {
+  db.executeKysely(
+    (db) =>
+      db
+        .deleteFrom("persisted_crdt_events")
+        .where("sync_id", "<", syncId)
+        .where("status", "in", ["applied", "skipped"]),
+    { loggerLevel: "system" },
+  );
 }
 
 function updateEvent(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, update: EventUpdate) {

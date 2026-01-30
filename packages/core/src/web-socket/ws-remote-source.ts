@@ -26,7 +26,10 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
 
     const pushEvents = async (request: EventsPushRequest): Promise<EventsPushResponse> => {
       const requestId = crypto.randomUUID();
-      const promise = createDeferredPromise<EventsPushResponse>({ timeout: 5000 });
+      const promise = createDeferredPromise<EventsPushResponse>({
+        timeout: 5000,
+        onTimeout: () => requestsMap.delete(requestId),
+      });
       requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
       const wsRequest: SyncServerRequest = {
@@ -42,7 +45,10 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
 
     const pullEvents = async (request: EventsPullRequest): Promise<GetEventsBatch> => {
       const requestId = crypto.randomUUID();
-      const promise = createDeferredPromise<GetEventsBatch>({ timeout: 2000 });
+      const promise = createDeferredPromise<GetEventsBatch>({
+        timeout: 5000,
+        onTimeout: () => requestsMap.delete(requestId),
+      });
       requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
       const wsRequest: SyncServerRequest = {

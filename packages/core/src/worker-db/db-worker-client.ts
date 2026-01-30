@@ -39,9 +39,13 @@ export const createWorkerDbClient = async ({
     method: TMethod,
     args: Parameters<WorkerRpc[TMethod]>,
   ): Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>> => {
-    // TODO Add timeout
     const requestId = crypto.randomUUID();
-    const promise = createDeferredPromise<unknown>();
+    const promise = createDeferredPromise<unknown>({
+      timeout: 30000,
+      onTimeout: () => {
+        workerRequestsMap.delete(requestId);
+      },
+    });
     workerRequestsMap.set(requestId, promise);
 
     const request: WorkerRequestMessage<TMethod> = {
@@ -62,7 +66,12 @@ export const createWorkerDbClient = async ({
       return;
     }
 
-    promise.resolve(message.data);
+    const data = message.data as Record<string, unknown>;
+    if (data && typeof data === "object" && "__error" in data) {
+      promise.reject(new Error(String(data.message ?? "Worker RPC error")));
+    } else {
+      promise.resolve(message.data);
+    }
     workerRequestsMap.delete(message.requestId);
   };
 

@@ -78,6 +78,7 @@ export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "
 export { createSyncedDb, type SyncedDb } from "./sync-db";
 // Utilities
 export {
+  assertSafeIdentifier,
   createAsyncAutoFlushBuffer,
   createAutoFlushBuffer,
   createDeferredPromise,

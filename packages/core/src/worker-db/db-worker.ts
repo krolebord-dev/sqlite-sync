@@ -116,6 +116,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     persistEvent: (event) => persistEvent(db, event),
     getEventsBatch: (opts) => getEventsBatch(db, opts),
     updateEvent: (syncId, update) => updateEvent(db, syncId, update),
+    eventExistsByTimestamp: (timestamp) => eventExistsByTimestamp(db, timestamp),
   });
 
   createCrdtSyncProducer({
@@ -153,9 +154,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const rpcTarget: WorkerRpc = {
     execute: (query) => db.execute(query),
     getSnapshot: () => {
-      db.execute("PRAGMA journal_mode=off", { loggerLevel: "system" });
+      db.execute("PRAGMA wal_checkpoint(TRUNCATE)", { loggerLevel: "system" });
       const file = db.createSnapshot();
-      db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
       return {
         file,
         syncId: localSyncId.current,
@@ -181,6 +181,22 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     goOffline: () => remoteSource.goOffline("DISCONNECTED"),
   };
 
+  const sendResponse = (requestId: string, data: unknown) => {
+    broadcastChannels.responses.postMessage({
+      type: "response",
+      requestId,
+      data,
+    } as WorkerResponseMessage);
+  };
+
+  const sendErrorResponse = (requestId: string, error: unknown) => {
+    broadcastChannels.responses.postMessage({
+      type: "response",
+      requestId,
+      data: { __error: true, message: error instanceof Error ? error.message : String(error) },
+    } as unknown as WorkerResponseMessage);
+  };
+
   broadcastChannels.requests.onmessage = (event) => {
     const message = event.data;
 
@@ -188,25 +204,24 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return;
     }
 
-    const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
-    const data = method.apply(null, message.args as []);
+    try {
+      const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
+      const data = method.apply(null, message.args as []);
 
-    if (data instanceof Promise) {
-      data.then((result) => {
-        const response: WorkerResponseMessage = {
-          type: "response",
-          requestId: message.requestId,
-          data: result,
-        };
-        broadcastChannels.responses.postMessage(response);
-      });
-    } else {
-      const response: WorkerResponseMessage = {
-        type: "response",
-        requestId: message.requestId,
-        data,
-      };
-      broadcastChannels.responses.postMessage(response);
+      if (data instanceof Promise) {
+        data.then(
+          (result) => sendResponse(message.requestId, result),
+          (error) => {
+            console.error(`Worker RPC error (async) in ${message.method}:`, error);
+            sendErrorResponse(message.requestId, error);
+          },
+        );
+      } else {
+        sendResponse(message.requestId, data);
+      }
+    } catch (error) {
+      console.error(`Worker RPC error (sync) in ${message.method}:`, error);
+      sendErrorResponse(message.requestId, error);
     }
   };
 
@@ -265,17 +280,24 @@ type WorkerOptions = {
 export async function startDbWorker(opts: WorkerOptions) {
   const config = opts.workerConfig ?? (await getWorkerConfig());
 
-  await navigator.locks.request(`${syncDbWorkerLockName}-${config.dbId}`, { mode: "exclusive" }, async (lock) => {
-    if (!lock) {
-      return;
-    }
+  try {
+    await navigator.locks.request(`${syncDbWorkerLockName}-${config.dbId}`, { mode: "exclusive" }, async (lock) => {
+      if (!lock) {
+        throw new Error(`Failed to acquire worker lock for ${config.dbId}`);
+      }
 
-    await createDbWorker(config, opts);
+      await createDbWorker(config, opts);
 
-    await new Promise<void>(() => {});
-  });
-
-  console.error("Failed to acquire lock");
+      await new Promise<void>(() => {});
+    });
+  } catch (error) {
+    console.error("Worker lock error:", error);
+    const broadcastChannels = createBroadcastChannels(config.dbId);
+    broadcastChannels.responses.postMessage({
+      notificationType: "state-changed",
+      state: { remoteState: "offline" },
+    });
+  }
 }
 
 function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {
@@ -313,6 +335,14 @@ function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOpti
     (db) => applyKyselyEventsBatchFilters(db.selectFrom("worker.crdt_events").selectAll(), opts),
     { loggerLevel: "system" },
   ).rows;
+}
+
+function eventExistsByTimestamp(db: SQLiteDbWrapper<WorkerDbSchema>, timestamp: string): boolean {
+  const result = db.executeKysely(
+    (db) => db.selectFrom("worker.crdt_events").select("sync_id").where("timestamp", "=", timestamp).limit(1),
+    { loggerLevel: "system" },
+  );
+  return result.rows.length > 0;
 }
 
 function updateEvent(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, update: EventUpdate) {
