@@ -9,31 +9,30 @@ export function App() {
   const [newTodoTitle, setNewTodoTitle] = useState("");
   const [randomCount, setRandomCount] = useState(10);
 
-  const { data: todos } = useDbQuery({
-    parameters: [newTodoTitle],
-    queryFn: (db, [newTodoTitle]) => {
-      let query = db.selectFrom("todo").selectAll().orderBy("id");
+  const { data: todos } = useDbQuery((db) => {
+    let query = db.selectFrom("todo").selectAll().orderBy("id");
 
-      if (newTodoTitle) {
-        query = query.where("title", "like", `${newTodoTitle}%`);
-      }
+    if (newTodoTitle) {
+      query = query.where("title", "like", `${newTodoTitle}%`);
+    }
 
-      return query.limit(100).orderBy("id", "asc");
-    },
+    return query.limit(100).orderBy("id", "asc");
   });
 
-  const { data: todoStats } = useDbQuery({
-    queryFn: (db) => {
+  const { data: todoStats } = useDbQuery(
+    (db) => {
       const query = db
         .selectFrom("todo")
         .select(({ fn }) => [fn.countAll<number>().as("total"), fn.sum<number>("completed").as("completed")]);
       return query;
     },
-    mapData: ([todoStats]) => ({
-      completedCount: Number(todoStats?.completed ?? 0),
-      totalCount: Number(todoStats?.total ?? 0),
-    }),
-  });
+    {
+      mapData: ([todoStats]) => ({
+        completedCount: Number(todoStats?.completed ?? 0),
+        totalCount: Number(todoStats?.total ?? 0),
+      }),
+    },
+  );
 
   const addTodo = () => {
     if (!newTodoTitle.trim()) return;

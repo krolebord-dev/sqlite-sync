@@ -1,4 +1,3 @@
-import type {} from "@sqlite.org/sqlite-wasm";
 import {
   CompiledQuery,
   type DatabaseConnection,

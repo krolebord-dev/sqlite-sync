@@ -1,11 +1,14 @@
-import type { SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
+import type { ExecuteParams, SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useCallback, useMemo, useSyncExternalStore } from "react";
+import { createContext, use, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 
-type UseDbQueryOptions<TParams extends readonly unknown[] | undefined, Database, TResult, TMapResult = TResult> = {
-  parameters?: TParams;
-  queryFn: (kysely: Kysely<Database>, keys: TParams) => Compilable<TResult>;
+type DbQueryParams<Database, TResult> =
+  | Compilable<TResult>
+  | ((kysely: Kysely<Database>) => Compilable<TResult>)
+  | ExecuteParams;
+
+type UseDbQueryOptions<TResult, TMapResult = TResult> = {
   mapData?: (data: TResult[]) => TMapResult;
 };
 
@@ -24,24 +27,35 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
     return <dbContext.Provider value={db}>{children}</dbContext.Provider>;
   };
 
-  const useDbQuery = <TResult, TMapResult = TResult[], TParams extends readonly unknown[] | undefined = undefined>({
-    parameters,
-    queryFn,
-    mapData,
-  }: UseDbQueryOptions<TParams, Schema["~clientSchema"], TResult, TMapResult>) => {
+  const useDbQuery = <TResult, TMapResult = TResult[]>(
+    query: DbQueryParams<Schema["~clientSchema"], TResult>,
+    { mapData }: UseDbQueryOptions<TResult, TMapResult> = {},
+  ) => {
     const db = useDb();
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: parameters is a dependency of the query
-    const compiledQuery = useMemo(() => {
-      return queryFn(dummyKysely, parameters as TParams).compile();
-    }, [...(parameters ?? [])]);
+    const { sql, parameters } = resolseQuery(query);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: initial parameters should only change when the query changes
     const liveQuery = useMemo(() => {
       return db.reactiveDb.createLiveQuery<TResult>({
-        sql: compiledQuery.sql,
-        parameters: compiledQuery.parameters,
+        sql,
+        parameters,
       });
-    }, [db, compiledQuery]);
+    }, [db, sql]);
+
+    const lastRef = useRef<{ db: unknown; sql: string; parameters: readonly unknown[] }>({
+      db,
+      sql,
+      parameters,
+    });
+    if (
+      lastRef.current.db === db &&
+      lastRef.current.sql === sql &&
+      !parametersAreEqual(lastRef.current.parameters, parameters)
+    ) {
+      liveQuery.refresh(parameters);
+    }
+    lastRef.current = { db, sql, parameters };
 
     const data = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
 
@@ -70,4 +84,26 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
   };
 
   return { useDb, DbProvider, useDbQuery, useDbState };
+}
+
+function resolseQuery<Database, TResult>(query: DbQueryParams<Database, TResult>): ExecuteParams {
+  if (typeof query === "function") {
+    return query(dummyKysely).compile();
+  } else if (typeof query === "object" && "compile" in query) {
+    return query.compile();
+  } else {
+    return query;
+  }
+}
+
+function parametersAreEqual(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a?.length !== b?.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
 }
