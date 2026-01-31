@@ -25,15 +25,17 @@ type TasteProfile = {
 type RecommendItemsProps = {
   tasteProfile: TasteProfile;
   model: LanguageModel;
+  customPrompt?: string;
 };
 
-export async function recommendItems({ tasteProfile, model }: RecommendItemsProps) {
+export async function recommendItems({ tasteProfile, model, customPrompt }: RecommendItemsProps) {
   const prompt = buildRecommenderPrompt({
     likedItems: JSON.stringify(tasteProfile.likedItems),
     dislikedPatterns: JSON.stringify(tasteProfile.dislikedPatterns),
     tagPreferences: JSON.stringify(tasteProfile.tagPreferences),
     existingTitles: JSON.stringify(tasteProfile.existingTitles),
     mediaTypePreference: tasteProfile.mediaTypePreference,
+    customPrompt,
   });
 
   const result = await generateText({

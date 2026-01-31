@@ -1,6 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { MovieWithMediaType, TVWithMediaType } from "tmdb-ts";
 import { TMDB } from "tmdb-ts";
+import z from "zod";
 import { recommendItems } from "../../ai/recommend-items";
 import { listProcedure } from "./orpc-base";
 
@@ -117,60 +118,62 @@ function adaptSearchResult(result: MovieWithMediaType | TVWithMediaType): Omit<E
   };
 }
 
-const getRecommendations = listProcedure.handler(async ({ context }) => {
-  const model = createOpenRouter({
-    apiKey: context.env.OPENROUTER_API_KEY,
-  })("@preset/fast-and-efficient");
+const getRecommendations = listProcedure
+  .input(z.object({ customPrompt: z.string().optional() }))
+  .handler(async ({ input, context }) => {
+    const model = createOpenRouter({
+      apiKey: context.env.OPENROUTER_API_KEY,
+    })("@preset/fast-and-efficient");
 
-  const items = context.syncDb.executeKysely((db) =>
-    db
-      .selectFrom("_item")
-      .where("tombstone", "=", false)
-      .select(["id", "title", "type", "tmdbId", "tags", "tagHighlights", "userRating", "watchedAt", "priority"]),
-  ).rows as ListItemRow[];
+    const items = context.syncDb.executeKysely((db) =>
+      db
+        .selectFrom("_item")
+        .where("tombstone", "=", false)
+        .select(["id", "title", "type", "tmdbId", "tags", "tagHighlights", "userRating", "watchedAt", "priority"]),
+    ).rows as ListItemRow[];
 
-  if (items.length === 0) {
-    return { recommendations: [] as EnrichedRecommendation[] };
-  }
+    if (items.length === 0) {
+      return { recommendations: [] as EnrichedRecommendation[] };
+    }
 
-  const tasteProfile = buildTasteProfile(items);
+    const tasteProfile = buildTasteProfile(items);
 
-  const aiResult = await recommendItems({ tasteProfile, model });
+    const aiResult = await recommendItems({ tasteProfile, model, customPrompt: input.customPrompt });
 
-  const tmdb = new TMDB(context.env.TMDB_READ_ACCESS_TOKEN);
-  const existingTmdbIds = new Set(items.map((i) => i.tmdbId));
+    const tmdb = new TMDB(context.env.TMDB_READ_ACCESS_TOKEN);
+    const existingTmdbIds = new Set(items.map((i) => i.tmdbId));
 
-  const enriched = await Promise.allSettled(
-    aiResult.recommendations.map(async (rec) => {
-      const searchResults = await tmdb.search.multi({
-        query: rec.title,
-        include_adult: false,
-      });
+    const enriched = await Promise.allSettled(
+      aiResult.recommendations.map(async (rec) => {
+        const searchResults = await tmdb.search.multi({
+          query: rec.title,
+          include_adult: false,
+        });
 
-      const match = searchResults.results.find((r) => {
-        if (r.media_type !== "movie" && r.media_type !== "tv") return false;
-        if (existingTmdbIds.has(r.id)) return false;
-        return true;
-      });
+        const match = searchResults.results.find((r) => {
+          if (r.media_type !== "movie" && r.media_type !== "tv") return false;
+          if (existingTmdbIds.has(r.id)) return false;
+          return true;
+        });
 
-      if (!match || (match.media_type !== "movie" && match.media_type !== "tv")) {
-        return null;
-      }
+        if (!match || (match.media_type !== "movie" && match.media_type !== "tv")) {
+          return null;
+        }
 
-      const adapted = adaptSearchResult(match);
-      return {
-        ...adapted,
-        reason: rec.reason,
-      } satisfies EnrichedRecommendation;
-    }),
-  );
+        const adapted = adaptSearchResult(match);
+        return {
+          ...adapted,
+          reason: rec.reason,
+        } satisfies EnrichedRecommendation;
+      }),
+    );
 
-  const recommendations = enriched
-    .filter((r): r is PromiseFulfilledResult<EnrichedRecommendation> => r.status === "fulfilled" && r.value != null)
-    .map((r) => r.value);
+    const recommendations = enriched
+      .filter((r): r is PromiseFulfilledResult<EnrichedRecommendation> => r.status === "fulfilled" && r.value != null)
+      .map((r) => r.value);
 
-  return { recommendations };
-});
+    return { recommendations };
+  });
 
 export const aiRecommendationsRouter = {
   getRecommendations,
