@@ -1,4 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { generateId } from "@sqlite-sync/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { sql } from "kysely";
 import { CheckIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
@@ -15,7 +16,8 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useListId } from "@/lib/use-list";
 import { formatDuration } from "@/lib/utils/format-duration";
-import { importSchema, transformImportItem } from "@/lib/utils/import-json";
+import { parseImportItemsFromJson } from "@/lib/utils/import-json";
+import { UserError } from "@/lib/utils/user-error";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import { orpc } from "@/orpc/orpc-client";
@@ -27,18 +29,7 @@ type ImportResult = {
 
 async function importItemsFromJson(db: ReturnType<typeof useDb>, file: File): Promise<ImportResult> {
   const text = await file.text();
-  const json = JSON.parse(text);
-
-  const parseResult = importSchema.safeParse(json);
-  if (!parseResult.success) {
-    throw new Error("Invalid JSON format. Please check the file structure.");
-  }
-
-  const items = parseResult.data;
-
-  if (items.length === 0) {
-    throw new Error("No items found in the file.");
-  }
+  const items = parseImportItemsFromJson(text);
 
   const existingTmdbIds = db.db.executeKysely((db) => db.selectFrom("item").select("tmdbId")).rows.map((x) => x.tmdbId);
 
@@ -51,10 +42,14 @@ async function importItemsFromJson(db: ReturnType<typeof useDb>, file: File): Pr
     return { imported: 0, skipped: items.length };
   }
 
-  const dbItems = itemsToImport.map(transformImportItem);
   db.db.executeTransaction((db) => {
-    for (const item of dbItems) {
-      db.executeKysely((db) => db.insertInto("item").values(item));
+    for (const item of itemsToImport) {
+      db.executeKysely((db) =>
+        db.insertInto("item").values({
+          id: generateId(),
+          ...item,
+        }),
+      );
     }
   });
 
@@ -122,9 +117,7 @@ function ListSettingsForm() {
       }
     },
     onError: (error) => {
-      if (error instanceof SyntaxError) {
-        toast.error("Invalid JSON file. Please check the file format.");
-      } else if (error instanceof Error) {
+      if (error instanceof UserError) {
         toast.error(error.message);
       } else {
         toast.error("Failed to import items. Please try again.");

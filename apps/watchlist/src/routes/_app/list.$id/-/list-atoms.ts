@@ -1,5 +1,6 @@
 import type { SyncedDb } from "@sqlite-sync/core";
 import { atom } from "jotai";
+import { atomFamily } from "jotai-family";
 import { z } from "zod";
 import type { ListDb } from "@/list-db/migrations";
 
@@ -21,6 +22,12 @@ export const reviewItemAtom = atom<string | null>(null);
 export const searchQueryAtom = atom<string>("");
 
 export const isSelectionModeAtom = atom((get) => get(selectedItemsAtom).length > 0);
+
+export const isItemSelectedAtom = atomFamily((itemId: string) =>
+  atom((get) => get(selectedItemsAtom).includes(itemId)),
+);
+
+export const isRandomizedItemAtom = atomFamily((itemId: string) => atom((get) => get(randomizedItemAtom) === itemId));
 
 export const selectAllAtom = atom(null, (get, set) => {
   const db = get(dbAtom);

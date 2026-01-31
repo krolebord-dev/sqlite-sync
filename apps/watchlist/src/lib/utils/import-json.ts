@@ -1,7 +1,6 @@
-import { generateId } from "@sqlite-sync/core";
 import { z } from "zod";
-import type { ListItem } from "@/list-db/migrations";
 import { parseDuration } from "./parse-duration";
+import { UserError } from "./user-error";
 
 export const importItemSchema = z.object({
   title: z.string(),
@@ -19,9 +18,7 @@ export const importItemSchema = z.object({
   posterUrl: z.string().nullable(),
 });
 
-export const importSchema = z.array(importItemSchema);
-
-export type ImportItem = z.infer<typeof importItemSchema>;
+const importSchema = z.array(importItemSchema);
 
 function parsePriority(priority: string): number {
   switch (priority) {
@@ -45,16 +42,44 @@ function parseDateRequired(dateString: string | null, fallback: number): number 
   return result ?? fallback;
 }
 
-export function transformImportItem(item: ImportItem): ListItem {
-  return {
-    id: generateId(),
+function parseRating(rating: number | null, maxRating: number): number | null {
+  if (rating === null) return null;
+  if (rating > 100) return 100;
+  if (rating < 0) return 0;
+  if (maxRating <= 1) return rating * 100;
+  if (maxRating <= 10) return rating * 10;
+  return rating;
+}
+
+export function parseImportItemsFromJson(text: string) {
+  const json = JSON.parse(text);
+
+  const parseResult = importSchema.safeParse(json);
+  if (!parseResult.success) {
+    throw new UserError("Invalid JSON format. Please check the file structure.");
+  }
+
+  const items = parseResult.data;
+
+  if (items.length === 0) {
+    throw new UserError("No items found in the file.");
+  }
+
+  let maxRating = items[0].rating ?? 0;
+  for (const item of items) {
+    if (item.rating !== null) {
+      maxRating = Math.max(maxRating, item.rating);
+    }
+  }
+
+  return items.map((item) => ({
     tmdbId: item.tmdbId,
     type: item.type.toLowerCase() as "movie" | "tv",
     title: item.title,
     releaseDate: parseDate(item.releaseDate),
     priority: parsePriority(item.priority),
     overview: item.overview,
-    rating: item.rating,
+    rating: parseRating(item.rating, maxRating),
     duration: parseDuration(item.duration),
     episodeCount: item.episodes,
     watchedAt: parseDate(item.watchedAt),
@@ -64,5 +89,5 @@ export function transformImportItem(item: ImportItem): ListItem {
     posterUrl: item.posterUrl,
     userRating: null,
     tagHighlights: "{}",
-  };
+  }));
 }
