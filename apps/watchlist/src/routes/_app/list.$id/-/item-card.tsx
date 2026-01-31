@@ -21,8 +21,8 @@ import {
   ThumbsUpIcon,
   TrashIcon,
 } from "lucide-react";
-import { useMemo } from "react";
-import { Button } from "@/components/ui/button";
+import { memo, useCallback, useMemo } from "react";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -39,157 +39,153 @@ import { formatDuration } from "@/lib/utils/format-duration";
 import { useDb } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
-import { editItemAtom, randomizedItemAtom, selectedItemsAtom, toggleItemSelectionAtom } from "./list-atoms";
+import { editItemAtom, isItemSelectedAtom, isRandomizedItemAtom, toggleItemSelectionAtom } from "./list-atoms";
 
-export function ListItemCard({ item }: { item: ListItem }) {
+export const ListItemCard = memo(({ item }: { item: ListItem }) => {
+  return (
+    <ContextMenu>
+      <ListItemCardDisplay item={item} />
+      <ListItemMenuContent type="context-menu" item={item} />
+    </ContextMenu>
+  );
+});
+
+export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
   const db = useDb();
   const isWatched = !!item.watchedAt;
   const isSelected = useIsItemSelected(item.id);
   const isRandomizedItem = useIsRandomizedItem(item.id);
 
   const toggleItemSelection = useSetAtom(toggleItemSelectionAtom);
+  const handleToggleSelection = useCallback(() => toggleItemSelection(item.id), [toggleItemSelection, item.id]);
 
   const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
-  const maxTags = 6;
+  const maxTags = 4;
   const visibleTags = tags.slice(0, maxTags);
   const hiddenTags = tags.slice(maxTags);
   const remainingTagCount = hiddenTags.length;
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            "group relative grid w-full grid-cols-3 items-stretch overflow-hidden rounded-md border border-border bg-card shadow-xs",
-            isRandomizedItem && "border-primary",
-          )}
-        >
-          {item.posterUrl && (
-            <img
-              className="pointer-events-none absolute inset-0 h-full w-full object-fill opacity-30 blur-3xl"
-              draggable={false}
-              src={item.posterUrl}
-              alt={item.title}
-            />
-          )}
-          <div
-            className={cn("relative aspect-2/3 w-full cursor-pointer self-center overflow-hidden")}
-            onClick={() => {
-              toggleItemSelection(item.id);
-            }}
+    <ContextMenuTrigger
+      className={cn(
+        "group relative grid w-full grid-cols-3 items-stretch overflow-hidden rounded-md border border-border bg-card shadow-xs",
+        isRandomizedItem && "border-primary",
+      )}
+    >
+      {item.posterUrl && (
+        <img
+          className="pointer-events-none absolute inset-0 h-full w-full object-fill opacity-30 blur-3xl"
+          draggable={false}
+          src={item.posterUrl}
+          alt={item.title}
+        />
+      )}
+      <div
+        className={cn("relative aspect-2/3 w-full cursor-pointer self-center overflow-hidden")}
+        onClick={handleToggleSelection}
+      >
+        {item.posterUrl && (
+          <img
+            className="h-full w-full select-none object-cover"
+            draggable={false}
+            src={item.posterUrl}
+            alt={item.title}
+          />
+        )}
+        {item.rating && !isSelected && <VoteAverage className="absolute top-2 left-2" voteAverage={item.rating} />}
+
+        <PriorityBadge className="absolute bottom-2 left-2" priority={item.priority} />
+
+        {(isWatched || isSelected) && (
+          <div className="absolute top-0 left-0 flex h-full w-full items-center justify-center bg-black/50">
+            {isWatched && <CheckIcon className="size-10! text-green-500" />}
+          </div>
+        )}
+        {isSelected && (
+          <p className="absolute top-2 left-2 flex size-8 select-none items-center justify-center rounded-full bg-primary text-white">
+            <CheckIcon />
+          </p>
+        )}
+      </div>
+
+      <div className="col-span-2 flex flex-col justify-between p-4">
+        <div className="flex flex-col gap-2">
+          <a
+            href={`https://www.google.com/search?q=${encodeURIComponent(item.title)}`}
+            target="_blank"
+            rel="noreferrer"
+            tabIndex={-1}
+            className="cursor-pointer truncate font-semibold"
           >
-            {item.posterUrl && (
-              <img
-                className="h-full w-full select-none object-cover"
-                draggable={false}
-                src={item.posterUrl}
-                alt={item.title}
-              />
+            {item.title}
+          </a>
+          <p className="flex flex-wrap gap-x-4 gap-y-2 text-muted-foreground text-sm">
+            {!!item.releaseDate && (
+              <span className="flex items-center gap-1">
+                <CalendarIcon className="size-4!" /> {format(new Date(item.releaseDate), "y")}
+              </span>
             )}
-            {item.rating && !isSelected && <VoteAverage className="absolute top-2 left-2" voteAverage={item.rating} />}
-
-            <PriorityBadge className="absolute bottom-2 left-2" priority={item.priority} />
-
-            {(isWatched || isSelected) && (
-              <div className="absolute top-0 left-0 flex h-full w-full items-center justify-center bg-black/50">
-                {isWatched && <CheckIcon className="size-10! text-green-500" />}
-              </div>
+            {!!item.duration && (
+              <span className="flex items-center gap-1">
+                <Clock4Icon className="size-4!" /> {formatDuration(item.duration)}
+              </span>
             )}
-            {isSelected && (
-              <p className="absolute top-2 left-2 flex size-8 select-none items-center justify-center rounded-full bg-primary text-white">
-                <CheckIcon />
-              </p>
+            {item.type === "tv" && !!item.episodeCount && (
+              <span className="flex items-center gap-1">
+                <HashIcon className="size-4!" /> {item.episodeCount}
+              </span>
             )}
-          </div>
-
-          <div className="col-span-2 flex flex-col justify-between p-4">
-            <div className="flex flex-col gap-2">
-              <a
-                href={`https://www.google.com/search?q=${encodeURIComponent(item.title)}`}
-                target="_blank"
-                rel="noreferrer"
-                tabIndex={-1}
-                className="cursor-pointer truncate font-semibold"
-              >
-                {item.title}
-              </a>
-              <p className="flex flex-wrap gap-x-4 gap-y-2 text-muted-foreground text-sm">
-                {!!item.releaseDate && (
-                  <span className="flex items-center gap-1">
-                    <CalendarIcon className="size-4!" /> {format(new Date(item.releaseDate), "y")}
-                  </span>
-                )}
-                {!!item.duration && (
-                  <span className="flex items-center gap-1">
-                    <Clock4Icon className="size-4!" /> {formatDuration(item.duration)}
-                  </span>
-                )}
-                {item.type === "tv" && !!item.episodeCount && (
-                  <span className="flex items-center gap-1">
-                    <HashIcon className="size-4!" /> {item.episodeCount}
-                  </span>
-                )}
-                {isWatched && !!item.watchedAt && (
-                  <span className="flex items-center gap-1">
-                    <EyeIcon className="size-4!" /> {format(item.watchedAt, "d MMM y")}
-                  </span>
-                )}
-              </p>
-              {tags.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {visibleTags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border bg-card/80 px-2 py-0.5 text-foreground text-xs"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                  {remainingTagCount > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className="cursor-default select-none rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground text-xs"
-                          title={hiddenTags.join(", ")}
-                        >
-                          +{remainingTagCount}
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={6}>{hiddenTags.join(", ")}</TooltipContent>
-                    </Tooltip>
-                  )}
-                </div>
+            {isWatched && !!item.watchedAt && (
+              <span className="flex items-center gap-1">
+                <EyeIcon className="size-4!" /> {format(item.watchedAt, "d MMM y")}
+              </span>
+            )}
+          </p>
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {visibleTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-border bg-card/80 px-2 py-0.5 text-foreground text-xs"
+                >
+                  {tag}
+                </span>
+              ))}
+              {remainingTagCount > 0 && (
+                <Tooltip>
+                  <TooltipTrigger className="cursor-default select-none rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+                    <span title={hiddenTags.join(", ")}>+{remainingTagCount}</span>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={6}>{hiddenTags.join(", ")}</TooltipContent>
+                </Tooltip>
               )}
             </div>
-            <div className="flex items-center justify-end gap-2">
-              <ProcessingStatusIndicator status={item.processingStatus} />
-              {!isWatched && (
-                <Button variant="ghost" size="icon" onClick={() => setWatchedMutation(db, item.id, true)}>
-                  <CheckIcon />
-                </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <EllipsisVerticalIcon />
-                  </Button>
-                </DropdownMenuTrigger>
-                <ListItemMenuContent type="dropdown-menu" item={item} />
-              </DropdownMenu>
-            </div>
-          </div>
+          )}
         </div>
-      </ContextMenuTrigger>
-      <ListItemMenuContent type="context-menu" item={item} />
-    </ContextMenu>
+        <div className="flex items-center justify-end gap-2">
+          <ProcessingStatusIndicator status={item.processingStatus} />
+          {!isWatched && (
+            <Button variant="ghost" size="icon" onClick={() => setWatchedMutation(db, item.id, true)}>
+              <CheckIcon />
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })}>
+              <EllipsisVerticalIcon />
+            </DropdownMenuTrigger>
+            <ListItemMenuContent type="dropdown-menu" item={item} />
+          </DropdownMenu>
+        </div>
+      </div>
+    </ContextMenuTrigger>
   );
-}
+};
 
 type ListItemMenuContentProps = {
   type: DynamicMenuContentType;
   item: ListItem;
 };
-function ListItemMenuContent({ type, item }: ListItemMenuContentProps) {
+const ListItemMenuContent = memo(({ type, item }: ListItemMenuContentProps) => {
   return (
     <DynamicMenuContent type={type}>
       <ToggleItemSelectionMenuItem item={item} />
@@ -198,10 +194,9 @@ function ListItemMenuContent({ type, item }: ListItemMenuContentProps) {
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
       <AiSuggestTagsMenuItem item={item} />
-      {/* <ReindexMenuItem item={item} /> */}
     </DynamicMenuContent>
   );
-}
+});
 
 type ItemMenuActioProps = {
   item: ListItem;
@@ -259,36 +254,9 @@ function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
   );
 }
 
-const useIsItemSelected = (itemId: string) => {
-  const selectedItems = useAtomValue(selectedItemsAtom);
-  return useMemo(() => selectedItems.includes(itemId), [selectedItems, itemId]);
-};
+const useIsItemSelected = (itemId: string) => useAtomValue(isItemSelectedAtom(itemId));
 
-const useIsRandomizedItem = (itemId: string) => {
-  const randomizedItem = useAtomValue(randomizedItemAtom);
-  return useMemo(() => randomizedItem === itemId, [randomizedItem, itemId]);
-};
-
-// function ReindexMenuItem({ item }: ItemMenuActioProps) {
-//   const listId = useListId();
-//   const utils = trpc.useUtils();
-
-//   const reindexItemMutation = trpc.list.reindexItem.useMutation({
-//     onSuccess: () => {
-//       utils.list.getItems.invalidate({ listId });
-//     },
-//   });
-
-//   return (
-//     <DynamicMenuItem
-//       disabled={reindexItemMutation.isPending}
-//       onClick={() => reindexItemMutation.mutate({ listId, itemId: item.id })}
-//     >
-//       <RefreshCwIcon />
-//       Reindex
-//     </DynamicMenuItem>
-//   );
-// }
+const useIsRandomizedItem = (itemId: string) => useAtomValue(isRandomizedItemAtom(itemId));
 
 function SetPriorityMenuItem({ item }: ItemMenuActioProps) {
   const db = useDb();
