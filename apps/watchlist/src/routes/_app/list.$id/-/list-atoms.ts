@@ -59,3 +59,17 @@ export const toggleItemSelectionAtom = atom(null, (get, set, itemId: string) => 
     set(selectedItemsAtom, [...selectedItems, itemId]);
   }
 });
+
+export type WatchProviderInfo = {
+  providerId: number;
+  providerName: string;
+  logoUrl: string;
+};
+
+export type ItemWatchProviders = {
+  link: string;
+  providers: WatchProviderInfo[];
+};
+
+export const itemWatchProvidersAtom = atom<Record<string, ItemWatchProviders>>({});
+export const loadingWatchProvidersAtom = atom<Set<string>>(new Set<string>());

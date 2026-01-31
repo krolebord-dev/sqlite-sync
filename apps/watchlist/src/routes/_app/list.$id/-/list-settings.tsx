@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { generateId } from "@sqlite-sync/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSetAtom } from "jotai";
 import { sql } from "kysely";
 import { CheckIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -8,8 +9,10 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -21,6 +24,7 @@ import { UserError } from "@/lib/utils/user-error";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import { orpc } from "@/orpc/orpc-client";
+import { itemWatchProvidersAtom } from "./list-atoms";
 
 type ImportResult = {
   imported: number;
@@ -139,6 +143,7 @@ function ListSettingsForm() {
         {list ? <ListNameForm listId={list.id} name={list.name} /> : <Skeleton className="h-8 w-full" />}
         {list ? <ListUsers listId={list.id} users={list.members} /> : <Skeleton className="h-8 w-full" />}
         <AiSuggestionsToggle />
+        <WatchProvidersSettings />
       </div>
       <div className="flex flex-col gap-4 pb-6">
         {!!listStats && (
@@ -338,6 +343,113 @@ function ListUsers({ listId, users }: ListUsersProps) {
           )}
         </Button>
       </form>
+    </div>
+  );
+}
+
+function WatchProvidersSettings() {
+  const listOrpc = useListOrpc();
+  const queryClient = useQueryClient();
+  const clearWatchProviders = useSetAtom(itemWatchProvidersAtom);
+
+  const { data: regionData, isLoading: regionLoading } = useQuery(
+    listOrpc.listSettings.getWatchProviderRegion.queryOptions(),
+  );
+  const { data: filterData, isLoading: filterLoading } = useQuery(
+    listOrpc.listSettings.getWatchProviderFilter.queryOptions(),
+  );
+
+  const region = regionData?.region ?? null;
+
+  const { data: regions } = useQuery(orpc.watchProviders.getRegions.queryOptions());
+  const { data: availableProviders } = useQuery(
+    orpc.watchProviders.getProviders.queryOptions({ input: { region: region ?? undefined }, enabled: !!region }),
+  );
+
+  const setRegionMutation = useMutation(
+    listOrpc.listSettings.setWatchProviderRegion.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderRegion.key() });
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
+        clearWatchProviders({});
+      },
+    }),
+  );
+
+  const setFilterMutation = useMutation(
+    listOrpc.listSettings.setWatchProviderFilter.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
+        clearWatchProviders({});
+      },
+    }),
+  );
+
+  const handleRegionChange = (value: string) => {
+    setRegionMutation.mutate({ region: value });
+  };
+
+  const selectedProviderIds = filterData?.providerIds ?? [];
+
+  const handleProviderToggle = (providerId: number, checked: boolean) => {
+    const next = checked ? [...selectedProviderIds, providerId] : selectedProviderIds.filter((id) => id !== providerId);
+    setFilterMutation.mutate({ providerIds: next });
+  };
+
+  if (regionLoading || filterLoading) {
+    return <Skeleton className="h-6 w-full" />;
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="font-medium text-sm">Watch Providers</p>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="watch-region" className="text-muted-foreground text-xs">
+          Region
+        </Label>
+        <Select value={region ?? ""} onValueChange={handleRegionChange} disabled={setRegionMutation.isPending}>
+          <SelectTrigger id="watch-region" className="w-full">
+            <SelectValue placeholder="Select region" />
+          </SelectTrigger>
+          <SelectContent>
+            {regions?.map((r) => (
+              <SelectItem key={r.iso_3166_1} value={r.iso_3166_1}>
+                {r.english_name} ({r.iso_3166_1})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {region && availableProviders && availableProviders.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <Label className="text-muted-foreground text-xs">Providers to show</Label>
+          <div className="flex max-h-48 flex-col gap-1 overflow-y-auto rounded-md border p-2">
+            {availableProviders.map((provider) => (
+              <Label
+                key={provider.providerId}
+                htmlFor={`provider-${provider.providerId}`}
+                className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 font-normal hover:bg-accent"
+              >
+                <Checkbox
+                  id={`provider-${provider.providerId}`}
+                  checked={selectedProviderIds.includes(provider.providerId)}
+                  onCheckedChange={(checked) => handleProviderToggle(provider.providerId, !!checked)}
+                />
+                <img
+                  src={`https://image.tmdb.org/t/p/original${provider.logoPath}`}
+                  alt={provider.providerName}
+                  className="size-5 rounded"
+                  draggable={false}
+                />
+                <span className="truncate text-sm">{provider.providerName}</span>
+              </Label>
+            ))}
+          </div>
+          {selectedProviderIds.length > 0 && (
+            <p className="text-muted-foreground text-xs">{selectedProviderIds.length} selected</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

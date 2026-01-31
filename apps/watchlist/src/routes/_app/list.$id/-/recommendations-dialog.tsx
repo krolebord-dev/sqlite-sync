@@ -63,7 +63,11 @@ function RecommendationsContent() {
   const recommendMutation = useMutation(listOrpc.aiRecommendations.getRecommendations.mutationOptions());
 
   const handleRecommend = () => {
-    recommendMutation.mutate({ customPrompt: customPrompt.trim() || undefined });
+    const excludeTmdbIds = recommendMutation.data?.recommendations.map((r) => r.tmdbId);
+    recommendMutation.mutate({
+      customPrompt: customPrompt.trim() || undefined,
+      excludeTmdbIds: excludeTmdbIds?.length ? excludeTmdbIds : undefined,
+    });
   };
 
   const addItem = (rec: Recommendation) => {

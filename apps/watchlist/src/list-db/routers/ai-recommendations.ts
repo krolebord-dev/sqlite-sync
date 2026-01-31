@@ -119,7 +119,7 @@ function adaptSearchResult(result: MovieWithMediaType | TVWithMediaType): Omit<E
 }
 
 const getRecommendations = listProcedure
-  .input(z.object({ customPrompt: z.string().optional() }))
+  .input(z.object({ customPrompt: z.string().optional(), excludeTmdbIds: z.array(z.number()).optional() }))
   .handler(async ({ input, context }) => {
     const model = createOpenRouter({
       apiKey: context.env.OPENROUTER_API_KEY,
@@ -141,7 +141,7 @@ const getRecommendations = listProcedure
     const aiResult = await recommendItems({ tasteProfile, model, customPrompt: input.customPrompt });
 
     const tmdb = new TMDB(context.env.TMDB_READ_ACCESS_TOKEN);
-    const existingTmdbIds = new Set(items.map((i) => i.tmdbId));
+    const existingTmdbIds = new Set([...items.map((i) => i.tmdbId), ...(input.excludeTmdbIds ?? [])]);
 
     const enriched = await Promise.allSettled(
       aiResult.recommendations.map(async (rec) => {

@@ -21,6 +21,7 @@ import {
   StarsIcon,
   ThumbsUpIcon,
   TrashIcon,
+  TvIcon,
 } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -42,8 +43,11 @@ import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
 import {
   editItemAtom,
+  type ItemWatchProviders,
   isItemSelectedAtom,
   isRandomizedItemAtom,
+  itemWatchProvidersAtom,
+  loadingWatchProvidersAtom,
   reviewItemAtom,
   toggleItemSelectionAtom,
 } from "./list-atoms";
@@ -182,6 +186,7 @@ export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
               )}
             </div>
           )}
+          <WatchProvidersDisplay itemId={item.id} />
         </div>
         <div className="flex items-center justify-end gap-2">
           <ProcessingStatusIndicator status={item.processingStatus} />
@@ -211,6 +216,7 @@ const ListItemMenuContent = memo(({ type, item }: ListItemMenuContentProps) => {
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
       <AiSuggestTagsMenuItem item={item} />
+      <LoadWatchProvidersMenuItem item={item} />
     </DynamicMenuContent>
   );
 });
@@ -444,6 +450,78 @@ function AiSuggestTagsMenuItem({ item }: ItemMenuActioProps) {
       <StarsIcon />
       Suggest Tags
     </DynamicMenuItem>
+  );
+}
+
+function LoadWatchProvidersMenuItem({ item }: ItemMenuActioProps) {
+  const listOrpc = useListOrpc();
+  const setWatchProviders = useSetAtom(itemWatchProvidersAtom);
+  const setLoading = useSetAtom(loadingWatchProvidersAtom);
+
+  const loadProvidersMutation = useMutation(
+    listOrpc.watchProviders.getItemWatchProviders.mutationOptions({
+      onMutate: () => {
+        setLoading((prev: Set<string>) => new Set(prev).add(item.id));
+      },
+      onSuccess: (data) => {
+        if (data.link) {
+          setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({
+            ...prev,
+            [item.id]: { link: data.link as string, providers: data.providers },
+          }));
+        }
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+      onError: () => {
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+    }),
+  );
+
+  return (
+    <DynamicMenuItem onClick={() => loadProvidersMutation.mutate({ tmdbId: item.tmdbId, type: item.type })}>
+      <TvIcon />
+      Watch Providers
+    </DynamicMenuItem>
+  );
+}
+
+function WatchProvidersDisplay({ itemId }: { itemId: string }) {
+  const watchProvidersMap = useAtomValue(itemWatchProvidersAtom);
+  const loadingSet = useAtomValue(loadingWatchProvidersAtom);
+
+  const isLoading = loadingSet.has(itemId);
+  const data = watchProvidersMap[itemId];
+
+  if (isLoading) {
+    return <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />;
+  }
+
+  if (!data || data.providers.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {data.providers.map((provider) => (
+        <Tooltip key={provider.providerId}>
+          <TooltipTrigger asChild>
+            <a href={data.link} target="_blank" rel="noreferrer" tabIndex={-1}>
+              <img src={provider.logoUrl} alt={provider.providerName} className="size-6 rounded" draggable={false} />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{provider.providerName}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
   );
 }
 
