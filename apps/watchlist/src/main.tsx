@@ -26,6 +26,10 @@ declare module "@tanstack/react-router" {
   }
 }
 
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js");
+}
+
 const rootElement = document.getElementById("root");
 if (rootElement) {
   const root = createRoot(rootElement);
