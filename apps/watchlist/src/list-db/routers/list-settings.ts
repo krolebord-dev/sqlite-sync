@@ -26,6 +26,7 @@ const setWatchProviderRegion = listProcedure
   .input(z.object({ region: z.string() }))
   .handler(async ({ input, context }) => {
     context.kv.put(WATCH_PROVIDER_REGION_KEY, input.region);
+    context.kv.put(WATCH_PROVIDER_FILTER_KEY, []);
     return { ok: true };
   });
 

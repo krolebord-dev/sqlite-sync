@@ -370,6 +370,7 @@ function WatchProvidersSettings() {
     listOrpc.listSettings.setWatchProviderRegion.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderRegion.key() });
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
         clearWatchProviders({});
       },
     }),
