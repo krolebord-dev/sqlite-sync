@@ -62,5 +62,7 @@ export function transformImportItem(item: ImportItem): ListItem {
     tags: JSON.stringify(item.tags),
     processingStatus: "idle" as const,
     posterUrl: item.posterUrl,
+    userRating: null,
+    tagHighlights: "{}",
   };
 }

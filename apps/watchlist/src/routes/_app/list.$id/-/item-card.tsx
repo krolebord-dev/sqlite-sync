@@ -17,6 +17,7 @@ import {
   PencilIcon,
   PlusIcon,
   SkullIcon,
+  StarIcon,
   StarsIcon,
   ThumbsUpIcon,
   TrashIcon,
@@ -39,10 +40,15 @@ import { formatDuration } from "@/lib/utils/format-duration";
 import { useDb } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
-import { editItemAtom, randomizedItemAtom, selectedItemsAtom, toggleItemSelectionAtom } from "./list-atoms";
+import {
+  editItemAtom,
+  randomizedItemAtom,
+  reviewItemAtom,
+  selectedItemsAtom,
+  toggleItemSelectionAtom,
+} from "./list-atoms";
 
 export function ListItemCard({ item }: { item: ListItem }) {
-  const db = useDb();
   const isWatched = !!item.watchedAt;
   const isSelected = useIsItemSelected(item.id);
   const isRandomizedItem = useIsRandomizedItem(item.id);
@@ -50,6 +56,13 @@ export function ListItemCard({ item }: { item: ListItem }) {
   const toggleItemSelection = useSetAtom(toggleItemSelectionAtom);
 
   const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
+  const tagHighlights = useMemo(() => {
+    try {
+      return JSON.parse(item.tagHighlights) as Record<string, "positive" | "negative">;
+    } catch {
+      return {} as Record<string, "positive" | "negative">;
+    }
+  }, [item.tagHighlights]);
   const maxTags = 6;
   const visibleTags = tags.slice(0, maxTags);
   const hiddenTags = tags.slice(maxTags);
@@ -137,14 +150,22 @@ export function ListItemCard({ item }: { item: ListItem }) {
               </p>
               {tags.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {visibleTags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border bg-card/80 px-2 py-0.5 text-foreground text-xs"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                  {visibleTags.map((tag) => {
+                    const hl = tagHighlights[tag];
+                    return (
+                      <span
+                        key={tag}
+                        className={cn(
+                          "rounded-full border px-2 py-0.5 text-xs",
+                          hl === "positive" && "border-green-500 bg-green-500/20 text-green-400",
+                          hl === "negative" && "border-red-500 bg-red-500/20 text-red-400",
+                          hl === undefined && "border-border bg-card/80 text-foreground",
+                        )}
+                      >
+                        {tag}
+                      </span>
+                    );
+                  })}
                   {remainingTagCount > 0 && (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -163,11 +184,7 @@ export function ListItemCard({ item }: { item: ListItem }) {
             </div>
             <div className="flex items-center justify-end gap-2">
               <ProcessingStatusIndicator status={item.processingStatus} />
-              {!isWatched && (
-                <Button variant="ghost" size="icon" onClick={() => setWatchedMutation(db, item.id, true)}>
-                  <CheckIcon />
-                </Button>
-              )}
+              <RatingButton item={item} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon">
@@ -245,6 +262,7 @@ function setWatchedMutation(db: SyncedDb<ListDb>, itemId: string, watched: boole
 function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
   const db = useDb();
   const isWatched = !!item.watchedAt;
+  const setReviewItem = useSetAtom(reviewItemAtom);
 
   return isWatched ? (
     <DynamicMenuItem onClick={() => setWatchedMutation(db, item.id, false)}>
@@ -252,10 +270,55 @@ function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
       <span>Mark as unwatched</span>
     </DynamicMenuItem>
   ) : (
-    <DynamicMenuItem onClick={() => setWatchedMutation(db, item.id, true)}>
+    <DynamicMenuItem onClick={() => setReviewItem({ itemId: item.id, mode: "watch" })}>
       <CheckIcon />
       Mark as watched
     </DynamicMenuItem>
+  );
+}
+
+function RatingButton({ item }: { item: ListItem }) {
+  const isWatched = !!item.watchedAt;
+  const setReviewItem = useSetAtom(reviewItemAtom);
+
+  if (!isWatched) {
+    return (
+      <Button variant="ghost" size="icon" onClick={() => setReviewItem({ itemId: item.id, mode: "watch" })}>
+        <CheckIcon />
+      </Button>
+    );
+  }
+
+  if (item.userRating != null) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative"
+            onClick={() => setReviewItem({ itemId: item.id, mode: "rate" })}
+          >
+            <StarIcon className="size-5 fill-yellow-500 text-yellow-500" />
+            <span className="absolute -right-1 -bottom-1 rounded-full bg-background px-1 font-bold text-[10px] text-yellow-500 leading-tight">
+              {item.userRating % 1 === 0 ? item.userRating : item.userRating.toFixed(1)}
+            </span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent sideOffset={6}>Edit review</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" onClick={() => setReviewItem({ itemId: item.id, mode: "rate" })}>
+          <StarIcon className="size-5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>Rate</TooltipContent>
+    </Tooltip>
   );
 }
 
