@@ -270,7 +270,12 @@ function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
       <span>Mark as unwatched</span>
     </DynamicMenuItem>
   ) : (
-    <DynamicMenuItem onClick={() => setReviewItem({ itemId: item.id, mode: "watch" })}>
+    <DynamicMenuItem
+      onClick={() => {
+        setWatchedMutation(db, item.id, true);
+        setReviewItem(item.id);
+      }}
+    >
       <CheckIcon />
       Mark as watched
     </DynamicMenuItem>
@@ -278,12 +283,20 @@ function SetWatchedMenuItem({ item }: ItemMenuActioProps) {
 }
 
 function RatingButton({ item }: { item: ListItem }) {
+  const db = useDb();
   const isWatched = !!item.watchedAt;
   const setReviewItem = useSetAtom(reviewItemAtom);
 
   if (!isWatched) {
     return (
-      <Button variant="ghost" size="icon" onClick={() => setReviewItem({ itemId: item.id, mode: "watch" })}>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => {
+          setWatchedMutation(db, item.id, true);
+          setReviewItem(item.id);
+        }}
+      >
         <CheckIcon />
       </Button>
     );
@@ -293,12 +306,7 @@ function RatingButton({ item }: { item: ListItem }) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="relative"
-            onClick={() => setReviewItem({ itemId: item.id, mode: "rate" })}
-          >
+          <Button variant="ghost" size="icon" className="relative" onClick={() => setReviewItem(item.id)}>
             <StarIcon className="size-5 fill-yellow-500 text-yellow-500" />
             <span className="absolute -right-1 -bottom-1 rounded-full bg-background px-1 font-bold text-[10px] text-yellow-500 leading-tight">
               {item.userRating % 1 === 0 ? item.userRating : item.userRating.toFixed(1)}
@@ -313,7 +321,7 @@ function RatingButton({ item }: { item: ListItem }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" onClick={() => setReviewItem({ itemId: item.id, mode: "rate" })}>
+        <Button variant="ghost" size="icon" onClick={() => setReviewItem(item.id)}>
           <StarIcon className="size-5" />
         </Button>
       </TooltipTrigger>

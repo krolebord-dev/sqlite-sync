@@ -1,5 +1,5 @@
 import { useAtom } from "jotai";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
@@ -26,61 +26,45 @@ function cycleTagState(current: "positive" | "negative" | undefined): "positive"
 
 export function ReviewDialog() {
   const db = useDb();
-  const [reviewState, setReviewState] = useAtom(reviewItemAtom);
-  const submittedRef = useRef(false);
+  const [reviewItemId, setReviewItemId] = useAtom(reviewItemAtom);
 
   const { data: items } = useDbQuery((db) => db.selectFrom("item").selectAll());
 
   const item = useMemo(() => {
-    if (!reviewState) return null;
-    return items.find((i) => i.id === reviewState.itemId) ?? null;
-  }, [reviewState, items]);
+    if (!reviewItemId) return null;
+    return items.find((i) => i.id === reviewItemId) ?? null;
+  }, [reviewItemId, items]);
 
   const handleClose = useCallback(() => {
-    if (!submittedRef.current && reviewState?.mode === "watch" && item) {
-      db.db.executeKysely((db) => db.updateTable("item").set({ watchedAt: Date.now() }).where("id", "=", item.id));
-    }
-    submittedRef.current = false;
-    setReviewState(null);
-  }, [db, reviewState, item, setReviewState]);
+    setReviewItemId(null);
+  }, [setReviewItemId]);
 
   const handleSubmit = useCallback(
     (userRating: number | null, tagHighlights: string) => {
-      if (!reviewState || !item) return;
-      submittedRef.current = true;
-      db.db.executeKysely((db) => {
-        let query = db.updateTable("item").where("id", "=", item.id);
-        if (reviewState.mode === "watch") {
-          query = query.set({ watchedAt: Date.now(), userRating, tagHighlights });
-        } else {
-          query = query.set({ userRating, tagHighlights });
-        }
-        return query;
-      });
-      setReviewState(null);
+      if (!item) return;
+      db.db.executeKysely((db) => db.updateTable("item").set({ userRating, tagHighlights }).where("id", "=", item.id));
+      setReviewItemId(null);
     },
-    [db, reviewState, item, setReviewState],
+    [db, item, setReviewItemId],
   );
 
-  if (!reviewState || !item) return null;
+  if (!reviewItemId || !item) return null;
 
   return (
     <Dialog open={true} onOpenChange={(open) => !open && handleClose()}>
-      <ReviewDialogContent item={item} mode={reviewState.mode} onSubmit={handleSubmit} onSkip={handleClose} />
+      <ReviewDialogContent item={item} onSubmit={handleSubmit} onClose={handleClose} />
     </Dialog>
   );
 }
 
 function ReviewDialogContent({
   item,
-  mode,
   onSubmit,
-  onSkip,
+  onClose,
 }: {
   item: ListItem;
-  mode: "watch" | "rate";
   onSubmit: (userRating: number | null, tagHighlights: string) => void;
-  onSkip: () => void;
+  onClose: () => void;
 }) {
   const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
   const existingHighlights = useMemo(() => parseTagHighlights(item.tagHighlights), [item.tagHighlights]);
@@ -104,9 +88,7 @@ function ReviewDialogContent({
   return (
     <DialogContent>
       <DialogHeader>
-        <DialogTitle>
-          {mode === "watch" ? "Rate & Review" : "Edit Review"} — {item.title}
-        </DialogTitle>
+        <DialogTitle>Review — {item.title}</DialogTitle>
       </DialogHeader>
 
       <div className="flex flex-col gap-6 py-2">
@@ -154,8 +136,8 @@ function ReviewDialogContent({
       </div>
 
       <DialogFooter>
-        <Button variant="ghost" onClick={onSkip}>
-          {mode === "watch" ? "Skip" : "Cancel"}
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
         </Button>
         <Button onClick={() => onSubmit(userRating, JSON.stringify(tagHighlights))}>Save Review</Button>
       </DialogFooter>
