@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { generateId } from "@sqlite-sync/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSetAtom } from "jotai";
 import { sql } from "kysely";
 import { CheckIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -23,6 +24,7 @@ import { UserError } from "@/lib/utils/user-error";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import { orpc } from "@/orpc/orpc-client";
+import { itemWatchProvidersAtom } from "./list-atoms";
 
 type ImportResult = {
   imported: number;
@@ -348,6 +350,7 @@ function ListUsers({ listId, users }: ListUsersProps) {
 function WatchProvidersSettings() {
   const listOrpc = useListOrpc();
   const queryClient = useQueryClient();
+  const clearWatchProviders = useSetAtom(itemWatchProvidersAtom);
 
   const { data: regionData, isLoading: regionLoading } = useQuery(
     listOrpc.listSettings.getWatchProviderRegion.queryOptions(),
@@ -367,6 +370,7 @@ function WatchProvidersSettings() {
     listOrpc.listSettings.setWatchProviderRegion.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderRegion.key() });
+        clearWatchProviders({});
       },
     }),
   );
@@ -375,6 +379,7 @@ function WatchProvidersSettings() {
     listOrpc.listSettings.setWatchProviderFilter.mutationOptions({
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
+        clearWatchProviders({});
       },
     }),
   );
