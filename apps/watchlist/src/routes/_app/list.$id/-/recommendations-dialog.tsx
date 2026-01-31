@@ -2,6 +2,7 @@ import { generateId } from "@sqlite-sync/core";
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { CalendarIcon, CheckIcon, Loader2, PlusIcon, RefreshCwIcon, SparklesIcon } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import { VoteAverage } from "./item-card";
@@ -49,6 +51,7 @@ export function RecommendationsDialog() {
 function RecommendationsContent() {
   const listOrpc = useListOrpc();
   const db = useDb();
+  const [customPrompt, setCustomPrompt] = useState("");
 
   const { data: alreadyAddedTmdbIds } = useDbQuery(
     (db) => db.selectFrom("item").select("tmdbId").where("tmdbId", "is not", null),
@@ -58,6 +61,10 @@ function RecommendationsContent() {
   );
 
   const recommendMutation = useMutation(listOrpc.aiRecommendations.getRecommendations.mutationOptions());
+
+  const handleRecommend = () => {
+    recommendMutation.mutate({ customPrompt: customPrompt.trim() || undefined });
+  };
 
   const addItem = (rec: Recommendation) => {
     db.db.executeKysely((db) =>
@@ -82,8 +89,15 @@ function RecommendationsContent() {
 
   return (
     <div className="flex flex-col gap-4">
+      <Textarea
+        placeholder="e.g. Something lighthearted for a weekend, or a sci-fi thriller from the 90s..."
+        value={customPrompt}
+        onChange={(e) => setCustomPrompt(e.target.value)}
+        disabled={recommendMutation.isPending}
+        className="min-h-10 resize-none"
+      />
       <div className="flex items-center justify-between">
-        <Button onClick={() => recommendMutation.mutate(undefined)} disabled={recommendMutation.isPending}>
+        <Button onClick={handleRecommend} disabled={recommendMutation.isPending}>
           {recommendMutation.isPending ? (
             <>
               <Loader2 className="size-4 animate-spin" /> Generating...

@@ -6,10 +6,15 @@ type RecommenderPromptProps = {
   tagPreferences: string;
   existingTitles: string;
   mediaTypePreference: string;
+  customPrompt?: string;
 };
 
 export function buildRecommenderPrompt(props: RecommenderPromptProps) {
-  return pupa(recommenderPrompt, props);
+  let prompt = pupa(recommenderPrompt, props);
+  if (props.customPrompt) {
+    prompt += `\n## Additional User Request\n${props.customPrompt}\n`;
+  }
+  return prompt;
 }
 
 const recommenderPrompt = `
