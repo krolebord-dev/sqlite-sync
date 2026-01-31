@@ -1,5 +1,5 @@
 import type { SyncedDb } from "@sqlite-sync/core";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -41,7 +41,6 @@ import { formatDuration } from "@/lib/utils/format-duration";
 import { useDb } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
-import { orpc } from "@/orpc/orpc-client";
 import {
   editItemAtom,
   type ItemWatchProviders,
@@ -459,49 +458,18 @@ function LoadWatchProvidersMenuItem({ item }: ItemMenuActioProps) {
   const setWatchProviders = useSetAtom(itemWatchProvidersAtom);
   const setLoading = useSetAtom(loadingWatchProvidersAtom);
 
-  const { data: regionData } = useQuery(listOrpc.listSettings.getWatchProviderRegion.queryOptions());
-  const { data: filterData } = useQuery(listOrpc.listSettings.getWatchProviderFilter.queryOptions());
-
   const loadProvidersMutation = useMutation(
-    orpc.watchProviders.getItemProviders.mutationOptions({
+    listOrpc.watchProviders.getItemWatchProviders.mutationOptions({
       onMutate: () => {
         setLoading((prev: Set<string>) => new Set(prev).add(item.id));
       },
       onSuccess: (data) => {
-        const region = regionData?.region;
-        if (!region || !data[region]) {
-          setLoading((prev: Set<string>) => {
-            const next = new Set(prev);
-            next.delete(item.id);
-            return next;
-          });
-          return;
+        if (data.link) {
+          setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({
+            ...prev,
+            [item.id]: { link: data.link as string, providers: data.providers },
+          }));
         }
-
-        const regionData_ = data[region];
-        const allProviders = [...(regionData_.flatrate ?? []), ...(regionData_.rent ?? []), ...(regionData_.buy ?? [])];
-
-        const seen = new Set<number>();
-        const unique = allProviders.filter((p) => {
-          if (seen.has(p.provider_id)) return false;
-          seen.add(p.provider_id);
-          return true;
-        });
-
-        const filterIds = filterData?.providerIds;
-        const filtered =
-          filterIds && filterIds.length > 0 ? unique.filter((p) => filterIds.includes(p.provider_id)) : unique;
-
-        const result: ItemWatchProviders = {
-          link: regionData_.link,
-          providers: filtered.map((p) => ({
-            providerId: p.provider_id,
-            providerName: p.provider_name,
-            logoUrl: `https://image.tmdb.org/t/p/original${p.logo_path}`,
-          })),
-        };
-
-        setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({ ...prev, [item.id]: result }));
         setLoading((prev: Set<string>) => {
           const next = new Set(prev);
           next.delete(item.id);

@@ -2,32 +2,6 @@ import z from "zod";
 import { tmdb } from "@/lib/tmdb";
 import { protectedProcedure } from "../common/procedure";
 
-const getItemProviders = protectedProcedure
-  .input(
-    z.object({
-      tmdbId: z.number(),
-      type: z.enum(["movie", "tv"]),
-    }),
-  )
-  .handler(async ({ input }) => {
-    const data =
-      input.type === "movie"
-        ? await tmdb.movies.watchProviders(input.tmdbId)
-        : await tmdb.tvShows.watchProviders(input.tmdbId);
-
-    const results = data.results as unknown as Record<
-      string,
-      {
-        link: string;
-        flatrate?: { provider_id: number; provider_name: string; logo_path: string }[];
-        rent?: { provider_id: number; provider_name: string; logo_path: string }[];
-        buy?: { provider_id: number; provider_name: string; logo_path: string }[];
-      }
-    >;
-
-    return results;
-  });
-
 const getRegions = protectedProcedure.handler(async () => {
   const regions = await tmdb.watchProviders.getRegions();
   return regions.results as { iso_3166_1: string; english_name: string; native_name: string }[];
@@ -55,7 +29,6 @@ const getProviders = protectedProcedure
   });
 
 export const watchProvidersRouter = {
-  getItemProviders,
   getRegions,
   getProviders,
 };
