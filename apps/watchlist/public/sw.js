@@ -5,12 +5,20 @@ self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
-self.addEventListener("activate", async () => {
-  const cacheNames = await caches.keys();
-  await Promise.all(cacheNames.map((name) => caches.delete(name)));
-  const clients = await self.clients.matchAll({ type: "window" });
-  for (const client of clients) {
-    client.navigate(client.url);
-  }
-  self.registration.unregister();
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    (async () => {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map((name) => caches.delete(name)));
+
+      await self.registration.unregister();
+
+      const clients = await self.clients.matchAll({ type: "window" });
+      for (const client of clients) {
+        if (client.url && "navigate" in client) {
+          client.navigate(client.url);
+        }
+      }
+    })()
+  );
 });
