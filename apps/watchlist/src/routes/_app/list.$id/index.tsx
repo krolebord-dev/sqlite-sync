@@ -55,6 +55,7 @@ import {
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
+import { ReviewDialog } from "./-/review-dialog";
 
 const dbs = new Map<string, SyncedDb<ListDb>>();
 
@@ -123,6 +124,7 @@ function ListPage() {
         <ItemsList />
         <TmdbSearchResults />
       </div>
+      <ReviewDialog />
     </>
   );
 }
@@ -538,6 +540,8 @@ function TmdbSearchResults() {
         createdAt: Date.now(),
         tags: "[]",
         processingStatus: "idle",
+        userRating: null,
+        tagHighlights: "{}",
       }),
     );
   };

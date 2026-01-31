@@ -21,6 +21,8 @@ export type ListItem = {
   tombstone?: boolean;
   tags: string;
   processingStatus: "idle" | "pending" | (string & {});
+  userRating: number | null;
+  tagHighlights: string;
 };
 
 const migrations = createMigrations((b) => ({
@@ -44,6 +46,10 @@ const migrations = createMigrations((b) => ({
         .addColumn("tags", "text", (col) => col.notNull().defaultTo("[]"))
         .addColumn("createdAt", "integer", (col) => col.notNull()),
     ),
+  ],
+  1: [
+    b.addColumn({ table: "_item", column: "userRating", type: "real", defaultValue: null }),
+    b.addColumn({ table: "_item", column: "tagHighlights", type: "text", defaultValue: "{}" }),
   ],
 }));
 

@@ -87,5 +87,7 @@ export function parseImportItemsFromJson(text: string) {
     tags: JSON.stringify(item.tags),
     processingStatus: "idle" as const,
     posterUrl: item.posterUrl,
+    userRating: null,
+    tagHighlights: "{}",
   }));
 }
