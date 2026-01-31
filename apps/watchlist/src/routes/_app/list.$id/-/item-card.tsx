@@ -1,5 +1,5 @@
 import type { SyncedDb } from "@sqlite-sync/core";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -21,6 +21,7 @@ import {
   StarsIcon,
   ThumbsUpIcon,
   TrashIcon,
+  TvIcon,
 } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -40,10 +41,14 @@ import { formatDuration } from "@/lib/utils/format-duration";
 import { useDb } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
+import { orpc } from "@/orpc/orpc-client";
 import {
   editItemAtom,
+  type ItemWatchProviders,
   isItemSelectedAtom,
   isRandomizedItemAtom,
+  itemWatchProvidersAtom,
+  loadingWatchProvidersAtom,
   reviewItemAtom,
   toggleItemSelectionAtom,
 } from "./list-atoms";
@@ -182,6 +187,7 @@ export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
               )}
             </div>
           )}
+          <WatchProvidersDisplay itemId={item.id} />
         </div>
         <div className="flex items-center justify-end gap-2">
           <ProcessingStatusIndicator status={item.processingStatus} />
@@ -211,6 +217,7 @@ const ListItemMenuContent = memo(({ type, item }: ListItemMenuContentProps) => {
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
       <AiSuggestTagsMenuItem item={item} />
+      <LoadWatchProvidersMenuItem item={item} />
     </DynamicMenuContent>
   );
 });
@@ -444,6 +451,109 @@ function AiSuggestTagsMenuItem({ item }: ItemMenuActioProps) {
       <StarsIcon />
       Suggest Tags
     </DynamicMenuItem>
+  );
+}
+
+function LoadWatchProvidersMenuItem({ item }: ItemMenuActioProps) {
+  const listOrpc = useListOrpc();
+  const setWatchProviders = useSetAtom(itemWatchProvidersAtom);
+  const setLoading = useSetAtom(loadingWatchProvidersAtom);
+
+  const { data: regionData } = useQuery(listOrpc.listSettings.getWatchProviderRegion.queryOptions());
+  const { data: filterData } = useQuery(listOrpc.listSettings.getWatchProviderFilter.queryOptions());
+
+  const loadProvidersMutation = useMutation(
+    orpc.watchProviders.getItemProviders.mutationOptions({
+      onMutate: () => {
+        setLoading((prev: Set<string>) => new Set(prev).add(item.id));
+      },
+      onSuccess: (data) => {
+        const region = regionData?.region;
+        if (!region || !data[region]) {
+          setLoading((prev: Set<string>) => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+          return;
+        }
+
+        const regionData_ = data[region];
+        const allProviders = [...(regionData_.flatrate ?? []), ...(regionData_.rent ?? []), ...(regionData_.buy ?? [])];
+
+        const seen = new Set<number>();
+        const unique = allProviders.filter((p) => {
+          if (seen.has(p.provider_id)) return false;
+          seen.add(p.provider_id);
+          return true;
+        });
+
+        const filterIds = filterData?.providerIds;
+        const filtered =
+          filterIds && filterIds.length > 0 ? unique.filter((p) => filterIds.includes(p.provider_id)) : unique;
+
+        const result: ItemWatchProviders = {
+          link: regionData_.link,
+          providers: filtered.map((p) => ({
+            providerId: p.provider_id,
+            providerName: p.provider_name,
+            logoUrl: `https://image.tmdb.org/t/p/original${p.logo_path}`,
+          })),
+        };
+
+        setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({ ...prev, [item.id]: result }));
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+      onError: () => {
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+    }),
+  );
+
+  return (
+    <DynamicMenuItem onClick={() => loadProvidersMutation.mutate({ tmdbId: item.tmdbId, type: item.type })}>
+      <TvIcon />
+      Watch Providers
+    </DynamicMenuItem>
+  );
+}
+
+function WatchProvidersDisplay({ itemId }: { itemId: string }) {
+  const watchProvidersMap = useAtomValue(itemWatchProvidersAtom);
+  const loadingSet = useAtomValue(loadingWatchProvidersAtom);
+
+  const isLoading = loadingSet.has(itemId);
+  const data = watchProvidersMap[itemId];
+
+  if (isLoading) {
+    return <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />;
+  }
+
+  if (!data || data.providers.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {data.providers.map((provider) => (
+        <Tooltip key={provider.providerId}>
+          <TooltipTrigger asChild>
+            <a href={data.link} target="_blank" rel="noreferrer" tabIndex={-1}>
+              <img src={provider.logoUrl} alt={provider.providerName} className="size-6 rounded" draggable={false} />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{provider.providerName}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
   );
 }
 
