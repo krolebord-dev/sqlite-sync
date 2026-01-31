@@ -55,6 +55,7 @@ import {
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
+import { RecommendationsDialog } from "./-/recommendations-dialog";
 import { ReviewDialog } from "./-/review-dialog";
 
 const dbs = new Map<string, SyncedDb<ListDb>>();
@@ -106,6 +107,7 @@ function ListPage() {
       <AppHeader>
         <div className="flex items-center gap-2">
           <ProjectSelector />
+          <RecommendationsDialog />
           <ListSettings />
         </div>
         <div className="flex items-center gap-2">
