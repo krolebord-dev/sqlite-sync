@@ -53,7 +53,6 @@ function parseRating(rating: number | null, maxRating: number): number | null {
 
 export function parseImportItemsFromJson(text: string) {
   const json = JSON.parse(text);
-  const result = importSchema.parse(json);
 
   const parseResult = importSchema.safeParse(json);
   if (!parseResult.success) {
@@ -66,8 +65,8 @@ export function parseImportItemsFromJson(text: string) {
     throw new UserError("No items found in the file.");
   }
 
-  let maxRating = result[0].rating ?? 0;
-  for (const item of result) {
+  let maxRating = items[0].rating ?? 0;
+  for (const item of items) {
     if (item.rating !== null) {
       maxRating = Math.max(maxRating, item.rating);
     }

@@ -387,7 +387,7 @@ function useOrderedAndFilteredItems() {
 function ItemsList() {
   const orderedAndFilteredItems = useOrderedAndFilteredItems() ?? [];
 
-  if (orderedAndFilteredItems.length === 100) {
+  if (orderedAndFilteredItems.length <= 100) {
     return (
       <div className="flex w-full max-w-7xl flex-wrap justify-center gap-4 px-4 pt-2 pb-20 md:grid md:grid-cols-2 xl:grid-cols-3">
         {orderedAndFilteredItems.map((item) => (

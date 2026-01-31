@@ -43,7 +43,7 @@ async function importItemsFromJson(db: ReturnType<typeof useDb>, file: File): Pr
   }
 
   db.db.executeTransaction((db) => {
-    for (const item of items) {
+    for (const item of itemsToImport) {
       db.executeKysely((db) =>
         db.insertInto("item").values({
           id: generateId(),
