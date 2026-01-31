@@ -21,6 +21,6 @@ self.addEventListener("activate", (event) => {
           client.navigate(client.url);
         }
       }
-    })()
+    })(),
   );
 });
