@@ -1,9 +1,9 @@
 import { useAtom } from "jotai";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
-import { MinusIcon, PlusIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import type { ListItem } from "@/list-db/migrations";
