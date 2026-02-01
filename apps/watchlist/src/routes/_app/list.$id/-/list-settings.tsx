@@ -197,7 +197,7 @@ function ListSettingsForm() {
           {importMutation.isPending ? "Importing..." : "Import from JSON"}
         </Button>
         <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
-        {list?.createdBy && <DeleteListButton listId={list.id} createdBy={list.createdBy} />}
+        {list && <DeleteListButton listId={list.id} createdBy={list.createdBy} />}
       </div>
     </div>
   );
