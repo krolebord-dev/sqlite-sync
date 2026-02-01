@@ -3,7 +3,7 @@ import { generateId } from "@sqlite-sync/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSetAtom } from "jotai";
 import { sql } from "kysely";
-import { CheckIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useListId } from "@/lib/use-list";
+import { downloadJson, exportItemsToJson } from "@/lib/utils/export-json";
 import { formatDuration } from "@/lib/utils/format-duration";
 import { parseImportItemsFromJson } from "@/lib/utils/import-json";
 import { UserError } from "@/lib/utils/user-error";
@@ -142,6 +143,13 @@ function ListSettingsForm() {
     importMutation.mutate(file);
   };
 
+  const handleExport = () => {
+    const items = db.db.executeKysely((db) => db.selectFrom("item").selectAll()).rows;
+    const json = exportItemsToJson(items);
+    downloadJson(json, "watchlist-export.json");
+    toast.success(`Exported ${items.length} items.`);
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col justify-between gap-12 px-4">
       <div className="flex flex-col gap-12">
@@ -162,6 +170,10 @@ function ListSettingsForm() {
             <p>Average rating: {Math.round(listStats.averageRating)}</p>
           </div>
         )}
+        <Button variant="outline" onClick={handleExport} className="w-full">
+          <DownloadIcon className="mr-2 size-4" />
+          Export to JSON
+        </Button>
         <Button
           variant="outline"
           onClick={() => fileInputRef.current?.click()}
