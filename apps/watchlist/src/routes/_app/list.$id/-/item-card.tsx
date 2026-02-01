@@ -11,6 +11,7 @@ import {
   EyeIcon,
   EyeOffIcon,
   FlameIcon,
+  FrownIcon,
   HashIcon,
   LoaderCircleIcon,
   MinusIcon,
@@ -186,10 +187,10 @@ export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
               )}
             </div>
           )}
-          <WatchProvidersDisplay itemId={item.id} />
         </div>
         <div className="flex items-center justify-end gap-2">
           <ProcessingStatusIndicator status={item.processingStatus} />
+          <WatchProvidersInline item={item} />
           <RatingButton item={item} />
           <DropdownMenu>
             <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })}>
@@ -494,34 +495,112 @@ function LoadWatchProvidersMenuItem({ item }: ItemMenuActioProps) {
   );
 }
 
-function WatchProvidersDisplay({ itemId }: { itemId: string }) {
+function WatchProvidersInline({ item }: { item: ListItem }) {
+  const listOrpc = useListOrpc();
   const watchProvidersMap = useAtomValue(itemWatchProvidersAtom);
   const loadingSet = useAtomValue(loadingWatchProvidersAtom);
+  const setWatchProviders = useSetAtom(itemWatchProvidersAtom);
+  const setLoading = useSetAtom(loadingWatchProvidersAtom);
 
-  const isLoading = loadingSet.has(itemId);
-  const data = watchProvidersMap[itemId];
+  const isLoading = loadingSet.has(item.id);
+  const data = watchProvidersMap[item.id];
+
+  const loadProvidersMutation = useMutation(
+    listOrpc.watchProviders.getItemWatchProviders.mutationOptions({
+      onMutate: () => {
+        setLoading((prev: Set<string>) => new Set(prev).add(item.id));
+      },
+      onSuccess: (data) => {
+        if (data.link) {
+          setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({
+            ...prev,
+            [item.id]: { link: data.link as string, providers: data.providers },
+          }));
+        } else {
+          setWatchProviders((prev: Record<string, ItemWatchProviders>) => ({
+            ...prev,
+            [item.id]: { link: "", providers: [] },
+          }));
+        }
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+      onError: () => {
+        setLoading((prev: Set<string>) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+      },
+    }),
+  );
+
+  const handleLoad = useCallback(() => {
+    loadProvidersMutation.mutate({ tmdbId: item.tmdbId, type: item.type });
+  }, [loadProvidersMutation, item.tmdbId, item.type]);
 
   if (isLoading) {
-    return <LoaderCircleIcon className="size-4 animate-spin text-muted-foreground" />;
+    return (
+      <Button variant="ghost" size="icon" disabled>
+        <LoaderCircleIcon className="animate-spin" />
+      </Button>
+    );
   }
 
-  if (!data || data.providers.length === 0) {
-    return null;
+  if (data) {
+    if (data.providers.length === 0) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" onClick={handleLoad}>
+              <FrownIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>No watch providers found</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    const visibleProviders = data.providers.slice(0, 3);
+    return (
+      <div className="flex items-center gap-1">
+        {visibleProviders.map((provider) => (
+          <Tooltip key={provider.providerId}>
+            <TooltipTrigger asChild>
+              <a
+                href={data.link}
+                target="_blank"
+                rel="noreferrer"
+                tabIndex={-1}
+                className="flex size-9 items-center justify-center"
+              >
+                <img
+                  src={provider.logoUrl}
+                  alt={provider.providerName}
+                  className="size-7 rounded border border-border"
+                  draggable={false}
+                />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{provider.providerName}</TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {data.providers.map((provider) => (
-        <Tooltip key={provider.providerId}>
-          <TooltipTrigger asChild>
-            <a href={data.link} target="_blank" rel="noreferrer" tabIndex={-1}>
-              <img src={provider.logoUrl} alt={provider.providerName} className="size-6 rounded" draggable={false} />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={6}>{provider.providerName}</TooltipContent>
-        </Tooltip>
-      ))}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" onClick={handleLoad}>
+          <TvIcon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>Watch Providers</TooltipContent>
+    </Tooltip>
   );
 }
 
