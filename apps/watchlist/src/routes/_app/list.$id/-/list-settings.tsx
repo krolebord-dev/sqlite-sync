@@ -1,13 +1,25 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { generateId } from "@sqlite-sync/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { useSetAtom } from "jotai";
 import { sql } from "kysely";
-import { CheckIcon, DownloadIcon, MailIcon, PenIcon, UploadIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon, MailIcon, PenIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -17,6 +29,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/lib/auth-client";
 import { useListId } from "@/lib/use-list";
 import { downloadJson, exportItemsToJson } from "@/lib/utils/export-json";
 import { formatDuration } from "@/lib/utils/format-duration";
@@ -184,6 +197,7 @@ function ListSettingsForm() {
           {importMutation.isPending ? "Importing..." : "Import from JSON"}
         </Button>
         <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
+        {list?.createdBy && <DeleteListButton listId={list.id} createdBy={list.createdBy} />}
       </div>
     </div>
   );
@@ -361,6 +375,65 @@ function ListUsers({ listId, users }: ListUsersProps) {
         </Button>
       </form>
     </div>
+  );
+}
+
+type DeleteListButtonProps = {
+  listId: string;
+  createdBy: string;
+};
+
+function DeleteListButton({ listId, createdBy }: DeleteListButtonProps) {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const isCreator = auth.userId === createdBy;
+
+  const deleteListMutation = useMutation(
+    orpc.list.deleteList.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: orpc.list.getLists.key() });
+        toast.success("List deleted.");
+        navigate({ to: "/" });
+      },
+      onError: () => {
+        toast.error("Failed to delete list.");
+      },
+    }),
+  );
+
+  if (!isCreator) {
+    return null;
+  }
+
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="destructive" className="w-full">
+          <Trash2Icon className="mr-2 size-4" />
+          Delete list
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete list?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This action cannot be undone. This will permanently delete the list and all its items for every
+            collaborator.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => deleteListMutation.mutate({ listId })}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {deleteListMutation.isPending ? "Deleting..." : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
