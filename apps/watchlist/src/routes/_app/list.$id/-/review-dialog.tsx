@@ -101,13 +101,6 @@ function ReviewDialogContent({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setUserRating((prev) => Math.max(0, (prev ?? 5) - 0.5))}
-            >
-              <MinusIcon />
-            </Button>
             <Slider
               className="flex-1"
               min={0}
@@ -116,6 +109,13 @@ function ReviewDialogContent({
               value={userRating !== null ? [userRating] : [5]}
               onValueChange={(values) => setUserRating(values[0])}
             />
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setUserRating((prev) => Math.max(0, (prev ?? 5) - 0.5))}
+            >
+              <MinusIcon />
+            </Button>
             <Button
               variant="outline"
               size="icon-sm"
