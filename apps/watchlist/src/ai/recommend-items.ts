@@ -10,6 +10,12 @@ const recommendationSchema = z.object({
       reason: z.string(),
     }),
   ),
+  searchRefinements: z.array(
+    z.object({
+      label: z.string(),
+      prompt: z.string(),
+    }),
+  ),
 });
 
 export type AiRecommendation = z.infer<typeof recommendationSchema>["recommendations"][number];

@@ -43,7 +43,7 @@ You are a personalized recommendation engine. Based on the user's watchlist data
 5. Match the user's preferred media type ratio
 
 ## Output Format
-Return a JSON object with a "recommendations" array:
+Return a JSON object with a "recommendations" array and a "searchRefinements" array:
 {
   "recommendations": [
     {
@@ -51,6 +51,18 @@ Return a JSON object with a "recommendations" array:
       "type": "movie" or "tv",
       "reason": "Brief explanation of why this matches their taste"
     }
+  ],
+  "searchRefinements": [
+    {
+      "label": "Short label for the button (2-4 words)",
+      "prompt": "A search prompt that would refine the recommendations in this direction"
+    }
   ]
 }
+
+## Search Refinements Rules
+1. Generate 3-5 search refinement suggestions based on the current recommendations and user taste
+2. Each refinement should suggest a meaningful direction to explore (e.g. "Darker thrillers", "More animated", "Classic films only", "Foreign language picks", "Feel-good comedies")
+3. The label should be short and descriptive (2-4 words), suitable for a button
+4. The prompt should be a full sentence that can be used as a custom search prompt to generate new recommendations in that direction
 `;

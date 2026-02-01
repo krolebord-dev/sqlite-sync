@@ -133,7 +133,10 @@ const getRecommendations = listProcedure
     ).rows as ListItemRow[];
 
     if (items.length === 0) {
-      return { recommendations: [] as EnrichedRecommendation[] };
+      return {
+        recommendations: [] as EnrichedRecommendation[],
+        searchRefinements: [] as Array<{ label: string; prompt: string }>,
+      };
     }
 
     const tasteProfile = buildTasteProfile(items);
@@ -172,7 +175,7 @@ const getRecommendations = listProcedure
       .filter((r): r is PromiseFulfilledResult<EnrichedRecommendation> => r.status === "fulfilled" && r.value != null)
       .map((r) => r.value);
 
-    return { recommendations };
+    return { recommendations, searchRefinements: aiResult.searchRefinements };
   });
 
 export const aiRecommendationsRouter = {
