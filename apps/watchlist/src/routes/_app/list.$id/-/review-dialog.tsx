@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import type { ListItem } from "@/list-db/migrations";
@@ -99,13 +100,30 @@ function ReviewDialogContent({
               {userRating !== null ? userRating.toFixed(1) : "—"} / 10
             </span>
           </div>
-          <Slider
-            min={0}
-            max={10}
-            step={0.5}
-            value={userRating !== null ? [userRating] : [5]}
-            onValueChange={(values) => setUserRating(values[0])}
-          />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setUserRating((prev) => Math.max(0, (prev ?? 5) - 0.5))}
+            >
+              <MinusIcon />
+            </Button>
+            <Slider
+              className="flex-1"
+              min={0}
+              max={10}
+              step={0.5}
+              value={userRating !== null ? [userRating] : [5]}
+              onValueChange={(values) => setUserRating(values[0])}
+            />
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() => setUserRating((prev) => Math.min(10, (prev ?? 5) + 0.5))}
+            >
+              <PlusIcon />
+            </Button>
+          </div>
         </div>
 
         {tags.length > 0 && (
