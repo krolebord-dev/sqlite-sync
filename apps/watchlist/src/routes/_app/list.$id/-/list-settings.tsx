@@ -71,7 +71,12 @@ export function ListSettingsSheet({ children, asChild }: ListSettingsSheetProps)
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild={asChild}>{children}</SheetTrigger>
-      <SheetContent side="left" showCloseButton={false} onOpenAutoFocus={(e) => e.preventDefault()}>
+      <SheetContent
+        side="left"
+        className="overflow-y-auto"
+        showCloseButton={false}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
         <SheetHeader>
           <SheetTitle>List Settings</SheetTitle>
         </SheetHeader>
@@ -138,7 +143,7 @@ function ListSettingsForm() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-between gap-12 overflow-y-auto px-4">
+    <div className="flex min-h-0 flex-1 flex-col justify-between gap-12 px-4">
       <div className="flex flex-col gap-12">
         {list ? <ListNameForm listId={list.id} name={list.name} /> : <Skeleton className="h-8 w-full" />}
         {list ? <ListUsers listId={list.id} users={list.members} /> : <Skeleton className="h-8 w-full" />}
