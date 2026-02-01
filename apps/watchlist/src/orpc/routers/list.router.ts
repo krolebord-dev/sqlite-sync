@@ -15,7 +15,7 @@ const canAccessList = osBase
       .innerJoin("user_to_list as utl", "l.id", "utl.listId")
       .where("utl.userId", "=", userId)
       .where("l.id", "=", listId)
-      .select(["l.id", "l.name"])
+      .select(["l.id", "l.name", "l.createdBy"])
       .executeTakeFirst();
     if (!list) {
       throw redirect({ to: "/", params: { id: listId } });
@@ -63,6 +63,7 @@ export const getListWithMembers = protectedProcedure
     return {
       id: list.id,
       name: list.name,
+      createdBy: list.createdBy,
       members: members.map((member) => ({
         id: member.id,
         name: member.name,
@@ -76,7 +77,10 @@ export const createList = protectedProcedure
   .handler(async ({ context, input }) => {
     const userId = context.auth.userId;
     const listId = crypto.randomUUID();
-    await db.insertInto("list").values({ id: listId, name: input.name, createdAt: new Date().toISOString() }).execute();
+    await db
+      .insertInto("list")
+      .values({ id: listId, name: input.name, createdAt: new Date().toISOString(), createdBy: userId })
+      .execute();
     await db.insertInto("user_to_list").values({ userId, listId }).execute();
     return { success: true, listId };
   });
@@ -135,6 +139,21 @@ export const inviteUser = protectedProcedure
     return { success: true };
   });
 
+export const deleteList = protectedProcedure
+  .input(z.object({ listId: z.string() }))
+  .use(canAccessList, (input) => input.listId)
+  .handler(async ({ context, errors }) => {
+    const userId = context.auth.userId;
+    const { list } = context;
+
+    if (list.createdBy !== userId) {
+      throw errors.BAD_REQUEST();
+    }
+
+    await db.deleteFrom("list").where("id", "=", list.id).execute();
+    return { success: true };
+  });
+
 export const listRouter = {
   getLists,
   getList,
@@ -142,4 +161,5 @@ export const listRouter = {
   createList,
   editList,
   inviteUser,
+  deleteList,
 };

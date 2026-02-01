@@ -16,6 +16,7 @@ export interface D1Migrations {
 
 export interface List {
   createdAt: string;
+  createdBy: string;
   id: string;
   name: string;
 }
