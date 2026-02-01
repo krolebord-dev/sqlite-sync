@@ -180,13 +180,13 @@ function ListSettingsForm() {
 function AiSuggestionsToggle() {
   const listOrpc = useListOrpc();
 
-  const { data, isLoading } = useQuery(listOrpc.listSettings.getAiSuggestionsEnabled.queryOptions());
+  const { data, isLoading } = useQuery(listOrpc.listSettings.getSettings.queryOptions());
 
   const queryClient = useQueryClient();
   const mutation = useMutation(
     listOrpc.listSettings.setAiSuggestionsEnabled.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getAiSuggestionsEnabled.key() });
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getSettings.key() });
       },
     }),
   );
@@ -206,7 +206,7 @@ function AiSuggestionsToggle() {
       </Label>
       <Switch
         id="ai-suggestions"
-        checked={data?.enabled ?? true}
+        checked={data?.aiSuggestionsEnabled ?? true}
         onCheckedChange={handleCheckedChange}
         disabled={mutation.isPending}
       />
@@ -357,14 +357,9 @@ function WatchProvidersSettings() {
   const queryClient = useQueryClient();
   const clearWatchProviders = useSetAtom(itemWatchProvidersAtom);
 
-  const { data: regionData, isLoading: regionLoading } = useQuery(
-    listOrpc.listSettings.getWatchProviderRegion.queryOptions(),
-  );
-  const { data: filterData, isLoading: filterLoading } = useQuery(
-    listOrpc.listSettings.getWatchProviderFilter.queryOptions(),
-  );
+  const { data: settingsData, isLoading: settingsLoading } = useQuery(listOrpc.listSettings.getSettings.queryOptions());
 
-  const region = regionData?.region ?? null;
+  const region = settingsData?.watchProviderRegion ?? null;
 
   const { data: regions } = useQuery(orpc.watchProviders.getRegions.queryOptions());
   const { data: availableProviders } = useQuery(
@@ -374,8 +369,7 @@ function WatchProvidersSettings() {
   const setRegionMutation = useMutation(
     listOrpc.listSettings.setWatchProviderRegion.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderRegion.key() });
-        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getSettings.key() });
         clearWatchProviders({});
       },
     }),
@@ -384,7 +378,7 @@ function WatchProvidersSettings() {
   const setFilterMutation = useMutation(
     listOrpc.listSettings.setWatchProviderFilter.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getWatchProviderFilter.key() });
+        queryClient.invalidateQueries({ queryKey: listOrpc.listSettings.getSettings.key() });
         clearWatchProviders({});
       },
     }),
@@ -394,14 +388,14 @@ function WatchProvidersSettings() {
     setRegionMutation.mutate({ region: value });
   };
 
-  const selectedProviderIds = filterData?.providerIds ?? [];
+  const selectedProviderIds = settingsData?.watchProviderFilter ?? [];
 
   const handleProviderToggle = (providerId: number, checked: boolean) => {
     const next = checked ? [...selectedProviderIds, providerId] : selectedProviderIds.filter((id) => id !== providerId);
     setFilterMutation.mutate({ providerIds: next });
   };
 
-  if (regionLoading || filterLoading) {
+  if (settingsLoading) {
     return <Skeleton className="h-6 w-full" />;
   }
 
