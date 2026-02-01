@@ -77,7 +77,11 @@ function RecommendationsContent() {
   const handleMoreLikeThis = (title: string) => {
     const prompt = `More like "${title}"`;
     setCustomPrompt(prompt);
-    recommendMutation.mutate({ customPrompt: prompt });
+    const excludeTmdbIds = recommendMutation.data?.recommendations.map((r) => r.tmdbId);
+    recommendMutation.mutate({
+      customPrompt: prompt,
+      excludeTmdbIds: excludeTmdbIds?.length ? excludeTmdbIds : undefined,
+    });
   };
 
   const addItem = (rec: Recommendation) => {
