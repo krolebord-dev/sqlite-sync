@@ -8,6 +8,7 @@ export const itemsFilterSchema = z.object({
   sortBy: z.enum(["duration", "rating", "createdAt", "priority"]).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
   priority: z.enum(["high", "normal", "low", "any"]).default("any"),
+  watched: z.enum(["all", "unwatched", "watched"]).default("all"),
 });
 
 export type SortingOptions = z.infer<typeof itemsFilterSchema>;
