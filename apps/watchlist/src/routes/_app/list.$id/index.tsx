@@ -13,6 +13,8 @@ import {
   CheckIcon,
   Clock4Icon,
   EllipsisVertical,
+  EyeIcon,
+  EyeOffIcon,
   HashIcon,
   Loader2,
   SettingsIcon,
@@ -266,8 +268,39 @@ function SortingHeader({ className }: { className?: string }) {
           {sortOrderIcon[sortOrder]}
         </Link>
       </Button>
+      <WatchedFilterToggle />
       <FilterButton />
     </div>
+  );
+}
+
+const watchedNextState: Record<SortingOptions["watched"], SortingOptions["watched"]> = {
+  all: "unwatched",
+  unwatched: "watched",
+  watched: "all",
+};
+
+const watchedConfig: Record<SortingOptions["watched"], { icon: React.ReactNode; label: string; className?: string }> = {
+  all: { icon: <EyeIcon />, label: "All" },
+  unwatched: { icon: <EyeOffIcon />, label: "Not watched", className: "text-muted-foreground" },
+  watched: { icon: <EyeIcon />, label: "Watched", className: "text-emerald-500" },
+};
+
+function WatchedFilterToggle() {
+  const { watched } = useSearch({ from: "/_app/list/$id/" });
+  const config = watchedConfig[watched];
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="icon" className={config.className} asChild>
+          <Link to="." search={(prev) => ({ ...prev, watched: watchedNextState[watched] })}>
+            {config.icon}
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>{config.label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -363,7 +396,7 @@ function SearchInput({ className }: { className?: string }) {
 }
 
 function useOrderedAndFilteredItems() {
-  const { sortBy, sortOrder, priority } = useSearch({ from: "/_app/list/$id/" });
+  const { sortBy, sortOrder, priority, watched } = useSearch({ from: "/_app/list/$id/" });
   const searchQuery = useAtomValue(searchQueryAtom);
   const randomizedItem = useAtomValue(randomizedItemAtom);
 
@@ -376,6 +409,12 @@ function useOrderedAndFilteredItems() {
       .orderBy(sortBy, sortOrder);
     if (priority !== "any") {
       query = query.where("priority", "=", getPriorityValue(priority));
+    }
+
+    if (watched === "watched") {
+      query = query.where("watchedAt", "is not", null);
+    } else if (watched === "unwatched") {
+      query = query.where("watchedAt", "is", null);
     }
 
     if (searchQuery) {

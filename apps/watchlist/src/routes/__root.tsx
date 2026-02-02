@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { type ErrorComponentProps, Link, createRootRouteWithContext, Outlet } from "@tanstack/react-router";
+import { createRootRouteWithContext, type ErrorComponentProps, Link, Outlet } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -32,7 +32,9 @@ function ErrorPage({ error, reset }: ErrorComponentProps) {
         <h1 className="text-3xl font-bold">Something went wrong</h1>
         <p className="mt-2 text-muted-foreground">{error.message}</p>
         <div className="mt-6 flex justify-center gap-2">
-          <Button onClick={reset} className="flex-1">Try again</Button>
+          <Button onClick={reset} className="flex-1">
+            Try again
+          </Button>
           <Button asChild variant="outline" className="flex-1">
             <Link to="/">Go home</Link>
           </Button>
