@@ -9,9 +9,6 @@
       "Bash(pnpm format:check)",
       "Bash(pnpm --filter watchlist typecheck:*)"
     ],
-    "deny": [
-      "Bash(pnpm dev)",
-      "Bash(pnpm dev:*)"
-    ]
+    "deny": ["Bash(pnpm dev)", "Bash(pnpm dev:*)"]
   }
 }
