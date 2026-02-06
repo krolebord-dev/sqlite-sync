@@ -57,7 +57,6 @@ import {
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
-import { RandomPickerDialog } from "./-/random-picker-dialog";
 import { RecommendationsDialog } from "./-/recommendations-dialog";
 import { ReviewDialog } from "./-/review-dialog";
 
@@ -88,7 +87,6 @@ function ListPage() {
       <AppHeader>
         <div className="flex items-center gap-2">
           <ProjectSelector />
-          <RandomPickerDialog />
           <RecommendationsDialog />
           <TrendingLink />
           <ListSettings />
