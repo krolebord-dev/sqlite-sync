@@ -1,5 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { TrendingUpIcon } from "lucide-react";
 import { useAuth, useSignOut } from "@/lib/auth-client";
 import { useActiveList } from "@/lib/use-list";
 import { cn } from "@/lib/utils";
@@ -53,13 +54,17 @@ export function ProjectSelector({ showCreate = true }: ProjectSelectorProps) {
           </DropdownMenuItem>
         ))}
 
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/trending">
+            <TrendingUpIcon className="size-4" />
+            Trending
+          </Link>
+        </DropdownMenuItem>
         {showCreate && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link to="/">Create new list</Link>
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem asChild>
+            <Link to="/">Create new list</Link>
+          </DropdownMenuItem>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

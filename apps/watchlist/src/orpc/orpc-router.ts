@@ -3,12 +3,14 @@ import { RequestHeadersPlugin, ResponseHeadersPlugin } from "@orpc/server/plugin
 import { authRouter } from "./routers/auth.router";
 import { listRouter } from "./routers/list.router";
 import { searchRouter } from "./routers/search.router";
+import { trendingRouter } from "./routers/trending.router";
 import { watchProvidersRouter } from "./routers/watch-providers.router";
 
 export const orpcRouter = {
   auth: authRouter,
   list: listRouter,
   search: searchRouter,
+  trending: trendingRouter,
   watchProviders: watchProvidersRouter,
 };
 
