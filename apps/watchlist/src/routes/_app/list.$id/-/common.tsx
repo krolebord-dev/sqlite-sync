@@ -23,5 +23,5 @@ export const priorityColors = {
 };
 
 export function useListId() {
-  return useMatch({ from: "/_app/list/$id/", shouldThrow: false, select: (m) => m.loaderData?.list.id });
+  return useMatch({ from: "/_app/list/$id", shouldThrow: false, select: (m) => m.loaderData?.list.id });
 }

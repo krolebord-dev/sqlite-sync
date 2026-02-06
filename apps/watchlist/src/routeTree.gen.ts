@@ -14,7 +14,9 @@ import { Route as AppRouteRouteImport } from './routes/_app/route'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignInRouteImport } from './routes/_auth/sign-in'
 import { Route as AuthMagicLinkVerifyRouteImport } from './routes/_auth/magic-link-verify'
+import { Route as AppListIdRouteRouteImport } from './routes/_app/list.$id/route'
 import { Route as AppListIdIndexRouteImport } from './routes/_app/list.$id/index'
+import { Route as AppListIdTrendingRouteImport } from './routes/_app/list.$id/trending'
 
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/_auth',
@@ -39,22 +41,35 @@ const AuthMagicLinkVerifyRoute = AuthMagicLinkVerifyRouteImport.update({
   path: '/magic-link-verify',
   getParentRoute: () => AuthRouteRoute,
 } as any)
-const AppListIdIndexRoute = AppListIdIndexRouteImport.update({
-  id: '/list/$id/',
-  path: '/list/$id/',
+const AppListIdRouteRoute = AppListIdRouteRouteImport.update({
+  id: '/list/$id',
+  path: '/list/$id',
   getParentRoute: () => AppRouteRoute,
+} as any)
+const AppListIdIndexRoute = AppListIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppListIdRouteRoute,
+} as any)
+const AppListIdTrendingRoute = AppListIdTrendingRouteImport.update({
+  id: '/trending',
+  path: '/trending',
+  getParentRoute: () => AppListIdRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
+  '/list/$id': typeof AppListIdRouteRouteWithChildren
+  '/list/$id/trending': typeof AppListIdTrendingRoute
   '/list/$id/': typeof AppListIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
+  '/list/$id/trending': typeof AppListIdTrendingRoute
   '/list/$id': typeof AppListIdIndexRoute
 }
 export interface FileRoutesById {
@@ -64,13 +79,26 @@ export interface FileRoutesById {
   '/_auth/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/_auth/sign-in': typeof AuthSignInRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/list/$id': typeof AppListIdRouteRouteWithChildren
+  '/_app/list/$id/trending': typeof AppListIdTrendingRoute
   '/_app/list/$id/': typeof AppListIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/magic-link-verify' | '/sign-in' | '/list/$id/'
+  fullPaths:
+    | '/'
+    | '/magic-link-verify'
+    | '/sign-in'
+    | '/list/$id'
+    | '/list/$id/trending'
+    | '/list/$id/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/magic-link-verify' | '/sign-in' | '/list/$id'
+  to:
+    | '/'
+    | '/magic-link-verify'
+    | '/sign-in'
+    | '/list/$id/trending'
+    | '/list/$id'
   id:
     | '__root__'
     | '/_app'
@@ -78,6 +106,8 @@ export interface FileRouteTypes {
     | '/_auth/magic-link-verify'
     | '/_auth/sign-in'
     | '/_app/'
+    | '/_app/list/$id'
+    | '/_app/list/$id/trending'
     | '/_app/list/$id/'
   fileRoutesById: FileRoutesById
 }
@@ -123,24 +153,52 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthMagicLinkVerifyRouteImport
       parentRoute: typeof AuthRouteRoute
     }
+    '/_app/list/$id': {
+      id: '/_app/list/$id'
+      path: '/list/$id'
+      fullPath: '/list/$id'
+      preLoaderRoute: typeof AppListIdRouteRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
     '/_app/list/$id/': {
       id: '/_app/list/$id/'
-      path: '/list/$id'
+      path: '/'
       fullPath: '/list/$id/'
       preLoaderRoute: typeof AppListIdIndexRouteImport
-      parentRoute: typeof AppRouteRoute
+      parentRoute: typeof AppListIdRouteRoute
+    }
+    '/_app/list/$id/trending': {
+      id: '/_app/list/$id/trending'
+      path: '/trending'
+      fullPath: '/list/$id/trending'
+      preLoaderRoute: typeof AppListIdTrendingRouteImport
+      parentRoute: typeof AppListIdRouteRoute
     }
   }
 }
 
+interface AppListIdRouteRouteChildren {
+  AppListIdTrendingRoute: typeof AppListIdTrendingRoute
+  AppListIdIndexRoute: typeof AppListIdIndexRoute
+}
+
+const AppListIdRouteRouteChildren: AppListIdRouteRouteChildren = {
+  AppListIdTrendingRoute: AppListIdTrendingRoute,
+  AppListIdIndexRoute: AppListIdIndexRoute,
+}
+
+const AppListIdRouteRouteWithChildren = AppListIdRouteRoute._addFileChildren(
+  AppListIdRouteRouteChildren,
+)
+
 interface AppRouteRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
-  AppListIdIndexRoute: typeof AppListIdIndexRoute
+  AppListIdRouteRoute: typeof AppListIdRouteRouteWithChildren
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppIndexRoute: AppIndexRoute,
-  AppListIdIndexRoute: AppListIdIndexRoute,
+  AppListIdRouteRoute: AppListIdRouteRouteWithChildren,
 }
 
 const AppRouteRouteWithChildren = AppRouteRoute._addFileChildren(
