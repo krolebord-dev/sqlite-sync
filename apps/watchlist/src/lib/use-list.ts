@@ -5,7 +5,7 @@ import { orpc } from "@/orpc/orpc-client";
 
 export function useListId() {
   return useMatch({
-    from: "/_app/list/$id/",
+    from: "/_app/list/$id",
     shouldThrow: false,
     select: (m) => m.loaderData?.list.id,
   });
@@ -15,7 +15,7 @@ export function useActiveList() {
   const lists = useSuspenseQuery(orpc.list.getLists.queryOptions());
 
   const selectedListId = useMatch({
-    from: "/_app/list/$id/",
+    from: "/_app/list/$id",
     shouldThrow: false,
     select: (m) => m.loaderData?.list.id,
   });

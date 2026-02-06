@@ -1,6 +1,6 @@
-import { generateId, type SyncedDb } from "@sqlite-sync/core";
+import { generateId } from "@sqlite-sync/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, useLoaderData, useSearch } from "@tanstack/react-router";
+import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { format } from "date-fns";
 import { Provider, useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -22,6 +22,7 @@ import {
   SquareDashed,
   SquareDashedMousePointerIcon,
   StarIcon,
+  TrendingUpIcon,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -38,9 +39,8 @@ import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
-import { DbProvider, initListDb, useDb, useDbQuery, useDbState } from "@/list-db/list-db";
-import { ListDbOrpcProvider } from "@/list-db/list-orpc-context";
-import type { ListDb, ListItem } from "@/list-db/migrations";
+import { useDb, useDbQuery, useDbState } from "@/list-db/list-db";
+import type { ListItem } from "@/list-db/migrations";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { priorityColors } from "./-/common";
 import { getPriorityValue, ListItemCard, VoteAverage } from "./-/item-card";
@@ -60,40 +60,18 @@ import { ListSettingsSheet } from "./-/list-settings";
 import { RecommendationsDialog } from "./-/recommendations-dialog";
 import { ReviewDialog } from "./-/review-dialog";
 
-const dbs = new Map<string, SyncedDb<ListDb>>();
-
 export const Route = createFileRoute("/_app/list/$id/")({
   component: RouteComponent,
   validateSearch: itemsFilterSchema,
-  loaderDeps: () => ({}),
-  shouldReload: false,
-  loader: async ({ params, context }) => {
-    const list = await context.queryClient.ensureQueryData(
-      orpc.list.getList.queryOptions({ input: { listId: params.id } }),
-    );
-
-    let db = dbs.get(list.id);
-    if (!db) {
-      db = await initListDb({ listId: list.id });
-      dbs.set(list.id, db);
-    }
-    return { list, db };
-  },
 });
 
 function RouteComponent() {
-  const { db, list } = useLoaderData({ from: "/_app/list/$id/" });
-
   return (
-    <DbProvider db={db}>
-      <ListDbOrpcProvider listId={list.id}>
-        <Provider>
-          <HydrateListAtoms>
-            <ListPage />
-          </HydrateListAtoms>
-        </Provider>
-      </ListDbOrpcProvider>
-    </DbProvider>
+    <Provider>
+      <HydrateListAtoms>
+        <ListPage />
+      </HydrateListAtoms>
+    </Provider>
   );
 }
 
@@ -110,6 +88,7 @@ function ListPage() {
         <div className="flex items-center gap-2">
           <ProjectSelector />
           <RecommendationsDialog />
+          <TrendingLink />
           <ListSettings />
         </div>
         <div className="flex items-center gap-2">
@@ -672,6 +651,21 @@ function TmdbSearchResultCard({ item, alreadyAdded, onClick }: TmdbSearchResultC
         </div>
       </div>
     </button>
+  );
+}
+
+function TrendingLink() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-10 rounded-full" asChild>
+          <Link to="/list/$id/trending" params={(prev) => ({ id: prev.id! })}>
+            <TrendingUpIcon className="size-6! text-gray-400" />
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>Trending</TooltipContent>
+    </Tooltip>
   );
 }
 
