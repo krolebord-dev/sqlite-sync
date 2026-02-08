@@ -22,6 +22,7 @@ import {
   SquareDashed,
   SquareDashedMousePointerIcon,
   StarIcon,
+  TrashIcon,
   TrendingUpIcon,
   Wifi,
   WifiOff,
@@ -34,6 +35,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -46,6 +51,9 @@ import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { priorityColors } from "./-/common";
 import { getPriorityValue, ListItemCard, VoteAverage } from "./-/item-card";
 import {
+  bulkDeleteAtom,
+  bulkMarkWatchedAtom,
+  bulkSetPriorityAtom,
   clearRandomizedItemAtom,
   clearSelectedItemsAtom,
   dbAtom,
@@ -55,6 +63,7 @@ import {
   type SortingOptions,
   searchQueryAtom,
   selectAllAtom,
+  selectedItemsAtom,
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
@@ -115,12 +124,16 @@ function ListPage() {
 
 function HeaderMenu({ className }: { className?: string }) {
   const isSelectionMode = useAtomValue(isSelectionModeAtom);
+  const selectedCount = useAtomValue(selectedItemsAtom).length;
   const isRandomizedItem = !!useAtomValue(randomizedItemAtom);
 
   const clearSelectedItems = useSetAtom(clearSelectedItemsAtom);
   const selectAllItems = useSetAtom(selectAllAtom);
   const selectRandomFromSelectedItems = useSetAtom(selectRandomFromSelectedItemsAtom);
   const clearRandomizedItem = useSetAtom(clearRandomizedItemAtom);
+  const bulkDelete = useSetAtom(bulkDeleteAtom);
+  const bulkMarkWatched = useSetAtom(bulkMarkWatchedAtom);
+  const bulkSetPriority = useSetAtom(bulkSetPriorityAtom);
 
   return (
     <DropdownMenu>
@@ -137,7 +150,7 @@ function HeaderMenu({ className }: { className?: string }) {
               clearSelectedItems();
             }}
           >
-            <SquareDashed /> Clear selection
+            <SquareDashed /> Clear selection ({selectedCount})
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
@@ -168,6 +181,74 @@ function HeaderMenu({ className }: { className?: string }) {
           >
             <CheckIcon /> Clear randomized
           </DropdownMenuItem>
+        )}
+        {isSelectionMode && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.preventDefault();
+                bulkMarkWatched(true);
+              }}
+            >
+              <EyeIcon /> Mark as watched
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.preventDefault();
+                bulkMarkWatched(false);
+              }}
+            >
+              <EyeOffIcon /> Mark as unwatched
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <HashIcon /> Set priority
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.preventDefault();
+                    bulkSetPriority(getPriorityValue("high"));
+                  }}
+                  className={priorityColors.high.text}
+                >
+                  {priorityColors.high.icon}
+                  High
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.preventDefault();
+                    bulkSetPriority(getPriorityValue("normal"));
+                  }}
+                  className={priorityColors.normal.text}
+                >
+                  {priorityColors.normal.icon}
+                  Normal
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.preventDefault();
+                    bulkSetPriority(getPriorityValue("low"));
+                  }}
+                  className={priorityColors.low.text}
+                >
+                  {priorityColors.low.icon}
+                  Low
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.preventDefault();
+                bulkDelete();
+              }}
+              className="text-destructive"
+            >
+              <TrashIcon /> Delete selected
+            </DropdownMenuItem>
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>

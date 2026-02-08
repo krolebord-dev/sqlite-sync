@@ -61,6 +61,44 @@ export const toggleItemSelectionAtom = atom(null, (get, set, itemId: string) => 
   }
 });
 
+export const bulkDeleteAtom = atom(null, (get, set) => {
+  const db = get(dbAtom);
+  const selectedIds = get(selectedItemsAtom);
+  db.db.executeTransaction((db) => {
+    for (const itemId of selectedIds) {
+      db.executeKysely((db) => db.deleteFrom("item").where("id", "=", itemId));
+    }
+  });
+  set(selectedItemsAtom, []);
+});
+
+export const bulkMarkWatchedAtom = atom(null, (get, set, watched: boolean) => {
+  const db = get(dbAtom);
+  const selectedIds = get(selectedItemsAtom);
+  db.db.executeTransaction((db) => {
+    for (const itemId of selectedIds) {
+      db.executeKysely((db) =>
+        db
+          .updateTable("item")
+          .set({ watchedAt: watched ? Date.now() : null })
+          .where("id", "=", itemId),
+      );
+    }
+  });
+  set(selectedItemsAtom, []);
+});
+
+export const bulkSetPriorityAtom = atom(null, (get, set, priority: number) => {
+  const db = get(dbAtom);
+  const selectedIds = get(selectedItemsAtom);
+  db.db.executeTransaction((db) => {
+    for (const itemId of selectedIds) {
+      db.executeKysely((db) => db.updateTable("item").set({ priority }).where("id", "=", itemId));
+    }
+  });
+  set(selectedItemsAtom, []);
+});
+
 export type WatchProviderInfo = {
   providerId: number;
   providerName: string;
