@@ -252,7 +252,7 @@ function SearchRefinements({
 
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-muted/50 p-4">
-      <span className="text-muted-foreground text-sm font-medium">Try a different direction</span>
+      <span className="font-medium text-muted-foreground text-sm">Try a different direction</span>
       <div className="flex flex-wrap gap-2">
         {refinements.map((ref) => (
           <Button key={ref.label} variant="outline" size="sm" onClick={() => onSelect(ref.prompt)} disabled={isLoading}>

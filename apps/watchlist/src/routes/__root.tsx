@@ -15,7 +15,7 @@ function NotFound() {
   return (
     <div className="flex min-h-screen items-center justify-center">
       <div className="text-center">
-        <h1 className="text-6xl font-bold">404</h1>
+        <h1 className="font-bold text-6xl">404</h1>
         <p className="mt-2 text-muted-foreground">Page not found</p>
         <Button asChild className="mt-6">
           <Link to="/">Go home</Link>
@@ -29,7 +29,7 @@ function ErrorPage({ error, reset }: ErrorComponentProps) {
   return (
     <div className="flex min-h-screen items-center justify-center">
       <div className="text-center">
-        <h1 className="text-3xl font-bold">Something went wrong</h1>
+        <h1 className="font-bold text-3xl">Something went wrong</h1>
         <p className="mt-2 text-muted-foreground">{error.message}</p>
         <div className="mt-6 flex justify-center gap-2">
           <Button onClick={reset} className="flex-1">
