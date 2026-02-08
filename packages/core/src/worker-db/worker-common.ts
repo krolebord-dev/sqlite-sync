@@ -63,6 +63,12 @@ export type WorkerResponseMessage<TMethod extends WorkerRequestMethod = WorkerRe
   data: ReturnType<WorkerRpc[TMethod]>;
 };
 
+export type WorkerErrorResponseMessage = {
+  type: "error-response";
+  requestId: string;
+  error: string;
+};
+
 export type AsyncRpc<T> = {
   [K in keyof T]: T[K] extends (...args: infer U) => infer V ? (...args: U) => Promise<Awaited<V>> : never;
 };
@@ -74,7 +80,7 @@ export const broadcastChannelNames = {
 
 export type WorkerBroadcastChannels = {
   requests: TypedBroadcastChannel<WorkerRequestMessage>;
-  responses: TypedBroadcastChannel<WorkerResponseMessage | WorkerNotificationMessage>;
+  responses: TypedBroadcastChannel<WorkerResponseMessage | WorkerErrorResponseMessage | WorkerNotificationMessage>;
 };
 
 export const createBroadcastChannels = (prefix: string): WorkerBroadcastChannels => {
@@ -108,6 +114,10 @@ export function isWorkerResponseMessage(message: unknown): message is WorkerResp
   return (
     typeof message === "object" && message !== null && "type" in message && "requestId" in message && "data" in message
   );
+}
+
+export function isWorkerErrorResponseMessage(message: unknown): message is WorkerErrorResponseMessage {
+  return typeof message === "object" && message !== null && "type" in message && message.type === "error-response";
 }
 
 export function isWorkerNotificationMessage(message: unknown): message is WorkerNotificationMessage {

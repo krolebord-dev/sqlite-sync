@@ -24,6 +24,7 @@ import {
   isWorkerRequestMessage,
   syncDbWorkerLockName,
   type WorkerConfig,
+  type WorkerErrorResponseMessage,
   type WorkerResponseMessage,
   type WorkerRpc,
 } from "./worker-common";
@@ -188,25 +189,40 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return;
     }
 
-    const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
-    const data = method.apply(null, message.args as []);
+    const sendError = (error: unknown) => {
+      const response: WorkerErrorResponseMessage = {
+        type: "error-response",
+        requestId: message.requestId,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      broadcastChannels.responses.postMessage(response);
+    };
 
-    if (data instanceof Promise) {
-      data.then((result) => {
+    try {
+      const method = rpcTarget[message.method] as () => ReturnType<WorkerRpc[keyof WorkerRpc]>;
+      const data = method.apply(null, message.args as []);
+
+      if (data instanceof Promise) {
+        data
+          .then((result) => {
+            const response: WorkerResponseMessage = {
+              type: "response",
+              requestId: message.requestId,
+              data: result,
+            };
+            broadcastChannels.responses.postMessage(response);
+          })
+          .catch(sendError);
+      } else {
         const response: WorkerResponseMessage = {
           type: "response",
           requestId: message.requestId,
-          data: result,
+          data,
         };
         broadcastChannels.responses.postMessage(response);
-      });
-    } else {
-      const response: WorkerResponseMessage = {
-        type: "response",
-        requestId: message.requestId,
-        data,
-      };
-      broadcastChannels.responses.postMessage(response);
+      }
+    } catch (error) {
+      sendError(error);
     }
   };
 

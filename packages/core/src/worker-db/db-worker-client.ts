@@ -9,6 +9,7 @@ import type {
   AsyncRpc,
   WorkerBroadcastChannels,
   WorkerConfig,
+  WorkerErrorResponseMessage,
   WorkerInitMessage,
   WorkerNotificationMessage,
   WorkerRequestMessage,
@@ -17,7 +18,7 @@ import type {
   WorkerRpc,
   WorkerState,
 } from "./worker-common";
-import { isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
+import { isWorkerErrorResponseMessage, isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
 
 type NotificationEvents = {
   [K in WorkerNotificationMessage["notificationType"]]: Extract<WorkerNotificationMessage, { notificationType: K }>;
@@ -39,7 +40,6 @@ export const createWorkerDbClient = async ({
     method: TMethod,
     args: Parameters<WorkerRpc[TMethod]>,
   ): Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>> => {
-    // TODO Add timeout
     const requestId = crypto.randomUUID();
     const promise = createDeferredPromise<unknown>();
     workerRequestsMap.set(requestId, promise);
@@ -66,11 +66,23 @@ export const createWorkerDbClient = async ({
     workerRequestsMap.delete(message.requestId);
   };
 
+  const handleWorkerError = (message: WorkerErrorResponseMessage) => {
+    const promise = workerRequestsMap.get(message.requestId);
+    if (!promise) {
+      return;
+    }
+
+    promise.reject(new Error(message.error));
+    workerRequestsMap.delete(message.requestId);
+  };
+
   broadcastChannels.responses.onmessage = (event) => {
     const message = event.data;
 
     if (isWorkerResponseMessage(message)) {
       handleWorkerResponse(message);
+    } else if (isWorkerErrorResponseMessage(message)) {
+      handleWorkerError(message);
     } else if (isWorkerNotificationMessage(message)) {
       eventTarget.dispatchEvent(message.notificationType, message);
     }
