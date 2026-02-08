@@ -48,7 +48,7 @@ export function ProjectSelector({ showCreate = true, compact = false, className 
           className,
         )}
       >
-        {selectedList?.name || "Available lists..."}
+        <span className="truncate">{selectedList?.name || "Available lists..."}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56">
         {lists.data?.map((list) => (

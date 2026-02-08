@@ -228,12 +228,12 @@ function SortingHeader({ className }: { className?: string }) {
   const { sortBy, sortOrder } = useSearch({ from: "/_app/list/$id/" });
 
   return (
-    <div className={cn("flex items-center gap-1", className)}>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-1", className)}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="outline">
             {sortByIcon[sortBy]}
-            <span>{sortByLabel[sortBy]}</span>
+            <span className="max-sm:hidden">{sortByLabel[sortBy]}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
