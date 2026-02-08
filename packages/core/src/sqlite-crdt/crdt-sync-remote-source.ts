@@ -97,8 +97,8 @@ export const createCrdtSyncRemoteSource = ({
 
       const factoryResult = await tryCatchAsync(async () => {
         return await remoteFactory?.({
-          onEventsAvailable: () => {
-            pullEvents({ includeSelf: false });
+          onEventsAvailable: (newSyncId) => {
+            pullEvents({ remoteSyncId: newSyncId, includeSelf: false });
           },
         });
       });
@@ -163,22 +163,26 @@ export const createCrdtSyncRemoteSource = ({
 
   let requestedPullSyncId: number | null = null;
   let pullPromise: Promise<void> | null = null;
-  const pullEvents = (request?: { afterSyncId?: number; includeSelf?: boolean }) => {
+  const pullEvents = (request?: { remoteSyncId?: number; includeSelf?: boolean }) => {
     if (remoteState.type !== "online") {
       return Promise.resolve();
     }
 
-    const afterSyncId = request?.afterSyncId ?? pullSyncId.current;
+    const remoteSyncId = request?.remoteSyncId;
+
+    if (remoteSyncId !== undefined && remoteSyncId <= pullSyncId.current) {
+      return Promise.resolve();
+    }
 
     if (pullPromise) {
-      if (!requestedPullSyncId || requestedPullSyncId < afterSyncId) {
-        requestedPullSyncId = afterSyncId;
+      if (remoteSyncId !== undefined && (!requestedPullSyncId || requestedPullSyncId < remoteSyncId)) {
+        requestedPullSyncId = remoteSyncId;
       }
       return pullPromise;
     }
 
     pullPromise = pullAllEvents({
-      afterSyncId,
+      afterSyncId: pullSyncId.current,
       excludeNodeId: request?.includeSelf ? undefined : nodeId,
     })
       .catch((error) => {
@@ -188,9 +192,11 @@ export const createCrdtSyncRemoteSource = ({
       .finally(() => {
         pullPromise = null;
 
-        if (requestedPullSyncId && requestedPullSyncId > pullSyncId.current) {
-          pullEvents({ afterSyncId: requestedPullSyncId });
-          requestedPullSyncId = null;
+        const nextTarget = requestedPullSyncId;
+        requestedPullSyncId = null;
+
+        if (nextTarget && nextTarget > pullSyncId.current) {
+          pullEvents({ remoteSyncId: nextTarget });
         }
       });
     return pullPromise;
