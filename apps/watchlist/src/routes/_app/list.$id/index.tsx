@@ -25,6 +25,7 @@ import {
   TrendingUpIcon,
   Wifi,
   WifiOff,
+  XIcon,
 } from "lucide-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
@@ -85,13 +86,13 @@ function ListPage() {
   return (
     <>
       <AppHeader>
-        <div className="flex items-center gap-2">
-          <ProjectSelector />
+        <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+          <ProjectSelector compact />
           <RecommendationsDialog />
           <TrendingLink />
           <ListSettings />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           <OnlineStatusIndicator />
           <UserAvatarDropdown />
         </div>
@@ -365,12 +366,26 @@ function SearchInput({ className }: { className?: string }) {
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
 
   return (
-    <Input
-      placeholder="Search..."
-      className={className}
-      value={searchQuery}
-      onChange={(e) => setSearchQuery(e.target.value)}
-    />
+    <div className={cn("relative", className)}>
+      <Input
+        placeholder="Search..."
+        className="pr-9"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
+      {searchQuery.length > 0 && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute top-1/2 right-1 size-7 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+          onClick={() => setSearchQuery("")}
+        >
+          <XIcon className="size-4" />
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -658,9 +673,9 @@ function TrendingLink() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-10 rounded-full" asChild>
+        <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10" asChild>
           <Link to="/list/$id/trending" params={(prev) => ({ id: prev.id! })}>
-            <TrendingUpIcon className="size-6! text-gray-400" />
+            <TrendingUpIcon className="size-4 text-gray-400 sm:size-6" />
           </Link>
         </Button>
       </TooltipTrigger>
@@ -672,8 +687,8 @@ function TrendingLink() {
 function ListSettings() {
   return (
     <ListSettingsSheet asChild>
-      <Button variant="ghost" size="icon" className="size-10 rounded-full">
-        <SettingsIcon className="size-6! text-gray-400" />
+      <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10">
+        <SettingsIcon className="size-4 text-gray-400 sm:size-6" />
       </Button>
     </ListSettingsSheet>
   );

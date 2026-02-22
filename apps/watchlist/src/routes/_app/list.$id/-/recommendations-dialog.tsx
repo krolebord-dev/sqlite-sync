@@ -33,8 +33,8 @@ export function RecommendationsDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-10 rounded-full">
-          <SparklesIcon className="size-6! text-gray-400" />
+        <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10">
+          <SparklesIcon className="size-4 text-gray-400 sm:size-6" />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">

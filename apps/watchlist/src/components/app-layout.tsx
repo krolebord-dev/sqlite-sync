@@ -30,8 +30,10 @@ export function AppHeader({ children, className }: AppHeaderProps) {
 
 type ProjectSelectorProps = {
   showCreate?: boolean;
+  compact?: boolean;
+  className?: string;
 };
-export function ProjectSelector({ showCreate = true }: ProjectSelectorProps) {
+export function ProjectSelector({ showCreate = true, compact = false, className }: ProjectSelectorProps) {
   const lists = useSuspenseQuery(orpc.list.getLists.queryOptions());
 
   const selectedList = useActiveList();
@@ -40,7 +42,11 @@ export function ProjectSelector({ showCreate = true }: ProjectSelectorProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         disabled={lists.isLoading || lists.isError || lists.data?.length === 0}
-        className="flex h-10 w-56 items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-start text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1"
+        className={cn(
+          "flex h-10 w-56 items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-start text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+          compact && "h-9 w-auto min-w-0 max-w-[36vw] sm:h-10 sm:w-56 sm:max-w-none",
+          className,
+        )}
       >
         {selectedList?.name || "Available lists..."}
       </DropdownMenuTrigger>
