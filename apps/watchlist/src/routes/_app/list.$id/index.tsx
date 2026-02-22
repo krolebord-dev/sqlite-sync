@@ -25,6 +25,7 @@ import {
   TrendingUpIcon,
   Wifi,
   WifiOff,
+  XIcon,
 } from "lucide-react";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
@@ -365,12 +366,26 @@ function SearchInput({ className }: { className?: string }) {
   const [searchQuery, setSearchQuery] = useAtom(searchQueryAtom);
 
   return (
-    <Input
-      placeholder="Search..."
-      className={className}
-      value={searchQuery}
-      onChange={(e) => setSearchQuery(e.target.value)}
-    />
+    <div className={cn("relative", className)}>
+      <Input
+        placeholder="Search..."
+        className="pr-9"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+      />
+      {searchQuery.length > 0 && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute top-1/2 right-1 size-7 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          aria-label="Clear search"
+          onClick={() => setSearchQuery("")}
+        >
+          <XIcon className="size-4" />
+        </Button>
+      )}
+    </div>
   );
 }
 
