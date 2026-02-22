@@ -63,7 +63,13 @@ export const ListItemCard = memo(({ item }: { item: ListItem }) => {
   );
 });
 
-export const ListItemCardDisplay = ({ item, disableContextMenu = false }: { item: ListItem; disableContextMenu?: boolean }) => {
+export const ListItemCardDisplay = ({
+  item,
+  disableContextMenu = false,
+}: {
+  item: ListItem;
+  disableContextMenu?: boolean;
+}) => {
   const isWatched = !!item.watchedAt;
   const isSelected = useIsItemSelected(item.id);
   const isRandomizedItem = useIsRandomizedItem(item.id);
