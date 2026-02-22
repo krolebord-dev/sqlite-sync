@@ -48,7 +48,7 @@ function TrendingPage() {
     <>
       <AppHeader>
         <div className="flex items-center gap-2">
-          <ProjectSelector />
+          <ProjectSelector compact />
           <Button variant="ghost" size="icon" asChild>
             <Link to="/list/$id" params={(prev) => ({ id: prev.id! })}>
               <ArrowLeftIcon className="size-4" />

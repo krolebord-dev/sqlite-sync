@@ -85,13 +85,13 @@ function ListPage() {
   return (
     <>
       <AppHeader>
-        <div className="flex items-center gap-2">
-          <ProjectSelector />
+        <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+          <ProjectSelector compact />
           <RecommendationsDialog />
           <TrendingLink />
           <ListSettings />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           <OnlineStatusIndicator />
           <UserAvatarDropdown />
         </div>
@@ -658,9 +658,9 @@ function TrendingLink() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-10 rounded-full" asChild>
+        <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10" asChild>
           <Link to="/list/$id/trending" params={(prev) => ({ id: prev.id! })}>
-            <TrendingUpIcon className="size-6! text-gray-400" />
+            <TrendingUpIcon className="size-4 text-gray-400 sm:size-6" />
           </Link>
         </Button>
       </TooltipTrigger>
@@ -672,8 +672,8 @@ function TrendingLink() {
 function ListSettings() {
   return (
     <ListSettingsSheet asChild>
-      <Button variant="ghost" size="icon" className="size-10 rounded-full">
-        <SettingsIcon className="size-6! text-gray-400" />
+      <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10">
+        <SettingsIcon className="size-4 text-gray-400 sm:size-6" />
       </Button>
     </ListSettingsSheet>
   );
