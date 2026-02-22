@@ -24,7 +24,7 @@ import {
   TrashIcon,
   TvIcon,
 } from "lucide-react";
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -54,15 +54,16 @@ import {
 } from "./list-atoms";
 
 export const ListItemCard = memo(({ item }: { item: ListItem }) => {
+  const isTouchDevice = useIsTouchDevice();
   return (
     <ContextMenu>
-      <ListItemCardDisplay item={item} />
-      <ListItemMenuContent type="context-menu" item={item} />
+      <ListItemCardDisplay item={item} disableContextMenu={isTouchDevice} />
+      {!isTouchDevice && <ListItemMenuContent type="context-menu" item={item} />}
     </ContextMenu>
   );
 });
 
-export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
+export const ListItemCardDisplay = ({ item, disableContextMenu = false }: { item: ListItem; disableContextMenu?: boolean }) => {
   const isWatched = !!item.watchedAt;
   const isSelected = useIsItemSelected(item.id);
   const isRandomizedItem = useIsRandomizedItem(item.id);
@@ -85,6 +86,7 @@ export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
 
   return (
     <ContextMenuTrigger
+      disabled={disableContextMenu}
       className={cn(
         "group relative grid w-full grid-cols-3 items-stretch overflow-hidden rounded-md border border-border bg-card shadow-xs",
         isRandomizedItem && "border-primary",
@@ -203,6 +205,28 @@ export const ListItemCardDisplay = ({ item }: { item: ListItem }) => {
     </ContextMenuTrigger>
   );
 };
+
+function useIsTouchDevice() {
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mediaQuery = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const update = () => setIsTouchDevice(mediaQuery.matches);
+    update();
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    mediaQuery.addListener(update);
+    return () => mediaQuery.removeListener(update);
+  }, []);
+
+  return isTouchDevice;
+}
 
 type ListItemMenuContentProps = {
   type: DynamicMenuContentType;
