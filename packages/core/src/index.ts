@@ -1,6 +1,5 @@
 // Main exports
 
-export { BoundMap } from "./bound-map";
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
 // HLC (Hybrid Logical Clock)
@@ -15,10 +14,8 @@ export {
 export { type DatabaseIntrospection, introspectDb, type TableMetadata } from "./introspection";
 // Logger
 export { type Logger, type LogLevel, startPerformanceLogger } from "./logger";
-export { createMemoryDb } from "./memory-db/memory-db";
 // Memory DB
 export {
-  createSQLiteReactiveDb,
   SQLiteReactiveDb,
 } from "./memory-db/sqlite-reactive-db";
 // Migrations
@@ -79,13 +76,10 @@ export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "
 export { createSyncedDb, type SyncedDb } from "./sync-db";
 // Utilities
 export {
-  createAsyncAutoFlushBuffer,
-  createAutoFlushBuffer,
   createDeferredPromise,
   createTypedEventTarget,
   type DeferredPromise,
   type DistributiveOmit,
-  ensureSingletonExecution,
   generateId,
   jsonSafeParse,
   TypedBroadcastChannel,
@@ -94,25 +88,8 @@ export {
   tryCatch,
   tryCatchAsync,
 } from "./utils";
-// Worker DB Client
-export { createWorkerDbClient } from "./worker-db/db-worker-client";
+// Worker DB
 export {
-  type AsyncRpc,
-  broadcastChannelNames,
-  createBroadcastChannels,
-  type GetSnapshotResponse,
-  isWorkerInitMessage,
-  isWorkerNotificationMessage,
-  isWorkerRequestMessage,
-  isWorkerResponseMessage,
-  syncDbWorkerLockName,
-  type WorkerBroadcastChannels,
   type WorkerConfig,
-  type WorkerInitMessage,
-  type WorkerNotificationMessage,
-  type WorkerRequestMessage,
-  type WorkerRequestMethod,
-  type WorkerResponseMessage,
-  type WorkerRpc,
   type WorkerState,
 } from "./worker-db/worker-common";
