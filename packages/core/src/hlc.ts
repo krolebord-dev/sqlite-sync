@@ -55,12 +55,23 @@ export function serializeHLC(hlc: HLC) {
   return `${hlc.timestamp.toString().padStart(15, "0")}:${hlc.counter.toString(36).padStart(5, "0")}:${hlc.nodeId}`;
 }
 
-export function deserializeHLC(serialized: string) {
-  const [ts, count, ...node] = serialized.split(":");
+export function deserializeHLC(serialized: string): HLC {
+  const parts = serialized.split(":");
+  if (parts.length < 3) {
+    throw new Error(`Invalid HLC format: expected at least 3 colon-separated segments, got ${parts.length}`);
+  }
+
+  const timestamp = parseInt(parts[0], 10);
+  const counter = parseInt(parts[1], 36);
+
+  if (Number.isNaN(timestamp) || Number.isNaN(counter)) {
+    throw new Error(`Invalid HLC values: timestamp=${parts[0]}, counter=${parts[1]}`);
+  }
+
   return {
-    timestamp: parseInt(ts, 10),
-    counter: parseInt(count, 36),
-    nodeId: node.join(":"),
+    timestamp,
+    counter,
+    nodeId: parts.slice(2).join(":"),
   };
 }
 
