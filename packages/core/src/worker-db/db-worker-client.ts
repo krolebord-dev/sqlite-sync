@@ -41,7 +41,10 @@ export const createWorkerDbClient = async ({
     args: Parameters<WorkerRpc[TMethod]>,
   ): Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>> => {
     const requestId = crypto.randomUUID();
-    const promise = createDeferredPromise<unknown>();
+    const promise = createDeferredPromise<unknown>({
+      timeout: 30_000,
+      onTimeout: () => workerRequestsMap.delete(requestId),
+    });
     workerRequestsMap.set(requestId, promise);
 
     const request: WorkerRequestMessage<TMethod> = {
@@ -117,7 +120,7 @@ export const createWorkerDbClient = async ({
 };
 
 function awaitWorkerState(eventTarget: TypedEventTarget<NotificationEvents>) {
-  const promise = createDeferredPromise<WorkerState>();
+  const promise = createDeferredPromise<WorkerState>({ timeout: 15_000 });
 
   const onStateChanged = (
     event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "state-changed" }>>,
