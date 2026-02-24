@@ -287,6 +287,15 @@ export class SQLiteReactiveDb<Database> {
     this.db.useSnapshot(snapshot);
     this.notifyTableSubscribers();
   }
+
+  dispose() {
+    this.liveQueryStatements.clear();
+    if (this.tablesUsedStatement) {
+      this.tablesUsedStatement.finalize();
+      this.tablesUsedStatement = null;
+    }
+    this.db.close();
+  }
 }
 
 function createDebouncedCallback<TArgs extends unknown[]>(callback: (...args: TArgs) => void, delay: number) {

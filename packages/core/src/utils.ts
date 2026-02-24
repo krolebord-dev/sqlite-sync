@@ -121,8 +121,12 @@ export class TypedBroadcastChannel<TMessage> {
     this.channel.postMessage(message);
   }
 
-  set onmessage(callback: (event: MessageEvent<TMessage>) => void) {
+  set onmessage(callback: ((event: MessageEvent<TMessage>) => void) | null) {
     this.channel.onmessage = callback;
+  }
+
+  close() {
+    this.channel.close();
   }
 }
 

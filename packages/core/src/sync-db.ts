@@ -7,9 +7,13 @@ import type { SyncDbMigrator } from "./migrations/migrator";
 import type { SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
-import { generateId, type TypedEvent } from "./utils";
+import { createDeferredPromise, generateId, type TypedEvent } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
-import { createBroadcastChannels, type WorkerNotificationMessage } from "./worker-db/worker-common";
+import {
+  createBroadcastChannels,
+  syncDbClientLockName,
+  type WorkerNotificationMessage,
+} from "./worker-db/worker-common";
 
 type SyncedDbOptions<Database, Props = undefined> = {
   dbId: string;
@@ -45,6 +49,14 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
   const tabId = generateId();
 
   const broadcastChannels = createBroadcastChannels(options.dbId);
+
+  const clientLockAcquired = createDeferredPromise<void>();
+  const clientLockRelease = createDeferredPromise<void>();
+  navigator.locks.request(`${syncDbClientLockName}-${options.dbId}`, { mode: "shared" }, () => {
+    clientLockAcquired.resolve();
+    return clientLockRelease.promise;
+  });
+  await clientLockAcquired.promise;
 
   const workerClient = await createWorkerDbClient({
     worker: options.worker,
@@ -120,10 +132,24 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 
+  let isDisposed = false;
+  const dispose = async () => {
+    if (isDisposed) return;
+    isDisposed = true;
+
+    clientLockRelease.resolve();
+    await tabRemoteSource.dispose();
+    broadcastChannels.requests.close();
+    broadcastChannels.responses.close();
+    workerClient.dispose();
+    reactiveDb.dispose();
+  };
+
   return {
     db: reactiveDb.db,
     reactiveDb: reactiveDb as Omit<SQLiteReactiveDb<Database>, "db">,
     workerDb: workerClient,
+    dispose,
   };
 }
 

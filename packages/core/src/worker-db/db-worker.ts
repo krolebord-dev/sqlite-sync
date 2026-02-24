@@ -22,6 +22,7 @@ import {
   createBroadcastChannels,
   isWorkerInitMessage,
   isWorkerRequestMessage,
+  syncDbClientLockName,
   syncDbWorkerLockName,
   type WorkerConfig,
   type WorkerErrorResponseMessage,
@@ -227,6 +228,13 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   };
 
   rpcTarget.postState();
+
+  return async () => {
+    await remoteSource.dispose();
+    broadcastChannels.requests.close();
+    broadcastChannels.responses.close();
+    db.close();
+  };
 }
 
 type InitRemoteOptions = {
@@ -286,12 +294,24 @@ export async function startDbWorker(opts: WorkerOptions) {
       return;
     }
 
-    await createDbWorker(config, opts);
+    const cleanup = await createDbWorker(config, opts);
 
-    await new Promise<void>(() => {});
+    const clientLockName = `${syncDbClientLockName}-${config.dbId}`;
+    await new Promise<void>((resolve) => {
+      const interval = setInterval(async () => {
+        const { held } = await navigator.locks.query();
+        const hasClients = held?.some((l) => l.name === clientLockName && l.mode === "shared");
+        if (!hasClients) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 5_000);
+    });
+
+    await cleanup();
   });
 
-  console.error("Failed to acquire lock");
+  self.close();
 }
 
 function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {

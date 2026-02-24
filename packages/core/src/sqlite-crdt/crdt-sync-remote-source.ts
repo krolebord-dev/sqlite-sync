@@ -298,17 +298,24 @@ export const createCrdtSyncRemoteSource = ({
     }
   });
 
-  storage.addEventListener("events-applied", () => {
+  const onEventsApplied = () => {
     startPushingEvents();
-  });
+  };
+  storage.addEventListener("events-applied", onEventsApplied);
 
   const getState = (): "pending" | "offline" | "online" => remoteState.type;
+
+  const dispose = async () => {
+    await goOffline("DISCONNECTED");
+    storage.removeEventListener("events-applied", onEventsApplied);
+  };
 
   return {
     goOnline,
     goOffline,
     syncWithRemote,
     getState,
+    dispose,
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
   };

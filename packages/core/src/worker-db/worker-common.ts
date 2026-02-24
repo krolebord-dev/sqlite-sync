@@ -4,6 +4,7 @@ import type { ExecuteParams, ExecuteResult } from "../sqlite-db-wrapper";
 import { TypedBroadcastChannel } from "../utils";
 
 export const syncDbWorkerLockName = "sync-db-worker-lock";
+export const syncDbClientLockName = "sync-db-client-lock";
 
 export type WorkerNotificationMessage =
   | {

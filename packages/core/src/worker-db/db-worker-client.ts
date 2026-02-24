@@ -35,11 +35,15 @@ export const createWorkerDbClient = async ({
 }) => {
   const eventTarget = createTypedEventTarget<NotificationEvents>();
   const workerRequestsMap = new Map<string, DeferredPromise<unknown>>();
+  let isDisposed = false;
 
   const queryWorker = <TMethod extends WorkerRequestMethod>(
     method: TMethod,
     args: Parameters<WorkerRpc[TMethod]>,
   ): Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>> => {
+    if (isDisposed) {
+      return Promise.reject(new Error("Worker client disposed"));
+    }
     const requestId = crypto.randomUUID();
     const promise = createDeferredPromise<unknown>({
       timeout: 30_000,
@@ -111,11 +115,21 @@ export const createWorkerDbClient = async ({
     workerState = event.payload.state;
   });
 
+  const dispose = () => {
+    isDisposed = true;
+    broadcastChannels.responses.onmessage = null;
+    for (const [id, deferred] of workerRequestsMap) {
+      deferred.reject(new Error("Worker client disposed"));
+      workerRequestsMap.delete(id);
+    }
+  };
+
   return {
     ...rpc,
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
     getState: () => workerState,
+    dispose,
   };
 };
 
