@@ -1,5 +1,6 @@
 import type { SQLiteReactiveDb } from "../memory-db/sqlite-reactive-db";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import { quoteId } from "../utils";
 import type { CrdtStorage } from "./crdt-storage";
 
 export function makeCrdtTable({
@@ -19,8 +20,8 @@ export function makeCrdtTable({
 
   db.execute(
     `
-create view ${crdtTableName} as
-select * from ${baseTableName}
+create view ${quoteId(crdtTableName)} as
+select * from ${quoteId(baseTableName)}
 where tombstone = 0;`,
     { loggerLevel: "system" },
   );
@@ -28,12 +29,12 @@ where tombstone = 0;`,
   const allColumnNames = tableSchema.columns.map((column) => column.name);
 
   const jsonPayload = (from: "new" | "old") =>
-    `'{'||${allColumnNames.map((col) => `'"${col}":'||json_quote(${from}.${col})`).join("||','||")}||'}'`;
+    `'{'||${allColumnNames.map((col) => `'"${col}":'||json_quote(${from}.${quoteId(col)})`).join("||','||")}||'}'`;
 
   db.execute(
     `
-create trigger ${crdtTableName}_created
-instead of insert on ${crdtTableName}
+create trigger ${quoteId(crdtTableName + "_created")}
+instead of insert on ${quoteId(crdtTableName)}
 for each row
 begin
 select handle_item_created('${baseTableName}', ${jsonPayload("new")});
@@ -44,8 +45,8 @@ end;
 
   db.execute(
     `
-create trigger ${crdtTableName}_updated
-instead of update on ${crdtTableName}
+create trigger ${quoteId(crdtTableName + "_updated")}
+instead of update on ${quoteId(crdtTableName)}
 for each row
 begin
 select handle_item_updated(
@@ -60,8 +61,8 @@ end;
 
   db.execute(
     `
-create trigger ${crdtTableName}_deleted
-instead of delete on ${crdtTableName}
+create trigger ${quoteId(crdtTableName + "_deleted")}
+instead of delete on ${quoteId(crdtTableName)}
 for each row
 when old.tombstone = 0
 begin

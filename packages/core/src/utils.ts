@@ -207,3 +207,11 @@ export async function tryCatchAsync<T>(fn: () => Promise<T>): Promise<TryCatchRe
 export function jsonSafeParse<T>(json: string) {
   return tryCatch(() => JSON.parse(json) as T);
 }
+
+/** Quote a SQLite identifier (table/column name), handling dot-separated schema qualifiers. */
+export function quoteId(name: string): string {
+  return name
+    .split(".")
+    .map((s) => `"${s.replace(/"/g, '""')}"`)
+    .join(".");
+}

@@ -1,5 +1,6 @@
 import type { Kysely } from "kysely";
 import type { SQLiteTransactionWrapper } from "../sqlite-db-wrapper";
+import { quoteId } from "../utils";
 import type { CrdtEventType, CrdtUpdateLogItem, CrdtUpdateLogPayload } from "./crdt-table-schema";
 
 export type PendingCrdtEvent = {
@@ -89,7 +90,7 @@ export const createSQLiteCrdtApplyFunction = ({
       const keys = Array.from(Object.keys(opts.payload));
       db.execute(
         {
-          sql: `update ${opts.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+          sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
           parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
         },
         { loggerLevel: "system" },
