@@ -75,23 +75,22 @@ Not an issue with the current CRDT design. Per-field LWW is working as intended 
 
 ---
 
-### 8. No dispose/cleanup mechanism for SyncedDb
+### ~~8. No dispose/cleanup mechanism for SyncedDb~~ ✅ RESOLVED
 
 **File:** `sync-db.ts`
 
-`createSyncedDb` returns an object with no `dispose()` method. BroadcastChannels, event listeners, and the Web Worker are never cleaned up. In SPAs with client-side routing, navigating away from a synced view leaks all these resources.
+**Fixed in:**
+- `4fcdbe1` — Added `dispose()` across all layers: `TypedBroadcastChannel.close()`, worker client dispose (rejects pending RPCs), `SQLiteReactiveDb.dispose()` (finalizes statements, closes WASM DB), `CrdtSyncRemoteSource.dispose()` (disconnects remote), and top-level `SyncedDb.dispose()` orchestrating teardown in order. Worker self-terminates via Web Locks: each SyncedDb holds a shared lock, worker polls `navigator.locks.query()` and gracefully shuts down when no clients remain.
 
 ---
 
-### 9. Missing primary key / unique constraint validation
+### 9. No unique constraint conflict resolution — KNOWN LIMITATION
 
 **File:** `apply-crdt-event.ts:192`
 
-```typescript
-// TODO Check primary key / unique constraints
-```
+Duplicate `id` creation is already handled: `applyItemCreated` checks the CRDT update log (`meta`) and falls through to LWW merge if the item exists. However, non-PK unique constraints (e.g., a `UNIQUE` column like `email`) have no conflict resolution. Two nodes can create items with different `id`s but the same unique column value, causing a SQLite constraint violation on replication. The CRDT layer only tracks conflicts by `(item_id, dataset)` and has no knowledge of table-level unique constraints.
 
-If two disconnected nodes independently create items with the same `id`, replication fails with a SQLite constraint violation error. No conflict resolution strategy exists for this scenario.
+This is a known architectural limitation of per-field LWW CRDTs. Mitigation: avoid unique constraints on CRDT tables and enforce uniqueness at the application layer instead.
 
 ---
 
@@ -110,11 +109,11 @@ These come from developer-controlled code (not user input), so injection risk is
 
 ---
 
-### 11. HLC counter overflow
+### ~~11. HLC counter overflow~~ ✅ RESOLVED
 
 **File:** `hlc.ts:38`
 
-Counter increments without bounds. Serialization uses 5-char base36 padding (`36^5 = 60,466,176`). Overflow would corrupt ordering and comparison. Practically unreachable — would require ~60M events in a single millisecond — but lacks a defensive check.
+**Fixed:** Added `MAX_COUNTER` constant (`36^5 - 1 = 60,466,175`) and overflow checks after every counter increment in both `getNextHLC()` and `mergeHLC()`. Overflow throws a descriptive error instead of silently corrupting serialized HLC ordering.
 
 ---
 
@@ -129,7 +128,7 @@ Counter increments without bounds. Serialization uses 5-char base36 padding (`36
 | 5  | ~~Statement cache finalizes active statements~~ | ❌ FALSE POSITIVE | Statements are re-prepared on cache miss |
 | 6  | ~~Tombstone + concurrent update semantics~~     | ❌ FALSE POSITIVE | Per-field LWW working as designed        |
 | 7  | ~~HLC deserialization no validation~~           | ✅ RESOLVED  | ~~Clock corruption from malformed input~~ |
-| 8  | No SyncedDb disposal                           | MEDIUM       | Memory leaks in SPAs                      |
-| 9  | No PK/unique constraint handling               | MEDIUM       | Replication failure on ID collision       |
+| 8  | ~~No SyncedDb disposal~~                       | ✅ RESOLVED  | ~~Memory leaks in SPAs~~                  |
+| 9  | No unique constraint conflict resolution        | KNOWN LIMITATION | Replication failure on non-PK unique collision |
 | 10 | Unquoted SQL identifiers                       | MEDIUM       | Fragile to special character names        |
-| 11 | HLC counter overflow                           | LOW          | Theoretical at extreme throughput         |
+| 11 | ~~HLC counter overflow~~                       | ✅ RESOLVED  | ~~Theoretical at extreme throughput~~     |

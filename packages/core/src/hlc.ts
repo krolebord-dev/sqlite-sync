@@ -4,6 +4,8 @@ export interface HLC {
   nodeId: string;
 }
 
+const MAX_COUNTER = 36 ** 5 - 1; // 60,466,175 — max value that fits in 5-char base36
+
 export class HLCCounter {
   private timestamp: number;
   private counter: number;
@@ -36,6 +38,9 @@ export class HLCCounter {
     }
 
     this.counter++;
+    if (this.counter > MAX_COUNTER) {
+      throw new Error(`HLC counter overflow: exceeded max value ${MAX_COUNTER}`);
+    }
     return this.getCurrentHLC();
   }
 
@@ -47,6 +52,9 @@ export class HLCCounter {
     } else {
       this.timestamp = hlc.timestamp;
       this.counter = hlc.counter + 1;
+    }
+    if (this.counter > MAX_COUNTER) {
+      throw new Error(`HLC counter overflow: exceeded max value ${MAX_COUNTER}`);
     }
   }
 }
