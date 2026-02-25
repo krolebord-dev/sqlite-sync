@@ -13,7 +13,6 @@ export class UserDbServer extends Server<Env> {
   onStart(): void | Promise<void> {
     const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
-      mode: "materialized",
       crdtEventsTable: "crdt_events",
       storage: this.ctx.storage,
       broadcastPayload: (payload) => {

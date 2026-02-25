@@ -16,7 +16,6 @@ export class EventLogServer extends Server<Env> {
       crdtEventsTable: "crdt_events",
       syncDbSchema,
       storage: this.ctx.storage,
-      mode: "event-log",
       broadcastPayload: (payload) => {
         this.broadcast(payload);
       },

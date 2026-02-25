@@ -38,6 +38,7 @@ export function buildPersistedCrdtEvents(count: number): PersistedCrdtEvent[] {
       item_id: itemId,
       payload: JSON.stringify({ id: itemId, value: id }),
       origin: "local",
+      source_node_id: "",
       timestamp: now,
     };
   });

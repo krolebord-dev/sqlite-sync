@@ -12,19 +12,9 @@
 
 ## High
 
-### 6. `excludeNodeId` filter is a no-op
+### ~~6. `excludeNodeId` filter is a no-op~~ ✅ Fixed
 
-`db-worker.ts:178`
-
-```ts
-pullEvents: (request) => {
-  return crdtStorage.getEventsBatch({
-    excludeOrigin: request.excludeNodeId, // tab UUID vs "local"/"own"/"remote"
-  });
-},
-```
-
-The tab passes its UUID as `excludeNodeId`, which is compared against the `origin` column (values: `"local"`, `"own"`, `"remote"`). It will never match, so the tab always re-pulls and re-applies its own events from the worker. The LWW logic prevents data corruption, but every event is processed twice — wasting bandwidth and potentially causing UI flicker in reactive queries.
+A new `source_node_id` column was added to CRDT events, tracked via system migrations (`ALTER TABLE ... ADD COLUMN`). Each node now stamps its identity on events it generates. The `excludeNodeId` filter queries `source_node_id` instead of `origin`, so tab UUIDs are correctly matched and filtered. The old `excludeOrigin` filter remains for filtering by origin category (e.g. excluding `"remote"` events when pushing to server).
 
 ### 8. No server-side event deduplication
 

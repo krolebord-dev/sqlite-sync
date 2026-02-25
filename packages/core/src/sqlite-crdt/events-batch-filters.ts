@@ -15,6 +15,9 @@ export function applyKyselyEventsBatchFilters(
   if (opts.excludeOrigin) {
     query = query.where("origin", "!=", opts.excludeOrigin);
   }
+  if (opts.excludeNodeId) {
+    query = query.where("source_node_id", "!=", opts.excludeNodeId);
+  }
 
   return query.limit(opts.limit ?? 50).orderBy("sync_id", "asc");
 }

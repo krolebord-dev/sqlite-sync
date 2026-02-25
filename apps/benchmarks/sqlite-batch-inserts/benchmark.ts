@@ -191,6 +191,7 @@ function runPreparedInsert(db: SQLiteDbWrapper<BenchmarkDbSchema>, events: Persi
           item_id: params("item_id"),
           payload: params("payload"),
           origin: params("origin"),
+          source_node_id: params("source_node_id"),
           timestamp: params("timestamp"),
         }),
       );

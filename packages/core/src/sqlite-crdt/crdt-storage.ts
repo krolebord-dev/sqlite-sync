@@ -37,6 +37,7 @@ export type GetEventsOptions = {
   afterSyncId?: number;
   status?: CrdtEventStatus;
   excludeOrigin?: string;
+  excludeNodeId?: string;
   limit?: number;
 };
 
@@ -58,6 +59,7 @@ export type EventUpdate = {
 type StorageHLC = Pick<HLCCounter, "getNextHLC" | "mergeHLC">;
 
 type DbSyncerStorage = {
+  nodeId: string;
   syncId: StoredValue<number>;
   migrator: SyncDbMigrator;
   persistEvent: (events: PersistedCrdtEvent) => void;
@@ -86,7 +88,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     "events-applied": EventsAppliedPayload;
   }>();
 
-  const enqueueEvents = (origin: CrdtEventOrigin, events: EnqueuedCrdtEvent[]) => {
+  const enqueueEvents = (origin: CrdtEventOrigin, sourceNodeId: string, events: EnqueuedCrdtEvent[]) => {
     if (events.length === 0) {
       return;
     }
@@ -100,6 +102,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           dataset: event.dataset,
           item_id: event.item_id,
           origin: origin,
+          source_node_id: sourceNodeId,
           payload: event.payload,
           sync_id: ++storage.syncId.current,
           status: "pending",
@@ -110,16 +113,16 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     processEnqueuedEvents();
   };
 
-  const enqueueLocalEvents = (events: LocalCrdtEvent[]) => {
-    enqueueEvents("local", events);
+  const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string) => {
+    enqueueEvents("local", sourceNodeId, events);
   };
 
   const enqueueOwnEvents = (events: OwnCrdtEvent[]) => {
-    enqueueEvents("own", events);
+    enqueueEvents("own", storage.nodeId, events);
   };
 
   const enqueueRemoteEvents = (events: RemoteCrdtEvent[]) => {
-    enqueueEvents("remote", events);
+    enqueueEvents("remote", "", events);
   };
 
   const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {
@@ -130,6 +133,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       dataset: event.dataset,
       item_id: event.item_id,
       origin: "own",
+      source_node_id: storage.nodeId,
       payload: event.payload,
       sync_id: ++storage.syncId.current,
       status: "pending",

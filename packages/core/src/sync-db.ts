@@ -92,6 +92,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     migrateEvents: (events) => events,
   };
   const { crdtStorage } = await createMemoryDb({
+    nodeId: tabId,
     migrator: memoryDbMigrator,
     reactiveDb: reactiveDb,
     hlcCounter,

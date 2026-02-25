@@ -100,6 +100,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const crdtStorage = createCrdtStorage({
+    nodeId: config.clientId,
     syncId: localSyncId,
     migrator,
     hlc: {
@@ -166,7 +167,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     postState,
     pushTabEvents: (request) => {
-      crdtStorage.enqueueLocalEvents(request.events);
+      crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
       return {
         ok: true,
       };
@@ -175,7 +176,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return crdtStorage.getEventsBatch({
         afterSyncId: request.afterSyncId,
         status: "applied",
-        excludeOrigin: request.excludeNodeId,
+        excludeNodeId: request.excludeNodeId,
         limit: 100,
       });
     },
@@ -339,6 +340,7 @@ function persistEvent(db: SQLiteDbWrapper<WorkerDbSchema>, event: PersistedCrdtE
         status: params("status"),
         timestamp: params("timestamp"),
         origin: params("origin"),
+        source_node_id: params("source_node_id"),
       }),
     { loggerLevel: "system" },
   );

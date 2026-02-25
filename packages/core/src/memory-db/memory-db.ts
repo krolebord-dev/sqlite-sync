@@ -12,6 +12,7 @@ import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
 type MemoryDbOptions<Database> = {
+  nodeId: string;
   migrator: SyncDbMigrator;
   reactiveDb: SQLiteReactiveDb<Database>;
   hlcCounter: HLCCounter;
@@ -19,6 +20,7 @@ type MemoryDbOptions<Database> = {
 };
 
 export async function createMemoryDb<Database>({
+  nodeId,
   migrator,
   reactiveDb: _reactiveDb,
   hlcCounter,
@@ -41,6 +43,7 @@ export async function createMemoryDb<Database>({
   });
 
   const crdtStorage = createCrdtStorage({
+    nodeId,
     syncId: localSyncId,
     hlc: hlcCounter,
     persistEvent: (event) => persistEvent(db, event),
@@ -79,6 +82,7 @@ function persistEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtE
         status: params("status"),
         timestamp: params("timestamp"),
         origin: params("origin"),
+        source_node_id: params("source_node_id"),
       }),
     { loggerLevel: "system" },
   );

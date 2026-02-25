@@ -2,13 +2,10 @@ import {
   createMigrator as createBaseMigrator,
   createStoredValue,
   type Migrations,
-  type StoredValue,
 } from "@sqlite-sync/core";
-import type { AdapterMode } from "./durable-object-adapter";
 import type { KyselyExecutor } from "./kysely-executor";
 
 export function createMigrator(
-  mode: AdapterMode,
   kv: SyncKvStorage,
   sqlExecutor: KyselyExecutor<any>,
   migrations: Migrations,
@@ -18,18 +15,9 @@ export function createMigrator(
     saveToStorage: (val) => kv.put("schema-version", val),
   });
 
-  const readonlySchemaVersion: StoredValue<number> = {
-    get current() {
-      return baseMigrator.latestSchemaVersion;
-    },
-    set current(_: number) {
-      throw new Error("Cannot set schema version in event-log mode");
-    },
-  };
-
   const baseMigrator = createBaseMigrator({
     migrations,
-    schemaVersion: mode === "materialized" ? schemaVersion : readonlySchemaVersion,
+    schemaVersion,
   });
 
   return {

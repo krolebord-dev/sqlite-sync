@@ -13,6 +13,7 @@ export type PersistedCrdtEvent = {
   type: CrdtEventType;
   timestamp: string;
   origin: CrdtEventOrigin;
+  source_node_id: string;
   dataset: string;
   item_id: string;
   payload: string;

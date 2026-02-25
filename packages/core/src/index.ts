@@ -25,7 +25,7 @@ export {
   type MigrationsDb,
   type SyncDbMigrator,
 } from "./migrations/migrator";
-export { applyMemoryDbSchema, applyWorkerDbSchema } from "./migrations/system-schema";
+export { applyMemoryDbSchema, applyWorkerDbSchema, runSystemMigrations } from "./migrations/system-schema";
 // CRDT
 export {
   createCrdtApplyFunction,
@@ -48,14 +48,13 @@ export {
   type EventsPushRequest,
   type EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";
-export {
-  type CrdtEventOrigin,
-  type CrdtEventStatus,
-  type CrdtEventType,
-  type CrdtUpdateLogItem,
-  type CrdtUpdateLogPayload,
-  crdtSchema,
-  type PersistedCrdtEvent,
+export type {
+  CrdtEventOrigin,
+  CrdtEventStatus,
+  CrdtEventType,
+  CrdtUpdateLogItem,
+  CrdtUpdateLogPayload,
+  PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
 export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
