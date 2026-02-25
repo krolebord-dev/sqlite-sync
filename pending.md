@@ -52,9 +52,9 @@ The HLC is now advanced (`mergeHLC`) even when an event is skipped due to a drop
 
 `migrator.ts:289` — Error message now correctly references `targetVersion` instead of `event.schema_version`, matching the condition being checked.
 
-### 27. `mapData` excluded from `useMemo` deps in React hook
+### ~~27. `mapData` excluded from `useMemo` deps in React hook~~ ✅ Fixed
 
-`packages/react/src/react.tsx:62-65` — Inline arrow functions as `mapData` produce stale closures.
+`packages/react/src/react.tsx:62-65` — Used a `useRef` to track the latest `mapData`, so the `useMemo` always calls the freshest transform without needing callers to stabilize the function reference.
 
 ### ~~28. `resolseQuery` typo~~ ✅ Fixed
 

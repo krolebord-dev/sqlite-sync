@@ -59,9 +59,11 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
 
     const data = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: mapData is a dependency of the mapped data
+    const mapDataRef = useRef(mapData);
+    mapDataRef.current = mapData;
+
     const mappedData = useMemo(() => {
-      return mapData ? mapData(data) : data;
+      return mapDataRef.current ? mapDataRef.current(data) : data;
     }, [data]) as TMapResult;
 
     return { data: mappedData, refresh: liveQuery.refresh };
