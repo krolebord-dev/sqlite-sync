@@ -6,11 +6,9 @@
 
 `mergeHLC` now checks incoming timestamps against `wallClock + maxDrift` (default 6 hours). Far-future timestamps are silently ignored with a `console.warn`, preventing clock poisoning while still applying the event data normally.
 
-### 4. Cloudflare adapter: unquoted SQL identifiers
+### ~~4. Cloudflare adapter: unquoted SQL identifiers~~ ✅ Fixed
 
-`durable-object-adapter.ts:138-143`
-
-`updateItem` interpolates column names and table names directly into SQL without `quoteId()`. The core package fixed this (`apply-crdt-event.ts:91-96`), but the Cloudflare adapter was never updated. Reserved words (`order`, `group`, `references`) as column names will break queries silently.
+`updateItem` in `durable-object-adapter.ts` now uses `quoteId()` for both table and column names, matching the core package fix. `quoteId` was also exported from `@sqlite-sync/core`'s public API.
 
 ## High
 
