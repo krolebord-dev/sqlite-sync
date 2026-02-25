@@ -56,6 +56,6 @@ The HLC is now advanced (`mergeHLC`) even when an event is skipped due to a drop
 
 `packages/react/src/react.tsx:62-65` — Inline arrow functions as `mapData` produce stale closures.
 
-### 28. `resolseQuery` typo
+### ~~28. `resolseQuery` typo~~ ✅ Fixed
 
-`packages/react/src/react.tsx:89` — Should be `resolveQuery`.
+`packages/react/src/react.tsx:89` — Renamed to `resolveQuery`.

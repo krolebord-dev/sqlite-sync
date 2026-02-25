@@ -33,7 +33,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
   ) => {
     const db = useDb();
 
-    const { sql, parameters } = resolseQuery(query);
+    const { sql, parameters } = resolveQuery(query);
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: initial parameters should only change when the query changes
     const liveQuery = useMemo(() => {
@@ -86,7 +86,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
   return { useDb, DbProvider, useDbQuery, useDbState };
 }
 
-function resolseQuery<Database, TResult>(query: DbQueryParams<Database, TResult>): ExecuteParams {
+function resolveQuery<Database, TResult>(query: DbQueryParams<Database, TResult>): ExecuteParams {
   if (typeof query === "function") {
     return query(dummyKysely).compile();
   } else if (typeof query === "object" && "compile" in query) {
