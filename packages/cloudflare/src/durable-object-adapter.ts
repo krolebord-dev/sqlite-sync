@@ -16,6 +16,7 @@ import {
   createTypedEventTarget,
   HLCCounter,
   jsonSafeParse,
+  quoteId,
   type PersistedCrdtEvent,
   type SyncDbSchema,
   type TypedEventTarget,
@@ -137,7 +138,7 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       updateItem(opts) {
         const keys = Array.from(Object.keys(opts.payload));
         sqlExecutor.execute({
-          sql: `update ${opts.dataset} set ${keys.map((key) => `${key} = ?`).join(",")} where id = ?`,
+          sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
           parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
         });
       },
