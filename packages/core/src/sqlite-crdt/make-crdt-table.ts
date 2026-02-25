@@ -18,6 +18,32 @@ export function makeCrdtTable({
     throw new Error(`Table ${baseTableName} not found`);
   }
 
+  const columns = new Map(tableSchema.columns.map((c) => [c.name, c]));
+
+  const idColumn = columns.get("id");
+  if (!idColumn) {
+    throw new Error(
+      `Table "${baseTableName}" is missing a required "id" column. CRDT tables must have an "id" column to identify items.`,
+    );
+  }
+  if (idColumn.dataType.toUpperCase() !== "TEXT") {
+    throw new Error(
+      `Table "${baseTableName}": "id" column must be of type TEXT, got "${idColumn.dataType}". CRDT item IDs are stored as strings.`,
+    );
+  }
+
+  const tombstoneColumn = columns.get("tombstone");
+  if (!tombstoneColumn) {
+    throw new Error(
+      `Table "${baseTableName}" is missing a required "tombstone" column. CRDT tables must have a "tombstone" INTEGER column for soft deletes.`,
+    );
+  }
+  if (tombstoneColumn.dataType.toUpperCase() !== "INTEGER") {
+    throw new Error(
+      `Table "${baseTableName}": "tombstone" column must be of type INTEGER, got "${tombstoneColumn.dataType}". It is compared as 0/1 for soft deletes.`,
+    );
+  }
+
   db.execute(
     `
 create view ${quoteId(crdtTableName)} as
