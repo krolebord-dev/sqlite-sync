@@ -175,6 +175,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     try {
+      // Always advance HLC, even for skipped events, to maintain monotonic ordering
+      if (event.origin === "local" || event.origin === "remote") {
+        storage.hlc.mergeHLC(deserializeHLC(event.timestamp));
+      }
+
       // Migrate event to latest schema version
       const migratedEvent = storage.migrator.migrateEvent(event, storage.migrator.latestSchemaVersion);
 
@@ -194,10 +199,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       storage.handleCrdtEventApply(event);
       event.status = "applied";
-
-      if (event.origin === "local" || event.origin === "remote") {
-        storage.hlc.mergeHLC(deserializeHLC(event.timestamp));
-      }
     } catch (error) {
       console.error("Error applying enqueued CRDT event", error);
       event.status = "failed";
