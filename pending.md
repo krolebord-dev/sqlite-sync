@@ -16,43 +16,27 @@
 
 A new `source_node_id` column was added to CRDT events, tracked via system migrations (`ALTER TABLE ... ADD COLUMN`). Each node now stamps its identity on events it generates. The `excludeNodeId` filter queries `source_node_id` instead of `origin`, so tab UUIDs are correctly matched and filtered. The old `excludeOrigin` filter remains for filtering by origin category (e.g. excluding `"remote"` events when pushing to server).
 
-### 8. No server-side event deduplication
+### ~~8. No server-side event deduplication~~ ✅ Fixed
 
-`durable-object-adapter.ts:300-313`
+A unique index on `(timestamp, source_node_id)` now prevents duplicate events at the database level. The Durable Object adapter uses `ON CONFLICT DO NOTHING` for idempotent inserts. A data migration (system migration version 2) cleans up any pre-existing duplicates. System migrations were made extensible so downstream packages can add their own.
 
-`enqueueLocalEvents` unconditionally inserts all received events. Client retries (3 attempts via `retryAsPromised`) duplicate events in the log. Each duplicate gets a new `sync_id` and is broadcast to all connected clients. The event log grows without bound with duplicates.
+### ~~9. Server HLC node ID hardcoded to `"root"`~~ ✅ Fixed
 
-### 9. Server HLC node ID hardcoded to `"root"`
+Each Durable Object now uses its own ID (`ctx.id.toString()`) as the HLC node ID, ensuring unique tiebreakers for LWW conflict resolution across different DO instances.
 
-`durable-object-adapter.ts:157`
+### ~~13. No validation that `tombstone`/`id` columns exist~~ ✅ Fixed
 
-All Durable Object instances use `nodeId = "root"`. For LWW conflict resolution, the node ID is the final tiebreaker. Two server shards processing events simultaneously for the same item at the same timestamp+counter cannot be distinguished, causing non-deterministic merge behavior.
-
-### 11. No worker crash detection or recovery
-
-`db-worker-client.ts:37-133`
-
-If the worker is killed (OOM, browser kill), there is no `worker.onerror` handler. All pending RPC calls hang for 30 seconds before timing out. The tab enters an unrecoverable state — no retry logic exists, and `createSyncedDb` must be called again externally.
-
-### 13. No validation that `tombstone`/`id` columns exist
-
-`make-crdt-table.ts:25,67`
-
-The CRDT view assumes `tombstone` and `id` columns exist. If a user defines a table without them, the view creation succeeds silently (SQLite doesn't validate views at creation), but queries fail at runtime. The delete trigger also assumes `old.id` — a missing `id` column produces `NULL` item IDs in CRDT events.
+`makeCrdtTable` now validates that `id` and `tombstone` columns are present in the schema at call time, throwing a descriptive error if either is missing. This prevents silent runtime failures from invalid CRDT table definitions.
 
 ## Medium
 
-### 16. React `useDbQuery` leaks old live query subscriptions
+### ~~16. React `useDbQuery` leaks old live query subscriptions~~ ✅ Not a bug
 
-`packages/react/src/react.tsx:39-44`
+Verified as invalid. `useSyncExternalStore` correctly handles subscription cleanup via the unsubscribe function returned by `subscribe()`. After unsubscribe, `subscriber` is set to `null`, so even if a debounced callback fires late, `subscriber?.()` is a no-op. The `liveQueryStatements` BoundMap is an intentional bounded LRU cache (max 100 entries) with `finalize()` on eviction — by design, not a leak.
 
-When `sql` changes, `useMemo` creates a new `liveQuery` without disposing the old one. While React's `useSyncExternalStore` cleanup handles unsubscription, there's a TOCTOU window where the old subscription fires `onDataChange` against a stale React callback. The `liveQueryStatements` BoundMap also retains old prepared statements until evicted at 100 entries.
+### ~~19. Skipped events don't advance HLC~~ ✅ Fixed
 
-### 19. Skipped events don't advance HLC
-
-`crdt-storage.ts:177-182`
-
-When an event is skipped (table dropped by migration), the function returns early before `storage.hlc.mergeHLC`. If the skipped event's timestamp is ahead of local clock, the local HLC won't advance, potentially causing future timestamps to appear before the skipped event's timestamp in LWW comparisons.
+The HLC is now advanced (`mergeHLC`) even when an event is skipped due to a dropped table, preventing timestamp regression in subsequent LWW comparisons.
 
 ## Low
 
