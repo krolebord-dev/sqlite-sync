@@ -15,6 +15,7 @@ export class EventLogServer extends Server<Env> {
       batchSize: 100,
       crdtEventsTable: "crdt_events",
       syncDbSchema,
+      nodeId: this.ctx.id.toString(),
       storage: this.ctx.storage,
       broadcastPayload: (payload) => {
         this.broadcast(payload);

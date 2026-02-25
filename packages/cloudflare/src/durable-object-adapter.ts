@@ -64,12 +64,14 @@ export type ServerSyncDb<Schema extends SyncDbSchema> = Pick<
 function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   storage,
   syncDbSchema,
+  nodeId,
   crdtEventsTable = "crdt_events",
   batchSize = 50,
   broadcastPayload,
 }: {
   storage: DurableObjectStorage;
   syncDbSchema: Schema;
+  nodeId: string;
   crdtEventsTable: string;
   batchSize?: number;
   broadcastPayload: (payload: string) => void;
@@ -151,10 +153,11 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     });
   };
 
-  const hlc = new HLCCounter("root", () => Date.now());
+  const truncatedNodeId = nodeId.slice(0, 12);
+  const hlc = new HLCCounter(truncatedNodeId, () => Date.now());
 
   const crdtStorage = createCrdtStorage({
-    nodeId: "root",
+    nodeId: truncatedNodeId,
     syncId,
     hlc,
     migrator: migrator,

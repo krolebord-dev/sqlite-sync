@@ -14,6 +14,7 @@ export class UserDbServer extends Server<Env> {
     const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
       crdtEventsTable: "crdt_events",
+      nodeId: this.ctx.id.toString(),
       storage: this.ctx.storage,
       broadcastPayload: (payload) => {
         this.broadcast(payload);

@@ -21,6 +21,7 @@ export class ListDbServer extends Server<Env> {
     const { syncDb, remoteHandler } = durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
       crdtEventsTable: "crdt_events",
+      nodeId: this.ctx.id.toString(),
       storage: this.ctx.storage,
       broadcastPayload: (payload) => {
         this.broadcast(payload);
