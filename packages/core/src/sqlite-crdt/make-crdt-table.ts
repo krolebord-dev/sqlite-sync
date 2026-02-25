@@ -38,9 +38,10 @@ export function makeCrdtTable({
       `Table "${baseTableName}" is missing a required "tombstone" column. CRDT tables must have a "tombstone" INTEGER column for soft deletes.`,
     );
   }
-  if (tombstoneColumn.dataType.toUpperCase() !== "INTEGER") {
+  const tombstoneType = tombstoneColumn.dataType.toUpperCase();
+  if (tombstoneType !== "INTEGER" && tombstoneType !== "BOOLEAN") {
     throw new Error(
-      `Table "${baseTableName}": "tombstone" column must be of type INTEGER, got "${tombstoneColumn.dataType}". It is compared as 0/1 for soft deletes.`,
+      `Table "${baseTableName}": "tombstone" column must be of type INTEGER or BOOLEAN, got "${tombstoneColumn.dataType}". It is compared as 0/1 for soft deletes.`,
     );
   }
 
