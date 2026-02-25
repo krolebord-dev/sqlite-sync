@@ -44,13 +44,13 @@ The HLC is now advanced (`mergeHLC`) even when an event is skipped due to a drop
 
 `crdt-storage.ts:162` — `hasMore: events.length === limit` causes one unnecessary extra fetch when the batch size exactly matches the limit.
 
-### 22. `ensureSingletonExecution` re-executes with stale arguments
+### ~~22. `ensureSingletonExecution` re-executes with stale arguments~~ ✅ Verified
 
-`utils.ts:52-58` — The re-execution path uses `...args` from the first call, not the call that triggered `shouldReExecute = true`. Currently harmless (all callers are zero-arg), but a latent bug.
+`utils.ts:52-58` — The re-execution path uses `...args` from the first call, not the call that triggered `shouldReExecute = true`. `goOffline` is the one caller that passes args (`reason: OfflineReason`), but an early-return guard (`remoteState.type !== "online"`) makes the re-execution a no-op in practice, so the stale reason is never stored.
 
-### 23. `migrateEvent` error message references wrong variable
+### ~~23. `migrateEvent` error message references wrong variable~~ ✅ Fixed
 
-`migrator.ts:288` — Says "Event schema version" but should say "Target schema version."
+`migrator.ts:289` — Error message now correctly references `targetVersion` instead of `event.schema_version`, matching the condition being checked.
 
 ### 27. `mapData` excluded from `useMemo` deps in React hook
 

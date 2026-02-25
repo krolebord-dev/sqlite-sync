@@ -286,7 +286,7 @@ export function createMigrator({
     targetVersion ??= latestSchemaVersion;
     if (targetVersion > schemaVersion.current) {
       throw new Error(
-        `Event schema version ${event.schema_version} is greater than current schema version ${schemaVersion.current}`,
+        `Target schema version ${targetVersion} is greater than current schema version ${schemaVersion.current}`,
       );
     }
 
