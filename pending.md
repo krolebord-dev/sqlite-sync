@@ -40,9 +40,9 @@ The HLC is now advanced (`mergeHLC`) even when an event is skipped due to a drop
 
 ## Low
 
-### 20. `hasMore` off-by-one
+### ~~20. `hasMore` off-by-one~~ ✅ Fixed
 
-`crdt-storage.ts:162` — `hasMore: events.length === limit` causes one unnecessary extra fetch when the batch size exactly matches the limit.
+`crdt-storage.ts` now uses the fetch-N+1 pattern: requests `limit + 1` rows and checks `events.length > limit` to definitively determine whether more events exist. The extra sentinel row is popped before returning. This eliminates false-positive `hasMore` signals that caused unnecessary extra fetches in the processing loop and redundant pull requests from clients.
 
 ### ~~22. `ensureSingletonExecution` re-executes with stale arguments~~ ✅ Verified
 
