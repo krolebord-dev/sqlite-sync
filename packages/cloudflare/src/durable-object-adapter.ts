@@ -1,5 +1,6 @@
 import {
   applyKyselyEventsBatchFilters,
+  baseSystemMigrations,
   type CrdtEventOrigin,
   type CrdtEventStatus,
   type CrdtEventType,
@@ -15,10 +16,11 @@ import {
   createTypedEventTarget,
   HLCCounter,
   jsonSafeParse,
-  quoteId,
   type PersistedCrdtEvent,
+  quoteId,
   runSystemMigrations,
   type SyncDbSchema,
+  type SystemMigration,
   type TypedEventTarget,
 } from "@sqlite-sync/core";
 import {
@@ -31,6 +33,23 @@ import { createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
 import { createMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
+
+const durableObjectMigrations: SystemMigration[] = [
+  ...baseSystemMigrations,
+  {
+    version: 2,
+    up: (ctx) => {
+      ctx.execute(
+        `DELETE FROM ${ctx.eventsTableName} WHERE "sync_id" NOT IN ` +
+          `(SELECT MIN("sync_id") FROM ${ctx.eventsTableName} GROUP BY "timestamp", "source_node_id")`,
+      );
+      ctx.execute(
+        `CREATE UNIQUE INDEX IF NOT EXISTS "idx_crdt_events_dedup" ` +
+          `ON ${ctx.eventsTableName} ("timestamp", "source_node_id")`,
+      );
+    },
+  },
+];
 
 type AdapterDb = {
   crdtEvents: PersistedCrdtEvent;
@@ -83,6 +102,7 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   const sqlExecutor = createKyselyExecutor<AdapterDb>(storage);
 
   runSystemMigrations({
+    migrations: durableObjectMigrations,
     version: createStoredValue<number>({
       initialValue: storage.kv.get("internal-schema-version") ?? -1,
       saveToStorage: (val) => storage.kv.put("internal-schema-version", val),
@@ -172,7 +192,12 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       ).rows;
     },
     persistEvent: (event) => {
-      sqlExecutor.executeKysely((db) => db.insertInto(crdtEventsTable as "crdtEvents").values(event));
+      sqlExecutor.executeKysely((db) =>
+        db
+          .insertInto(crdtEventsTable as "crdtEvents")
+          .values(event)
+          .onConflict((oc) => oc.columns(["timestamp", "source_node_id"]).doNothing()),
+      );
     },
     updateEvent: (syncId, event) =>
       sqlExecutor.executeKysely((db) =>

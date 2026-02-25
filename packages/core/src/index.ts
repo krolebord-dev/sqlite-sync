@@ -25,7 +25,14 @@ export {
   type MigrationsDb,
   type SyncDbMigrator,
 } from "./migrations/migrator";
-export { applyMemoryDbSchema, applyWorkerDbSchema, runSystemMigrations } from "./migrations/system-schema";
+export {
+  applyMemoryDbSchema,
+  applyWorkerDbSchema,
+  baseSystemMigrations,
+  runSystemMigrations,
+  type SystemMigration,
+  type SystemMigrationContext,
+} from "./migrations/system-schema";
 // CRDT
 export {
   createCrdtApplyFunction,

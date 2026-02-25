@@ -1,15 +1,7 @@
-import {
-  createMigrator as createBaseMigrator,
-  createStoredValue,
-  type Migrations,
-} from "@sqlite-sync/core";
+import { createMigrator as createBaseMigrator, createStoredValue, type Migrations } from "@sqlite-sync/core";
 import type { KyselyExecutor } from "./kysely-executor";
 
-export function createMigrator(
-  kv: SyncKvStorage,
-  sqlExecutor: KyselyExecutor<any>,
-  migrations: Migrations,
-) {
+export function createMigrator(kv: SyncKvStorage, sqlExecutor: KyselyExecutor<any>, migrations: Migrations) {
   const schemaVersion = createStoredValue<number>({
     initialValue: kv.get("schema-version") ?? -1,
     saveToStorage: (val) => kv.put("schema-version", val),

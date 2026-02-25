@@ -14,13 +14,18 @@ export type MemoryDbSchema = {
   persisted_crdt_events: PersistedCrdtEvent;
 };
 
-type SystemMigrationContext = {
+export type SystemMigrationContext = {
   eventsTableName: string;
   updateLogTableName: string;
   execute: (sql: string) => void;
 };
 
-const systemMigrations = [
+export type SystemMigration = {
+  version: number;
+  up: (ctx: SystemMigrationContext) => void;
+};
+
+export const baseSystemMigrations: SystemMigration[] = [
   {
     version: 0,
     up: (ctx: SystemMigrationContext) => {
@@ -53,6 +58,7 @@ const systemMigrations = [
 
 export function runSystemMigrations(opts: {
   version: StoredValue<number>;
+  migrations: SystemMigration[];
   eventsTableName: string;
   updateLogTableName: string;
   execute: (sql: string) => void;
@@ -63,7 +69,7 @@ export function runSystemMigrations(opts: {
     updateLogTableName: opts.updateLogTableName,
     execute: opts.execute,
   };
-  for (const migration of systemMigrations) {
+  for (const migration of opts.migrations) {
     if (migration.version > opts.version.current) {
       opts.transaction(() => {
         migration.up(ctx);
@@ -80,6 +86,7 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
   // System schema migrations (each in its own transaction)
   const kvStore = createSQLiteKvStore({ db, metaTableName: "worker.kv" });
   runSystemMigrations({
+    migrations: baseSystemMigrations,
     version: kvStore.createNumberStoredValue("internal-schema-version", -1),
     eventsTableName: '"worker"."crdt_events"',
     updateLogTableName: '"crdt_update_log"',
