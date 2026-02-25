@@ -5,6 +5,7 @@ export interface HLC {
 }
 
 const MAX_COUNTER = 36 ** 5 - 1; // 60,466,175 — max value that fits in 5-char base36
+const DEFAULT_MAX_DRIFT_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export class HLCCounter {
   private timestamp: number;
@@ -12,12 +13,14 @@ export class HLCCounter {
   private nodeId: string;
 
   private readonly getTimestamp: () => number;
+  private readonly maxDrift: number;
 
-  constructor(nodeId: string, getTimestamp: () => number) {
+  constructor(nodeId: string, getTimestamp: () => number, maxDrift: number = DEFAULT_MAX_DRIFT_MS) {
     this.timestamp = getTimestamp();
     this.counter = 0;
     this.nodeId = nodeId;
     this.getTimestamp = getTimestamp;
+    this.maxDrift = maxDrift;
   }
 
   getCurrentHLC(): HLC {
@@ -45,6 +48,14 @@ export class HLCCounter {
   }
 
   mergeHLC(hlc: HLC) {
+    const now = this.getTimestamp();
+    if (hlc.timestamp - now > this.maxDrift) {
+      console.warn(
+        `HLC: ignoring far-future timestamp (remote=${hlc.timestamp}, local=${now}, drift=${hlc.timestamp - now}ms)`,
+      );
+      return;
+    }
+
     if (this.timestamp === hlc.timestamp) {
       this.counter = Math.max(this.counter, hlc.counter) + 1;
     } else if (this.timestamp > hlc.timestamp) {
