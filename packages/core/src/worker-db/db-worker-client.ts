@@ -107,7 +107,11 @@ export const createWorkerDbClient = async ({
 
   const statePromise = awaitWorkerState(eventTarget);
   postWorkerConfig(worker, config);
-  rpc.postState();
+  // On first tab, the worker may not have its BroadcastChannel listener ready yet,
+  // so this request can be silently dropped and timeout. The worker will independently
+  // post state at the end of init. For subsequent tabs, this triggers the already-running
+  // worker to send its current state.
+  rpc.postState().catch(() => {});
 
   let workerState = await statePromise;
 
