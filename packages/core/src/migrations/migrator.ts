@@ -50,6 +50,14 @@ type MigrationSql = { sql: string; parameters: readonly unknown[] };
 
 type DataTypeExpression = ColumnDataType | Expression<any>;
 
+const protectedColumns = ["id", "tombstone"];
+
+function assertColumnNotProtected(column: string, operation: string) {
+  if (protectedColumns.includes(column)) {
+    throw new Error(`Cannot ${operation} protected column "${column}"`);
+  }
+}
+
 const migrationSteps = {
   createTable: (table: string, build: (table: CreateTableBuilder<string, never>) => Compilable): MigrationStep => ({
     sql: (db) => build(db.schema.createTable(table)),
@@ -88,22 +96,26 @@ const migrationSteps = {
     table: string;
     oldColumn: string;
     newColumn: string;
-  }): MigrationStep => ({
-    sql: (db) => db.schema.alterTable(table).renameColumn(oldColumn, newColumn),
-    eventTransformer: {
-      [table]: (event) => {
-        if ((event.type !== "item-updated" && event.type !== "item-created") || !(oldColumn in event.payload)) {
+  }): MigrationStep => {
+    assertColumnNotProtected(oldColumn, "rename");
+    assertColumnNotProtected(newColumn, "rename to");
+    return {
+      sql: (db) => db.schema.alterTable(table).renameColumn(oldColumn, newColumn),
+      eventTransformer: {
+        [table]: (event) => {
+          if ((event.type !== "item-updated" && event.type !== "item-created") || !(oldColumn in event.payload)) {
+            return event;
+          }
+
+          const oldVal = event.payload[oldColumn];
+          delete event.payload[oldColumn];
+          event.payload[newColumn] = oldVal;
+
           return event;
-        }
-
-        const oldVal = event.payload[oldColumn];
-        delete event.payload[oldColumn];
-        event.payload[newColumn] = oldVal;
-
-        return event;
+        },
       },
-    },
-  }),
+    };
+  },
 
   addColumn: ({
     table,
@@ -132,28 +144,27 @@ const migrationSteps = {
     },
   }),
 
-  dropColumn: ({ table, column }: { table: string; column: string }): MigrationStep => ({
-    sql: (db) => db.schema.alterTable(table).dropColumn(column),
-    eventTransformer: {
-      [table]: (event) => {
-        if (event.type !== "item-updated" && event.type !== "item-created") {
+  dropColumn: ({ table, column }: { table: string; column: string }): MigrationStep => {
+    assertColumnNotProtected(column, "drop");
+    return {
+      sql: (db) => db.schema.alterTable(table).dropColumn(column),
+      eventTransformer: {
+        [table]: (event) => {
+          if (!(column in event.payload)) {
+            return event;
+          }
+
+          delete event.payload[column];
+
+          if (event.type === "item-updated" && Object.keys(event.payload).length === 0) {
+            return null;
+          }
+
           return event;
-        }
-
-        if (!(column in event.payload)) {
-          return event;
-        }
-
-        delete event.payload[column];
-
-        if (Object.keys(event.payload).length === 0) {
-          return null;
-        }
-
-        return event;
+        },
       },
-    },
-  }),
+    };
+  },
 };
 
 type MigrationEventTransformers = Record<string, CrdtEventTransformer>;
