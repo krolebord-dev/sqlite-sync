@@ -4,13 +4,12 @@ export type UserDbProps = {
   userId: string;
 };
 
-// Placeholder table for future app-specific features (notes, todos, expenses, habits, etc.)
-// Each feature will add its own tables via new migration versions.
-
-export type PlaceholderItem = {
+export type NoteItem = {
   id: string;
   type: string;
   title: string;
+  content: string;
+  order: number;
   createdAt: number;
   tombstone?: boolean;
 };
@@ -26,6 +25,10 @@ const migrations = createMigrations((b) => ({
         .addColumn("createdAt", "integer", (col) => col.notNull()),
     ),
   ],
+  1: [
+    b.addColumn({ table: "_item", column: "content", type: "text", defaultValue: "" }),
+    b.addColumn({ table: "_item", column: "order", type: "real", defaultValue: 0 }),
+  ],
 }));
 
 export type UserDb = (typeof syncDbSchema)["~clientSchema"];
@@ -35,6 +38,6 @@ export type UserSyncDbSchema = typeof syncDbSchema;
 export const syncDbSchema = createSyncDbSchema({
   migrations,
 })
-  .addTable<PlaceholderItem>()
+  .addTable<NoteItem>()
   .withConfig({ baseTableName: "_item", crdtTableName: "item" })
   .build();

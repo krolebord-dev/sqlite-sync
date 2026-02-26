@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { AppSidebar } from "@/components/app-sidebar";
 import { orpc } from "@/orpc/orpc-client";
 import { DbProvider, initUserDb } from "@/user-db/user-db";
 
@@ -28,7 +29,12 @@ function RouteComponent() {
   const { db } = Route.useLoaderData();
   return (
     <DbProvider db={db}>
-      <Outlet />
+      <div className="flex h-screen overflow-hidden">
+        <AppSidebar />
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     </DbProvider>
   );
 }
