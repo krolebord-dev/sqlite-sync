@@ -43,7 +43,7 @@ type MigrationStep = {
 
 type RawMigrationStep = {
   sql: MigrationSql[];
-  eventTransformer?: MigrationEventTransformers;
+  eventTransformer?: CompiledMigrationEventTransformer;
 };
 
 type MigrationSql = { sql: string; parameters: readonly unknown[] };
@@ -168,6 +168,7 @@ const migrationSteps = {
 };
 
 type MigrationEventTransformers = Record<string, CrdtEventTransformer>;
+type CompiledMigrationEventTransformer = (event: CrdtEvent) => CrdtEvent | null;
 
 function buildMigrationSql(steps: MigrationStep[]): MigrationSql[] {
   return steps
@@ -194,40 +195,37 @@ function buildMigrationSql(steps: MigrationStep[]): MigrationSql[] {
     });
 }
 
-function buildMigrationEventTransformer(steps: MigrationStep[]): MigrationEventTransformers {
-  const transformers = new Map<string, CrdtEventTransformer[]>();
+function buildMigrationEventTransformer(steps: MigrationStep[]): CompiledMigrationEventTransformer | undefined {
+  const transformers: Array<[string, CrdtEventTransformer]> = [];
 
   for (const step of steps) {
     if (step.eventTransformer) {
-      for (const [table, transformer] of Object.entries(step.eventTransformer)) {
-        const existingTransformers = transformers.get(table);
-        if (existingTransformers) {
-          existingTransformers.push(transformer);
-        } else {
-          transformers.set(table, [transformer]);
-        }
-      }
+      transformers.push(...Object.entries(step.eventTransformer));
     }
   }
 
-  const entries = Array.from(transformers.entries()).map(([table, transformers]) => {
-    return [
-      table,
-      (event: CrdtEvent | null) => {
-        for (const transformer of transformers) {
-          if (event === null) {
-            return null;
-          }
-          event = transformer(event);
-          if (event === null) {
-            return null;
-          }
-        }
-        return event;
-      },
-    ];
-  });
-  return Object.fromEntries(entries);
+  if (transformers.length === 0) {
+    return undefined;
+  }
+
+  return (event: CrdtEvent) => {
+    let transformedEvent: CrdtEvent | null = event;
+
+    for (const [table, transformer] of transformers) {
+      if (transformedEvent === null) {
+        return null;
+      }
+      if (transformedEvent.dataset !== table) {
+        continue;
+      }
+      transformedEvent = transformer(transformedEvent);
+      if (transformedEvent === null) {
+        return null;
+      }
+    }
+
+    return transformedEvent;
+  };
 }
 
 export function createMigrations(buildMigrations: (builder: typeof migrationSteps) => Record<number, MigrationStep[]>) {
@@ -319,7 +317,7 @@ export function createMigrator({
       if (version <= fromVersion) continue;
       if (version > targetVersion) break;
 
-      const transformer: CrdtEventTransformer | undefined = migration.eventTransformer?.[crdtEvent.dataset];
+      const transformer = migration.eventTransformer;
       if (transformer) {
         crdtEvent = transformer(crdtEvent);
         if (crdtEvent === null) return null;
