@@ -2,6 +2,9 @@ packages:
   - packages/*
   - apps/*
 
+catalog:
+  '@sqlite.org/sqlite-wasm': ^3.51.2-build5
+
 ignoredBuiltDependencies:
   - '@prisma/client'
 
@@ -10,8 +13,6 @@ onlyBuiltDependencies:
   - '@tailwindcss/oxide'
   - better-sqlite3
   - esbuild
+  - lefthook
   - sharp
   - workerd
-
-catalog:
-  '@sqlite.org/sqlite-wasm': ^3.51.2-build5
