@@ -117,7 +117,7 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     initialValue: getLatestSyncId(sqlExecutor),
   });
 
-  const migrator = createMigrator(storage.kv, sqlExecutor, syncDbSchema.migrations);
+  const migrator = createMigrator(storage.kv, sqlExecutor, syncDbSchema.migrations, quoteId(updateLogTableName));
   migrator.migrateDbToLatest();
 
   const baseApply = createCrdtApplyFunction({

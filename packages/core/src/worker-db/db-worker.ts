@@ -87,6 +87,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const migrator = createMigrator({
     migrations: opts.syncDbSchema.migrations,
     schemaVersion: kvStore.createNumberStoredValue("schema-version", -1),
+    updateLogTableName: '"crdt_update_log"',
   });
   migrator.migrateDbToLatest({
     startTransaction: (callback) => {

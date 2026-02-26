@@ -36,14 +36,20 @@ type MigrationStepSql =
   | Compilable
   | ((db: Kysely<unknown>) => Compilable);
 
+type TableRename = { oldTable: string; newTable: string };
+
 type MigrationStep = {
   sql: MigrationStepSql | MigrationStepSql[];
   eventTransformer?: MigrationEventTransformers;
+  tableRenames?: TableRename[];
+  tableDrops?: string[];
 };
 
 type RawMigrationStep = {
   sql: MigrationSql[];
   eventTransformer?: CompiledMigrationEventTransformer;
+  tableRenames?: TableRename[];
+  tableDrops?: string[];
 };
 
 type MigrationSql = { sql: string; parameters: readonly unknown[] };
@@ -68,6 +74,7 @@ const migrationSteps = {
     eventTransformer: {
       [table]: () => null,
     },
+    tableDrops: [table],
   }),
 
   createIndex: (indexName: string, build: (index: CreateIndexBuilder) => Compilable): MigrationStep => ({
@@ -86,6 +93,7 @@ const migrationSteps = {
         return event;
       },
     },
+    tableRenames: [{ oldTable, newTable }],
   }),
 
   renameColumn: ({
@@ -241,11 +249,16 @@ export function createMigrations(buildMigrations: (builder: typeof migrationStep
         throw new Error(`Migration version cannot be negative: ${version}`);
       }
 
+      const tableRenames = steps.flatMap((s) => s.tableRenames ?? []);
+      const tableDrops = steps.flatMap((s) => s.tableDrops ?? []);
+
       return [
         version,
         {
           sql: buildMigrationSql(steps),
           eventTransformer: buildMigrationEventTransformer(steps),
+          ...(tableRenames.length > 0 && { tableRenames }),
+          ...(tableDrops.length > 0 && { tableDrops }),
         },
       ];
     }),
@@ -267,9 +280,11 @@ type MigrationsTransaction = {
 export function createMigrator({
   migrations,
   schemaVersion,
+  updateLogTableName,
 }: {
   migrations: Migrations;
   schemaVersion: StoredValue<number>;
+  updateLogTableName?: string;
 }) {
   const latestSchemaVersion = Math.max(...Object.keys(migrations).map(Number));
 
@@ -278,14 +293,26 @@ export function createMigrator({
     .map(([v, m]) => [Number(v), m] as const)
     .sort((a, b) => a[0] - b[0]);
 
-  const applyMigration = (db: MigrationsDb, version: number, sqlStatements: MigrationSql[]) => {
+  const applyMigration = (db: MigrationsDb, version: number, migration: RawMigrationStep) => {
     if (version <= schemaVersion.current) {
       throw new Error(`Cannot apply migration ${version} to schema version ${schemaVersion.current}`);
     }
 
     db.startTransaction((tx) => {
-      for (const statement of sqlStatements) {
+      for (const statement of migration.sql) {
         tx.execute(statement.sql, statement.parameters);
+      }
+      if (updateLogTableName) {
+        if (migration.tableRenames) {
+          for (const { oldTable, newTable } of migration.tableRenames) {
+            tx.execute(`UPDATE ${updateLogTableName} SET "dataset" = ? WHERE "dataset" = ?`, [newTable, oldTable]);
+          }
+        }
+        if (migration.tableDrops) {
+          for (const table of migration.tableDrops) {
+            tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [table]);
+          }
+        }
       }
       schemaVersion.current = version;
     });
@@ -356,9 +383,9 @@ export function createMigrator({
       }
 
       for (let i = 0; i < sortedMigrations.length; i++) {
-        const [version, { sql }] = sortedMigrations[i];
+        const [version, migration] = sortedMigrations[i];
         if (version <= currentSchemaVersion) continue;
-        applyMigration(db, version, sql);
+        applyMigration(db, version, migration);
       }
     },
     migrateEvent,
