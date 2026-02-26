@@ -135,7 +135,7 @@ const migrationSteps = {
     table: string;
     column: string;
     type: DataTypeExpression;
-    defaultValue: number | boolean | string;
+    defaultValue: number | boolean | string | null;
     build?: ColumnDefinitionBuilderCallback;
   }): MigrationStep => ({
     sql: (db) => db.schema.alterTable(table).addColumn(column, type, (x) => build(x).defaultTo(defaultValue)),
