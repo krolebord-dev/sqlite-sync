@@ -60,7 +60,7 @@ where tombstone = 0;`,
 
   db.execute(
     `
-create trigger ${quoteId(crdtTableName + "_created")}
+create trigger ${quoteId(`${crdtTableName}_created`)}
 instead of insert on ${quoteId(crdtTableName)}
 for each row
 begin
@@ -72,7 +72,7 @@ end;
 
   db.execute(
     `
-create trigger ${quoteId(crdtTableName + "_updated")}
+create trigger ${quoteId(`${crdtTableName}_updated`)}
 instead of update on ${quoteId(crdtTableName)}
 for each row
 begin
@@ -88,7 +88,7 @@ end;
 
   db.execute(
     `
-create trigger ${quoteId(crdtTableName + "_deleted")}
+create trigger ${quoteId(`${crdtTableName}_deleted`)}
 instead of delete on ${quoteId(crdtTableName)}
 for each row
 when old.tombstone = 0

@@ -1,7 +1,7 @@
 import type { ExecuteParams, SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, use, useMemo, useRef, useSyncExternalStore } from "react";
 
 type DbQueryParams<Database, TResult> =
   | Compilable<TResult>
@@ -37,7 +37,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: initial parameters should only change when the query changes
     const liveQuery = useMemo(() => {
-      return db.reactiveDb.createLiveQuery<TResult>({
+      return db.db.createLiveQuery<TResult>({
         sql,
         parameters,
       });
@@ -72,17 +72,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
   const useDbState = (): WorkerState => {
     const db = useDb();
 
-    const subscribeToDbState = useCallback(
-      (onChange: () => void) => {
-        db.workerDb.addEventListener("state-changed", onChange);
-        return () => {
-          db.workerDb.removeEventListener("state-changed", onChange);
-        };
-      },
-      [db],
-    );
-
-    return useSyncExternalStore<WorkerState>(subscribeToDbState, () => db.workerDb.getState());
+    return useSyncExternalStore<WorkerState>(db.state.subscribe, db.state.getState);
   };
 
   return { useDb, DbProvider, useDbQuery, useDbState };

@@ -2,7 +2,7 @@ import { validateDbId } from "./db-id";
 import { HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb } from "./memory-db/memory-db";
-import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
 import type { SyncDbMigrator } from "./migrations/migrator";
 import type { SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
@@ -147,10 +147,27 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
   };
 
   return {
-    db: reactiveDb.db,
-    reactiveDb: reactiveDb as Omit<SQLiteReactiveDb<Database>, "db">,
-    workerDb: workerClient,
+    db: {
+      execute: reactiveDb.db.execute.bind(reactiveDb.db),
+      executeKysely: reactiveDb.db.executeKysely.bind(reactiveDb.db),
+      executeTransaction: reactiveDb.db.executeTransaction.bind(reactiveDb.db),
+      createLiveQuery: reactiveDb.createLiveQuery.bind(reactiveDb),
+    },
+    state: {
+      getState: workerClient.getState.bind(workerClient),
+      subscribe: (onChange: () => void) => {
+        workerClient.addEventListener("state-changed", onChange);
+        return () => {
+          workerClient.removeEventListener("state-changed", onChange);
+        };
+      },
+      goOnline: workerClient.goOnline.bind(workerClient),
+      goOffline: workerClient.goOffline.bind(workerClient),
+    },
     dispose,
+    _internal: {
+      executeAsync: workerClient.execute.bind(workerClient),
+    },
   };
 }
 

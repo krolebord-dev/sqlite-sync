@@ -244,14 +244,14 @@ function TodoItem({
 }
 
 function OnlineStatusButton() {
-  const { workerDb } = useDb();
+  const { state } = useDb();
   const dbState = useDbState();
 
   const toggleOnlineStatus = () => {
     if (dbState.remoteState === "online") {
-      workerDb.goOffline();
+      state.goOffline();
     } else {
-      workerDb.goOnline();
+      state.goOnline();
     }
   };
 

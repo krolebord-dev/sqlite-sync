@@ -275,15 +275,15 @@ const onlineStatusConfig = {
 } as const;
 
 function OnlineStatusIndicator() {
-  const { workerDb } = useDb();
+  const { state } = useDb();
   const { remoteState } = useDbState();
   const status = onlineStatusConfig[remoteState ?? "offline"];
 
   const toggleOnlineStatus = () => {
     if (remoteState === "online") {
-      workerDb.goOffline();
+      state.goOffline();
     } else {
-      workerDb.goOnline();
+      state.goOnline();
     }
   };
 
@@ -753,6 +753,11 @@ function TmdbSearchResultCard({ item, alreadyAdded, onClick }: TmdbSearchResultC
 
 function TrendingLink() {
   const listId = useListId();
+
+  if (!listId) {
+    return null;
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
