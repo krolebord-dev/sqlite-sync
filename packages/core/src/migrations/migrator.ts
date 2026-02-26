@@ -328,6 +328,7 @@ export function createMigrator({
       return null;
     }
 
+    event.schema_version = targetVersion;
     event.dataset = crdtEvent.dataset;
     event.item_id = crdtEvent.item_id;
     event.type = crdtEvent.type;
