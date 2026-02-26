@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useListId } from "@/lib/use-list";
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
 import { useDb, useDbQuery, useDbState } from "@/list-db/list-db";
@@ -751,11 +752,12 @@ function TmdbSearchResultCard({ item, alreadyAdded, onClick }: TmdbSearchResultC
 }
 
 function TrendingLink() {
+  const listId = useListId();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button variant="ghost" size="icon" className="size-8 rounded-full sm:size-10" asChild>
-          <Link to="/list/$id/trending" params={(prev) => ({ id: prev.id! })}>
+          <Link to="/list/$id/trending" params={{ id: listId }}>
             <TrendingUpIcon className="size-4 text-gray-400 sm:size-6" />
           </Link>
         </Button>

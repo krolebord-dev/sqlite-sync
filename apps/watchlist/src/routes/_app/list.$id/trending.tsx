@@ -18,6 +18,7 @@ import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useListId } from "@/lib/use-list";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
 import { VoteAverage } from "./-/item-card";
@@ -44,15 +45,19 @@ function TrendingPage() {
     setPage(1);
   };
 
+  const listId = useListId();
+
   return (
     <>
       <AppHeader>
         <div className="flex items-center gap-2">
           <ProjectSelector compact />
           <Button variant="ghost" size="icon" asChild>
-            <Link to="/list/$id" params={(prev) => ({ id: prev.id! })}>
-              <ArrowLeftIcon className="size-4" />
-            </Link>
+            {!!listId && (
+              <Link to="/list/$id" params={{ id: listId }}>
+                <ArrowLeftIcon className="size-4" />
+              </Link>
+            )}
           </Button>
           <span className="flex items-center gap-1.5 font-semibold text-sm">
             <TrendingUpIcon className="size-4" />
@@ -228,7 +233,7 @@ function TrendingItemCard({ item, alreadyAdded, onToggle }: TrendingItemCardProp
             <CheckIcon />
           </p>
         )}
-        <span className="absolute bottom-2 right-2 rounded-full border border-border bg-black/60 px-2 py-0.5 text-[10px] text-white uppercase">
+        <span className="absolute right-2 bottom-2 rounded-full border border-border bg-black/60 px-2 py-0.5 text-[10px] text-white uppercase">
           {item.type}
         </span>
       </div>

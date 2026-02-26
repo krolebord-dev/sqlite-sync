@@ -1,4 +1,3 @@
-import { useMatch } from "@tanstack/react-router";
 import { FlameIcon, SkullIcon, ThumbsUpIcon } from "lucide-react";
 
 export const priorityColors = {
@@ -21,7 +20,3 @@ export const priorityColors = {
     icon: <SkullIcon />,
   },
 };
-
-export function useListId() {
-  return useMatch({ from: "/_app/list/$id", shouldThrow: false, select: (m) => m.loaderData?.list.id });
-}
