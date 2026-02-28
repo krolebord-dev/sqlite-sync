@@ -9,24 +9,21 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
-import { generateId } from "@sqlite-sync/core";
+import { formatForDisplay } from "@tanstack/hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { NoteCard } from "@/components/note-card";
 import { Button } from "@/components/ui/button";
+import { NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
+import { useCreateNote } from "@/lib/use-create-note";
 import type { NoteItem } from "@/user-db/migrations";
 import { useDb, useDbQuery } from "@/user-db/user-db";
 
 export const Route = createFileRoute("/_app/notes")({
   component: NotesPage,
 });
-
-function getNewOrder(notes: NoteItem[]): number {
-  if (notes.length === 0) return 1000;
-  return Math.max(...notes.map((n) => n.order)) + 1000;
-}
 
 function getOrderBetween(before: NoteItem | undefined, after: NoteItem | undefined): number {
   if (before && after) return (before.order + after.order) / 2;
@@ -37,6 +34,7 @@ function getOrderBetween(before: NoteItem | undefined, after: NoteItem | undefin
 
 function NotesPage() {
   const db = useDb();
+  const createNote = useCreateNote();
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const { data: notes } = useDbQuery((db) =>
@@ -50,21 +48,6 @@ function NotesPage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-
-  function createNote() {
-    const id = generateId();
-    db.db.executeKysely((q) =>
-      q.insertInto("item").values({
-        id,
-        type: "note",
-        title: "",
-        content: "",
-        order: getNewOrder(noteList),
-        createdAt: Date.now(),
-        tombstone: false,
-      }),
-    );
-  }
 
   const updateNote = useCallback(
     (id: string, fields: Partial<Pick<NoteItem, "title" | "content">>) => {
@@ -111,12 +94,15 @@ function NotesPage() {
   }
 
   return (
-    <div className="px-6 py-6">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mb-4 sm:mb-6 flex items-center justify-between">
         <h1 className="font-semibold text-xl">Notes</h1>
         <Button onClick={createNote} size="sm">
           <PlusIcon />
           New note
+          <kbd className="pointer-events-none hidden rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground md:inline">
+            {formatForDisplay(NEW_NOTE_HOTKEY)}
+          </kbd>
         </Button>
       </div>
 

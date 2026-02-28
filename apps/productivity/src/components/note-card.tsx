@@ -59,7 +59,13 @@ export function NoteCard({ note, onUpdate, onDelete }: NoteCardProps) {
 
   return (
     <>
-      <div ref={setNodeRef} style={style} className="group mb-4 break-inside-avoid" {...attributes} {...listeners}>
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="group mb-2 sm:mb-4 break-inside-avoid"
+        {...attributes}
+        {...listeners}
+      >
         <div className="relative rounded-lg border bg-card text-card-foreground shadow-xs">
           {/* Hover actions */}
           <div className="absolute top-1.5 right-1.5 opacity-0 transition-opacity group-hover:opacity-100">

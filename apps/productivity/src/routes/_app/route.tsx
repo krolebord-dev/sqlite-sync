@@ -1,5 +1,7 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { AppSidebar } from "@/components/app-sidebar";
+import { CommandPalette } from "@/components/command-palette";
+import { NoteDialog } from "@/components/note-dialog";
 import { orpc } from "@/orpc/orpc-client";
 import { DbProvider, initUserDb } from "@/user-db/user-db";
 
@@ -35,6 +37,8 @@ function RouteComponent() {
           <Outlet />
         </main>
       </div>
+      <CommandPalette />
+      <NoteDialog />
     </DbProvider>
   );
 }
