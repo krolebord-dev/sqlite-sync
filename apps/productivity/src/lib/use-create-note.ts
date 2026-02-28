@@ -13,7 +13,10 @@ export function useCreateNote() {
 
     db.db.executeTransaction((trx) => {
       const [maxOrderRow] = trx.executeKysely((q) =>
-        q.selectFrom("item").select((eb) => eb.fn.max("order").as("maxOrder")).where("type", "=", "note"),
+        q
+          .selectFrom("item")
+          .select((eb) => eb.fn.max("order").as("maxOrder"))
+          .where("type", "=", "note"),
       ).rows;
 
       const maxOrder = Number(maxOrderRow?.maxOrder ?? 0);
