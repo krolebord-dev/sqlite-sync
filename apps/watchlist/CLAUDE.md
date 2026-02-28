@@ -1,130 +1,105 @@
 # Watchlist App
 
-> See also: [root CLAUDE.md](../../CLAUDE.md) for monorepo-wide conventions, build commands, and sync architecture.
+> See also: [root CLAUDE.md](../../CLAUDE.md) for monorepo conventions, build commands, and sync architecture.
 
-Production watchlist application built with TanStack Router, oRPC, and Cloudflare D1. Uses `@sqlite-sync/*` packages for offline-first per-list sync via CRDT events and Durable Objects.
+Production watchlist app. TanStack Router + oRPC + Cloudflare D1 + Durable Objects. Per-list offline-first sync via `@sqlite-sync/*` CRDT.
 
 ## Commands
 
 ```bash
-pnpm --filter watchlist dev               # Dev server on port 3000
-pnpm --filter watchlist build             # Build for production
-pnpm --filter watchlist deploy            # Build + wrangler deploy
-pnpm --filter watchlist test              # Run tests (vitest)
-pnpm --filter watchlist typecheck         # Type-check
+pnpm --filter watchlist dev               # port 3000
+pnpm --filter watchlist build
+pnpm --filter watchlist deploy
+pnpm --filter watchlist test
+pnpm --filter watchlist typecheck
+pnpm --filter watchlist db:local:init
+pnpm --filter watchlist db:local:migrate
+pnpm --filter watchlist db:new-migration
+pnpm --filter watchlist generate:types:db   # kysely types from D1
+pnpm --filter watchlist generate:types:env  # wrangler env types → worker-configuration.d.ts
 ```
 
-### Database
+## Stack
 
-```bash
-pnpm --filter watchlist db:local:init          # Initialize local D1
-pnpm --filter watchlist db:local:migrate       # Apply D1 migrations locally
-pnpm --filter watchlist db:new-migration       # Create new D1 migration
-pnpm --filter watchlist generate:types:db      # Generate Kysely types from D1
-pnpm --filter watchlist generate:types:env     # Generate Wrangler env types
-```
+Routing: TanStack Router (file-based), API: oRPC, UI: Shadcn/UI + Tailwind CSS 4, State: Jotai + React Query, Auth: magic link + Google/Twitch OAuth (`arctic`), AI: Vercel AI SDK + OpenRouter + Workers AI, Server: Cloudflare Workers + D1 + Durable Objects, Testing: Vitest
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Routing | TanStack Router (file-based) |
-| Data Fetching | TanStack React Query + oRPC |
-| UI | Shadcn/UI (Radix primitives + Tailwind CSS 4) |
-| State | Jotai (atomic), React Query (server), sync DB (local) |
-| Auth | Magic link + OAuth (Google, Twitch) via `arctic` |
-| AI | Vercel AI SDK + OpenRouter / Workers AI |
-| Server | Cloudflare Workers + D1 + Durable Objects |
-| Testing | Vitest + Testing Library |
-
-## Source Structure
+## Key Files
 
 ```
-src/
-├── server.ts                  # Cloudflare Worker entry point
-├── main.tsx                   # React entry point
-├── routeTree.gen.ts           # Auto-generated route tree (do not edit)
-├── routes/                    # TanStack file-based routing
-│   ├── __root.tsx             #   Root layout with providers
-│   ├── _auth/                 #   Public auth routes
-│   │   ├── sign-in.tsx        #     Sign-in page
-│   │   └── magic-link-verify.tsx
-│   └── _app/                  #   Authenticated routes (auth guard in route.tsx)
-│       ├── route.tsx          #     Auth loader
-│       ├── index.tsx          #     Home / list selection
-│       └── list.$id/          #     Dynamic list detail route
-├── components/                # React components
-│   └── ui/                    #   Shadcn/UI primitives (configured via components.json)
-├── orpc/                      # Backend API (oRPC)
-│   ├── orpc-client.ts         #   Typed client setup
-│   ├── orpc-router.ts         #   Main router definition
-│   └── routers/
-│       ├── auth.router.ts     #   Auth: signUp, verify, getAuth, signOut
-│       ├── list.router.ts     #   Lists: getLists, getList, getListWithMembers
-│       └── search.router.ts   #   TMDB search
-├── list-db/                   # Per-list sync DB (Durable Objects)
-│   ├── list-db-server.ts      #   Durable Object class
-│   ├── list-db.ts             #   Client initialization
-│   ├── migrations.ts          #   List item CRDT schema
-│   ├── list-db-router.ts      #   oRPC router for list-db
-│   ├── list-orpc-client.ts    #   Client setup
-│   ├── list-worker.ts         #   Web Worker entry
-│   └── routers/
-│       ├── ai-suggestions.ts  #   AI tag suggestions
-│       ├── list-settings.ts   #   Per-list settings
-│       └── orpc-base.ts       #   Base oRPC context
-├── api/                       # REST endpoints
-│   ├── api-handler.ts         #   Route dispatcher
-│   └── handlers/
-│       └── callback.google.ts #   OAuth callback
-├── ai/                        # AI features
-│   ├── suggest-tags.ts        #   Tag generation logic
-│   └── prompts/
-│       └── classifier.prompt.ts
-├── lib/                       # Utilities
-│   ├── db.ts                  #   Kysely D1 instance
-│   ├── context.ts             #   Environment variable types
-│   ├── db-types.ts            #   Generated DB types (kysely-codegen)
-│   ├── auth-client.ts         #   Auth hooks
-│   ├── tmdb.ts                #   TMDB API client
-│   └── utils.ts               #   General utilities
-├── migrations/                # Server D1 migrations (Wrangler-managed)
-│   ├── 0001_init_auth.sql     #   User, session, verification tables
-│   └── 0002_add_lists.sql     #   List, user_to_list tables
-└── public/                    # Static assets
+src/server.ts                          # CF Worker entry
+src/main.tsx                           # React entry
+src/routeTree.gen.ts                   # Auto-generated — do not edit
+src/routes/
+  __root.tsx
+  _auth/route.tsx
+  _auth/sign-in.tsx
+  _auth/magic-link-verify.tsx
+  _app/route.tsx                       # Auth loader/guard
+  _app/index.tsx                       # Home / list selection
+  _app/list.$id/route.tsx
+  _app/list.$id/index.tsx
+  _app/list.$id/trending.tsx
+  _app/list.$id/-/                     # Route-local components
+    common.tsx, item-card.tsx, list-atoms.ts
+    list-settings.tsx, recommendations-dialog.tsx, review-dialog.tsx
+src/orpc/
+  orpc-router.ts                       # auth, list, search, trending, watchProviders
+  orpc-client.ts
+  common/auth.ts, logging.ts, os.ts, procedure.ts
+  routers/auth.router.ts, list.router.ts, search.router.ts
+           trending.router.ts, watch-providers.router.ts
+src/list-db/                           # Per-list Durable Object sync
+  list-db-server.ts                    # DO class (ListDbServer)
+  list-db.ts                           # Client init
+  migrations.ts                        # CRDT table schemas (makeCrdtTable)
+  list-db-router.ts
+  list-orpc-client.ts
+  list-orpc-context.tsx
+  list-worker.ts                       # Web Worker entry
+  routers/ai-recommendations.ts, ai-suggestions.ts
+          list-settings.ts, watch-providers.ts, orpc-base.ts
+src/api/
+  api-handler.ts
+  handlers/callback.google.ts
+src/ai/
+  suggest-tags.ts, recommend-items.ts
+  prompts/classifier.prompt.ts, recommender.prompt.ts
+src/lib/
+  db.ts                                # Kysely D1 instance (binding: MAIN_DB)
+  db-types.ts                          # Generated by kysely-codegen
+  context.ts                           # Env var types
+  auth-client.ts, tmdb.ts, utils.ts
+  emails/emails.tsx, layout.email.tsx, magic-link.email.tsx
+  utils/export-json.ts, import-json.ts, last-opened-list.ts
+         format-duration.ts, parse-duration.ts, use-throttle.ts
+         user-error.ts, wait.ts
+migrations/                            # Server D1 migrations (Wrangler-managed)
+  0001_init_auth.sql, 0002_add_lists.sql, 0003_add_list_created_by.sql
 ```
 
 ## Request Routing
 
-- `/rpc/*` → oRPC API handlers
-- `/api/*` → REST endpoints (OAuth callbacks)
-- `/list-db/*` → Durable Object routing (per-list sync)
-- `/*` → Frontend SPA (Vite)
+- `/rpc/*` → oRPC handlers
+- `/api/*` → REST (OAuth callbacks)
+- `/list-db/*` → Durable Object (per-list sync)
+- `/*` → SPA
 
 ## Conventions
 
-- **Routing**: File-based via TanStack Router. `routeTree.gen.ts` is auto-generated — never edit it manually.
-- **API**: oRPC routers in `src/orpc/routers/`. Typed client in `src/orpc/orpc-client.ts`.
-- **Components**: Shadcn/UI in `src/components/ui/`, configured via `components.json`.
-- **Database types**: Generated with `kysely-codegen` to `src/lib/db-types.ts`. Re-generate after migration changes.
-- **Server migrations**: SQL files in `src/migrations/`, managed by Wrangler D1.
-- **Per-list sync DB**: CRDT table schemas in `src/list-db/migrations.ts`, using `makeCrdtTable()` from core.
-- **Generated files**: `*.gen.ts` files are auto-generated and excluded from Biome.
+- `routeTree.gen.ts` is auto-generated — never edit manually
+- DB types in `src/lib/db-types.ts` — regenerate after migrations with `generate:types:db`
+- `worker-configuration.d.ts` is generated by `wrangler types` — regenerate after `wrangler.jsonc` changes
+- Per-list CRDT schemas in `src/list-db/migrations.ts` using `makeCrdtTable()` from `@sqlite-sync/core`
+- `*.gen.ts` excluded from Biome
+- `MODE` env var: cast to string before comparing — `(env.MODE as string) === "production"`
 
-## Environment Variables
+## Cloudflare Bindings (`wrangler.jsonc`)
 
-Required bindings (configured in `wrangler.jsonc`):
+- D1: binding `MAIN_DB`, database name `watchlist-admin`
+- Durable Object: `ListDbServer` (per-list, prefix `list-db`)
+- AI: remote inference binding `AI`
+- Worker name: `watchlist-new`
 
-| Variable | Purpose |
-|----------|---------|
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
-| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | Twitch OAuth |
-| `AUTH_SECRET` | Session signing |
-| `RESEND_API_KEY` | Email delivery (optional) |
-| `VITE_APP_URL` | Public app URL |
-| `MODE` | `"development"` or `"production"` |
+## Env Vars
 
-Cloudflare bindings:
-- **D1**: `watchlist-admin`
-- **Durable Object**: `ListDbServer`
-- **AI**: Remote inference binding
+`GOOGLE_CLIENT_ID/SECRET`, `TWITCH_CLIENT_ID/SECRET`, `AUTH_SECRET`, `RESEND_API_KEY`, `VITE_APP_URL`, `MODE`
