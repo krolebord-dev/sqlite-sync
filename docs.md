@@ -31,6 +31,9 @@ pnpm add @sqlite-sync/react
 
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
+
+# Optional: any Standard Schema v1 validator for jobs API (zod, valibot, arktype, etc.)
+pnpm add zod
 ```
 
 Peer dependencies:
@@ -932,6 +935,53 @@ function createMigrator(
   updateLogTableName?: string
 ): SyncDbMigrator
 ```
+
+#### `@sqlite-sync/cloudflare/jobs`
+
+SQLite-backed background jobs for Durable Objects with alarm-based execution.
+
+```ts
+import { defineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
+import { z } from "zod";
+
+const exampleJob = defineJob({ type: "example" })
+  .input(z.object({ world: z.string() }))
+  .handler(async ({ input }) => {
+    console.log("hello", input.world);
+  });
+
+let jobsRuntime: JobRuntime;
+
+async function onStart(ctx: DurableObjectState, env: Env) {
+  jobsRuntime = await setupJobs({
+    jobs: [exampleJob],
+    ctx,
+    env,
+  });
+}
+
+function onAlarm() {
+  return jobsRuntime.onAlarm();
+}
+```
+
+**Job APIs**
+
+| Method | Description |
+|--------|-------------|
+| `defineJob({ type }).input(schema).handler(fn)` | Define a typed job handler. |
+| `setupJobs({ jobs, ctx, env, maxJobsPerAlarm? })` | Initialize schema/alarms and create runtime. |
+| `job.schedule(ctx, { input, at })` | Enqueue one-off run at a timestamp. Always inserts a new row. |
+| `job.scheduleInterval(ctx, { input, dedupeKey, everyMs, startAt? })` | Upsert recurring schedule by `(type, dedupeKey)`. |
+| `job.cancelInterval(ctx, { dedupeKey })` | Cancel active recurring schedule for that key. |
+
+**Execution semantics**
+
+- Due jobs are processed serially in FIFO order by `scheduledAt`.
+- No automatic retries on failure.
+- Interval schedules use fixed-delay (`nextRunAt = now + everyMs`).
+- Missed interval ticks are coalesced into one run after wake-up.
+- Job history is retained in SQLite tables.
 
 ### WebSocket Protocol
 

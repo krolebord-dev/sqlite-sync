@@ -272,6 +272,9 @@ importers:
       kysely-codegen:
         specifier: ^0.19.0
         version: 0.19.0(better-sqlite3@12.6.2)(kysely@0.28.10)(pg@8.17.2)(typescript@5.9.3)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -522,6 +525,9 @@ importers:
       '@sqlite-sync/core':
         specifier: workspace:*
         version: link:../core
+      '@standard-schema/spec':
+        specifier: ^1.1.0
+        version: 1.1.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260124.0
@@ -5626,11 +5632,6 @@ packages:
       typescript:
         optional: true
 
-  tsx@4.20.5:
-    resolution: {integrity: sha512-+wKjMNU9w/EaQayHXb7WA7ZaHY6hN8WgfvHNQ3t1PnU91/7O8TcTnIhCDYTZwnt8JsO9IBqZ30Ln1r7pPF52Aw==}
-    engines: {node: '>=18.0.0'}
-    hasBin: true
-
   tsx@4.21.0:
     resolution: {integrity: sha512-5C1sg4USs1lfG0GFb2RLXsdpXqBSEhAaA/0kPL01wxzpMqLILNxIxIOKiILz+cdg/pLnOUxFYOR5yhHU666wbw==}
     engines: {node: '>=18.0.0'}
@@ -10473,7 +10474,7 @@ snapshots:
       preact: 10.27.2
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
-      tsx: 4.20.5
+      tsx: 4.21.0
     optionalDependencies:
       react-router: 7.12.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       react-router-dom: 7.12.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -10913,13 +10914,6 @@ snapshots:
       - supports-color
       - tsx
       - yaml
-
-  tsx@4.20.5:
-    dependencies:
-      esbuild: 0.25.12
-      get-tsconfig: 4.13.0
-    optionalDependencies:
-      fsevents: 2.3.3
 
   tsx@4.21.0:
     dependencies:

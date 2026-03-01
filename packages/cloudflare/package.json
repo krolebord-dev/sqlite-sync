@@ -26,6 +26,12 @@
       "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./jobs": {
+      "@sqlite-sync/source": "./src/jobs/index.ts",
+      "workerd": "./src/jobs/index.ts",
+      "types": "./dist/jobs.d.ts",
+      "import": "./dist/jobs.js"
     }
   },
   "files": [
@@ -38,7 +44,8 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@sqlite-sync/core": "workspace:*"
+    "@sqlite-sync/core": "workspace:*",
+    "@standard-schema/spec": "^1.1.0"
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "^4.0.0",

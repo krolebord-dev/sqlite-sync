@@ -177,6 +177,44 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
+### Durable Object Background Jobs
+
+`@sqlite-sync/cloudflare/jobs` provides SQLite-backed job scheduling inside a Durable Object with alarm-driven execution.
+
+```ts
+import { defineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
+import { z } from "zod";
+
+const digestJob = defineJob({ type: "digest" })
+  .input(z.object({ userId: z.string() }))
+  .handler(async ({ input }) => {
+    console.log("generate digest for", input.userId);
+  });
+
+export class DigestServer extends Server<Env> {
+  private jobs!: JobRuntime;
+
+  async onStart() {
+    this.jobs = await setupJobs({
+      jobs: [digestJob],
+      ctx: this.ctx,
+      env: this.env,
+    });
+  }
+
+  onAlarm() {
+    return this.jobs.onAlarm();
+  }
+
+  onMessage() {
+    void digestJob.schedule(this.ctx, {
+      input: { userId: "u-1" },
+      at: Date.now() + 1_000,
+    });
+  }
+}
+```
+
 ## How Sync Works
 
 Runtime model:
