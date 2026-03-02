@@ -1,5 +1,5 @@
 import { durableObjectAdapter, type RemoteHandler } from "@sqlite-sync/cloudflare";
-import { type JobRuntime, setupJobs } from "@sqlite-sync/cloudflare/jobs";
+import { type JobRuntime, setupJobs } from "do-jobs";
 import { type Connection, Server } from "partyserver";
 import { fetchCurrencyRatesJob } from "./jobs/fetch-currency-rates";
 import { jobs } from "./jobs/jobs";

@@ -205,6 +205,9 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
+      do-jobs:
+        specifier: ^0.0.2
+        version: 0.0.2(@cloudflare/workers-types@4.20260124.0)
       kysely:
         specifier: ^0.28.10
         version: 0.28.10
@@ -525,9 +528,6 @@ importers:
       '@sqlite-sync/core':
         specifier: workspace:*
         version: link:../core
-      '@standard-schema/spec':
-        specifier: ^1.1.0
-        version: 1.1.0
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260124.0
@@ -4109,6 +4109,11 @@ packages:
   diff@8.0.3:
     resolution: {integrity: sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ==}
     engines: {node: '>=0.3.1'}
+
+  do-jobs@0.0.2:
+    resolution: {integrity: sha512-9TyzUukeyrzKq/xBd/eW+gkJ8JltsMbctRwXUsIFqQwL7mf4kYBPCi6P8upQ7SbjV8aDpTeJlzkDaUlLig2gaQ==}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.0.0
 
   dom-accessibility-api@0.5.16:
     resolution: {integrity: sha512-X7BJ2yElsnOJ30pZF4uIIDfBEVgF4XEBxL9Bxhy6dnrm5hkzqmsWHGTiHqRiITNhMyFLyAiWndIJP7Z1NTteDg==}
@@ -9405,6 +9410,11 @@ snapshots:
   diff@3.5.0: {}
 
   diff@8.0.3: {}
+
+  do-jobs@0.0.2(@cloudflare/workers-types@4.20260124.0):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260124.0
+      '@standard-schema/spec': 1.1.0
 
   dom-accessibility-api@0.5.16: {}
 

@@ -32,6 +32,9 @@ pnpm add @sqlite-sync/react
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
 
+# Durable Object jobs runtime
+pnpm add do-jobs
+
 # Optional: any Standard Schema v1 validator for jobs API (zod, valibot, arktype, etc.)
 pnpm add zod
 ```
@@ -936,12 +939,12 @@ function createMigrator(
 ): SyncDbMigrator
 ```
 
-#### `@sqlite-sync/cloudflare/jobs`
+#### `do-jobs`
 
 SQLite-backed background jobs for Durable Objects with alarm-based execution.
 
 ```ts
-import { createDefineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
+import { createDefineJob, setupJobs, type JobRuntime } from "do-jobs";
 import { z } from "zod";
 
 type JobContext = { ctx: DurableObjectState; env: Env };

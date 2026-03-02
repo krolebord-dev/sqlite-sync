@@ -1,5 +1,5 @@
 import type { ServerSyncDb } from "@sqlite-sync/cloudflare";
-import { createDefineJob } from "@sqlite-sync/cloudflare/jobs";
+import { createDefineJob } from "do-jobs";
 import type { UserSyncDbSchema } from "../migrations";
 
 export type UserDbJobContext = {

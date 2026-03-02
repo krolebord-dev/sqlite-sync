@@ -179,10 +179,10 @@ export default {
 
 ### Durable Object Background Jobs
 
-`@sqlite-sync/cloudflare/jobs` provides SQLite-backed job scheduling inside a Durable Object with alarm-driven execution.
+`do-jobs` provides SQLite-backed job scheduling inside a Durable Object with alarm-driven execution.
 
 ```ts
-import { createDefineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
+import { createDefineJob, setupJobs, type JobRuntime } from "do-jobs";
 import { z } from "zod";
 
 type JobContext = { ctx: DurableObjectState; env: Env };
