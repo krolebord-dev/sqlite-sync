@@ -2,7 +2,9 @@
 
 name: Release on npm
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build_and_publish:
