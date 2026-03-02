@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/krolebord/sqlite-sync.git",
+    "url": "https://github.com/krolebord-dev/sqlite-sync",
     "directory": "packages/core"
   },
   "keywords": [
