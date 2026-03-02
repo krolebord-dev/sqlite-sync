@@ -1,5 +1,5 @@
 {
-  "version": "0.0.3",
+  "version": "0.0.4",
   "name": "sqlite-sync-monorepo",
   "private": true,
   "type": "module",
