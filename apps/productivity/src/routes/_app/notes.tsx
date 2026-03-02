@@ -95,7 +95,7 @@ function NotesPage() {
 
   return (
     <div className="px-4 py-4 sm:px-6 sm:py-6">
-      <div className="mb-4 sm:mb-6 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between sm:mb-6">
         <h1 className="font-semibold text-xl">Notes</h1>
         <Button onClick={createNote} size="sm">
           <PlusIcon />

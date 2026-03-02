@@ -93,7 +93,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             to={item.to}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex items-center gap-2 rounded-md px-3 py-2 font-medium text-sm transition-colors",
               currentPath === item.to
                 ? "bg-sidebar-accent text-sidebar-accent-foreground"
                 : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
@@ -117,7 +117,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               <AvatarFallback className="text-xs">{auth.userName.slice(0, 2)}</AvatarFallback>
             </Avatar>
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-medium">{auth.userName}</span>
+              <span className="truncate font-medium text-sm">{auth.userName}</span>
               <span className="truncate text-muted-foreground text-xs">{auth.userEmail}</span>
             </div>
             <ChevronsUpDown className="size-4 shrink-0 text-sidebar-foreground/50" />
@@ -130,7 +130,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 <AvatarFallback className="text-xs">{auth.userName.slice(0, 2)}</AvatarFallback>
               </Avatar>
               <div className="flex min-w-0 flex-col">
-                <span className="truncate text-sm font-medium">{auth.userName}</span>
+                <span className="truncate font-medium text-sm">{auth.userName}</span>
                 <span className="truncate text-muted-foreground text-xs">{auth.userEmail}</span>
               </div>
             </div>
@@ -164,7 +164,7 @@ function MobileSidebar() {
           <Button
             variant="secondary"
             size="icon"
-            className="fixed bottom-4 left-4 z-40 size-11 !rounded-full shadow-lg md:hidden"
+            className="!rounded-full fixed bottom-4 left-4 z-40 size-11 shadow-lg md:hidden"
             aria-label="Open menu"
           >
             <Menu className="size-5" />
@@ -178,7 +178,7 @@ function MobileSidebar() {
       <Button
         variant="default"
         size="icon"
-        className="fixed right-4 bottom-4 z-40 size-11 !rounded-full shadow-lg md:hidden"
+        className="!rounded-full fixed right-4 bottom-4 z-40 size-11 shadow-lg md:hidden"
         aria-label="Open command palette"
         onClick={openCommand}
       >

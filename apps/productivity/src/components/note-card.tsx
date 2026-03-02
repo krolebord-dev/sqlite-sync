@@ -62,7 +62,7 @@ export function NoteCard({ note, onUpdate, onDelete }: NoteCardProps) {
       <div
         ref={setNodeRef}
         style={style}
-        className="group mb-2 sm:mb-4 break-inside-avoid"
+        className="group mb-2 break-inside-avoid sm:mb-4"
         {...attributes}
         {...listeners}
       >
