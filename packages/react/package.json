@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/react",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "React bindings for @sqlite-sync/core",
   "type": "module",
   "license": "MIT",
