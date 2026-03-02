@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/cloudflare",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "description": "Cloudflare utilities for @sqlite-sync/core",
   "type": "module",
   "license": "MIT",
