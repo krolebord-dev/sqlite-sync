@@ -9,7 +9,7 @@
     "dev:server": "pnpm --filter @sqlite-sync/example dev:server",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "publish:packages": "pnpm --filter './packages/**' publish --access public",
+    "publish:packages": "pnpm --filter './packages/**' publish --access public --no-git-checks",
     "publish:dry": "pnpm --filter './packages/**' publish --access public --dry-run",
     "version": "pnpm --filter './packages/**' exec npm version $(node -p \"require('./package.json').version\") --no-git-tag-version && git add --all",
     "version:patch": "npm version patch",
