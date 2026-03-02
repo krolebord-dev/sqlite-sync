@@ -40,17 +40,28 @@ export type JobRunResult = {
 export type JobRuntime = {
   onAlarm: () => Promise<JobRunResult>;
   setNextAlarm: () => Promise<number | null>;
+  schedule: <TType extends string, TSchema extends StandardSchemaV1>(
+    job: DefinedJob<TType, TSchema>,
+    options: JobScheduleOptions<StandardSchemaV1.InferOutput<TSchema>>,
+  ) => Promise<JobRunRecord<TType, StandardSchemaV1.InferOutput<TSchema>>>;
+  scheduleInterval: <TType extends string, TSchema extends StandardSchemaV1>(
+    job: DefinedJob<TType, TSchema>,
+    options: IntervalJobScheduleOptions<StandardSchemaV1.InferOutput<TSchema>>,
+  ) => Promise<IntervalScheduleRecord<TType, StandardSchemaV1.InferOutput<TSchema>>>;
+  cancelInterval: <TType extends string, TSchema extends StandardSchemaV1>(
+    job: DefinedJob<TType, TSchema>,
+    options: CancelIntervalJobOptions,
+  ) => Promise<boolean>;
 };
 
-export type JobExecutionContext<TInput, TEnv, TType extends string> = {
+export type JobExecutionContext<TInput, TContext extends Record<string, unknown>, TType extends string> = {
   input: TInput;
-  ctx: DurableObjectState;
-  env: TEnv;
+  context: TContext;
   job: JobRunRecord<TType, TInput>;
 };
 
-export type JobHandler<TInput, TEnv, TType extends string> = (
-  context: JobExecutionContext<TInput, TEnv, TType>,
+export type JobHandler<TInput, TContext extends Record<string, unknown>, TType extends string> = (
+  context: JobExecutionContext<TInput, TContext, TType>,
 ) => void | Promise<void>;
 
 export type JobScheduleOptions<TInput> = {
@@ -69,27 +80,34 @@ export type CancelIntervalJobOptions = {
   dedupeKey: string;
 };
 
-export type DefinedJob<TType extends string, TSchema extends StandardSchemaV1> = {
+export type DefinedJob<
+  TType extends string,
+  TSchema extends StandardSchemaV1,
+  TContext extends Record<string, unknown> = Record<string, unknown>,
+> = {
   type: TType;
-  schedule: (
-    ctx: DurableObjectState,
-    options: JobScheduleOptions<StandardSchemaV1.InferOutput<TSchema>>,
-  ) => Promise<JobRunRecord<TType, StandardSchemaV1.InferOutput<TSchema>>>;
-  scheduleInterval: (
-    ctx: DurableObjectState,
-    options: IntervalJobScheduleOptions<StandardSchemaV1.InferOutput<TSchema>>,
-  ) => Promise<IntervalScheduleRecord<TType, StandardSchemaV1.InferOutput<TSchema>>>;
-  cancelInterval: (ctx: DurableObjectState, options: CancelIntervalJobOptions) => Promise<boolean>;
+  /** @internal Phantom field for type inference — never set at runtime. */
+  readonly "~schema"?: TSchema;
+  /** @internal Phantom field for type inference — never set at runtime. */
+  readonly "~context"?: TContext;
 };
 
-export type AnyDefinedJob = DefinedJob<string, StandardSchemaV1>;
+export type AnyDefinedJob = DefinedJob<string, StandardSchemaV1, Record<string, unknown>>;
 
-export type DefineJobInputBuilder<TType extends string, TSchema extends StandardSchemaV1> = {
-  handler: <TEnv>(
-    handler: JobHandler<StandardSchemaV1.InferOutput<TSchema>, TEnv, TType>,
-  ) => DefinedJob<TType, TSchema>;
+export type DefineJobInputBuilder<
+  TType extends string,
+  TSchema extends StandardSchemaV1,
+  TContext extends Record<string, unknown>,
+> = {
+  handler: (
+    handler: JobHandler<StandardSchemaV1.InferOutput<TSchema>, TContext, TType>,
+  ) => DefinedJob<TType, TSchema, TContext>;
 };
 
-export type DefineJobBuilder<TType extends string> = {
-  input: <TSchema extends StandardSchemaV1>(schema: TSchema) => DefineJobInputBuilder<TType, TSchema>;
+export type DefineJobBuilder<TType extends string, TContext extends Record<string, unknown>> = {
+  input: <TSchema extends StandardSchemaV1>(schema: TSchema) => DefineJobInputBuilder<TType, TSchema, TContext>;
 };
+
+export type CreateDefineJobBuilder<TContext extends Record<string, unknown>> = <TType extends string>(options: {
+  type: TType;
+}) => DefineJobBuilder<TType, TContext>;

@@ -1,8 +1,9 @@
-export { defineJob } from "./define-job";
+export { createDefineJob } from "./define-job";
 export { setupJobs } from "./runtime";
 export type {
   AnyDefinedJob,
   CancelIntervalJobOptions,
+  CreateDefineJobBuilder,
   DefinedJob,
   DefineJobBuilder,
   DefineJobInputBuilder,

@@ -941,39 +941,46 @@ function createMigrator(
 SQLite-backed background jobs for Durable Objects with alarm-based execution.
 
 ```ts
-import { defineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
+import { createDefineJob, setupJobs, type JobRuntime } from "@sqlite-sync/cloudflare/jobs";
 import { z } from "zod";
+
+type JobContext = { ctx: DurableObjectState; env: Env };
+const defineJob = createDefineJob<JobContext>();
 
 const exampleJob = defineJob({ type: "example" })
   .input(z.object({ world: z.string() }))
-  .handler(async ({ input }) => {
-    console.log("hello", input.world);
+  .handler(async ({ input, context }) => {
+    console.log("hello", input.world, context.env);
   });
 
-let jobsRuntime: JobRuntime;
+let jobs: JobRuntime;
 
 async function onStart(ctx: DurableObjectState, env: Env) {
-  jobsRuntime = await setupJobs({
+  jobs = await setupJobs({
     jobs: [exampleJob],
     ctx,
-    env,
+    context: { ctx, env },
   });
 }
 
 function onAlarm() {
-  return jobsRuntime.onAlarm();
+  return jobs.onAlarm();
 }
+
+// Schedule a one-off job
+await jobs.schedule(exampleJob, { input: { world: "earth" }, at: Date.now() + 1000 });
 ```
 
 **Job APIs**
 
 | Method | Description |
 |--------|-------------|
-| `defineJob({ type }).input(schema).handler(fn)` | Define a typed job handler. |
-| `setupJobs({ jobs, ctx, env, maxJobsPerAlarm? })` | Initialize schema/alarms and create runtime. |
-| `job.schedule(ctx, { input, at })` | Enqueue one-off run at a timestamp. Always inserts a new row. |
-| `job.scheduleInterval(ctx, { input, dedupeKey, everyMs, startAt? })` | Upsert recurring schedule by `(type, dedupeKey)`. |
-| `job.cancelInterval(ctx, { dedupeKey })` | Cancel active recurring schedule for that key. |
+| `createDefineJob<TContext>()` | Create a typed `defineJob` factory bound to a context shape. |
+| `defineJob({ type }).input(schema).handler(fn)` | Define a typed job handler. Handler receives `{ input, context, job }`. |
+| `setupJobs({ jobs, ctx, context, maxJobsPerAlarm? })` | Initialize schema/alarms and create runtime. `context` is passed to handlers. |
+| `jobs.schedule(job, { input, at })` | Enqueue one-off run at a timestamp. Always inserts a new row. |
+| `jobs.scheduleInterval(job, { input, dedupeKey, everyMs, startAt? })` | Upsert recurring schedule by `(type, dedupeKey)`. |
+| `jobs.cancelInterval(job, { dedupeKey })` | Cancel active recurring schedule for that key. |
 
 **Execution semantics**
 
