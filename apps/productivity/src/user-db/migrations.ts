@@ -107,6 +107,7 @@ const migrations = createMigrations((b) => ({
         .addColumn("ZAR", "real"),
     ),
   ],
+  3: [],
 }));
 
 export type UserDb = (typeof syncDbSchema)["~clientSchema"];

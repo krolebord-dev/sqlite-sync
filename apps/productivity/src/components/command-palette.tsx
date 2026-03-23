@@ -3,9 +3,9 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
 import { Home, PlusIcon, StickyNote } from "lucide-react";
 import { useSyncExternalStore } from "react";
+import { useCreateNote } from "@/components/note-dialog";
 import { useCommandStore } from "@/lib/command-store";
 import { NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
-import { useCreateNote } from "@/lib/use-create-note";
 import {
   CommandDialog,
   CommandEmpty,

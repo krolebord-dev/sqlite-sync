@@ -5,8 +5,10 @@
     "defaultEffort": "high"
   },
   "localCodex": {
+    "model": "gpt-5.4",
     "permissionMode": "yolo",
-    "modelReasoningEffort": "high"
+    "modelReasoningEffort": "high",
+    "fastMode": "fast"
   },
   "localCursor": {
     "model": "gpt-5.3-codex-high",

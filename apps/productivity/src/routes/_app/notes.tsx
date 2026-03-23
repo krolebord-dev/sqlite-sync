@@ -8,60 +8,54 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { arraySwap, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
-import { useCallback, useState } from "react";
-import { toast } from "sonner";
+import { useCallback, useMemo, useState } from "react";
+import { MasonryGrid } from "@/components/masonry-grid";
 import { NoteCard } from "@/components/note-card";
+import { useCreateNote } from "@/components/note-dialog";
 import { Button } from "@/components/ui/button";
 import { NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
-import { useCreateNote } from "@/lib/use-create-note";
-import type { NoteItem } from "@/user-db/migrations";
 import { useDb, useDbQuery } from "@/user-db/user-db";
 
 export const Route = createFileRoute("/_app/notes")({
   component: NotesPage,
 });
 
-function getOrderBetween(before: NoteItem | undefined, after: NoteItem | undefined): number {
-  if (before && after) return (before.order + after.order) / 2;
-  if (before) return before.order + 500;
-  if (after) return after.order - 500;
-  return 1000;
-}
-
 function NotesPage() {
   const db = useDb();
   const createNote = useCreateNote();
-  const [activeId, setActiveId] = useState<string | null>(null);
 
-  const { data: notes } = useDbQuery((db) =>
-    db.selectFrom("item").selectAll().where("type", "=", "note").orderBy("order", "asc").orderBy("createdAt", "desc"),
+  const { data: list } = useDbQuery(
+    (db) => db.selectFrom("item").selectAll().where("type", "=", "note").orderBy("order", "asc"),
+    {
+      mapData: (notes) => ({
+        notes: notes,
+        timestamp: Date.now(),
+      }),
+    },
   );
+  const [optimisticList, _setOptimisticList] = useState<typeof list>(list);
 
-  const noteList = notes ?? [];
-  const activeNote = activeId ? noteList.find((n) => n.id === activeId) : null;
+  const setOptimisticList = useCallback((notes: (typeof list)["notes"]) => {
+    _setOptimisticList({
+      notes,
+      timestamp: Date.now(),
+    });
+  }, []);
+
+  const notes = list.timestamp > optimisticList.timestamp ? list.notes : optimisticList.notes;
+
+  const noteIds = useMemo(() => notes.map((note) => note.id), [notes]);
+
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const activeNote = useMemo(() => notes.find((note) => note.id === activeId), [notes, activeId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-
-  const updateNote = useCallback(
-    (id: string, fields: Partial<Pick<NoteItem, "title" | "content">>) => {
-      db.db.executeKysely((q) => q.updateTable("item").set(fields).where("id", "=", id));
-    },
-    [db],
-  );
-
-  const deleteNote = useCallback(
-    (id: string) => {
-      db.db.executeKysely((q) => q.deleteFrom("item").where("id", "=", id));
-      toast.success("Note deleted");
-    },
-    [db],
   );
 
   function handleDragStart(event: DragStartEvent) {
@@ -73,24 +67,29 @@ function NotesPage() {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    const oldIndex = noteList.findIndex((n) => n.id === active.id);
-    const newIndex = noteList.findIndex((n) => n.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
+    const oldOrder = over.data.current?.order;
+    const newOrder = active.data.current?.order;
 
-    const reordered = [...noteList];
-    const [moved] = reordered.splice(oldIndex, 1);
-    reordered.splice(newIndex, 0, moved);
+    if (oldOrder === undefined || newOrder === undefined) return;
 
-    const before = reordered[newIndex - 1];
-    const after = reordered[newIndex + 1];
-    const newOrder = getOrderBetween(before, after);
+    const oldIndex = notes.findIndex((note) => note.id === active.id);
+    const newIndex = notes.findIndex((note) => note.id === over.id);
+    setOptimisticList(arraySwap(notes, oldIndex, newIndex));
 
-    db.db.executeKysely((q) =>
-      q
-        .updateTable("item")
-        .set({ order: newOrder })
-        .where("id", "=", active.id as string),
-    );
+    db.db.executeTransaction((trx) => {
+      trx.executeKysely((q) =>
+        q
+          .updateTable("item")
+          .set({ order: oldOrder })
+          .where("id", "=", active.id as string),
+      );
+      trx.executeKysely((q) =>
+        q
+          .updateTable("item")
+          .set({ order: newOrder })
+          .where("id", "=", over.id as string),
+      );
+    });
   }
 
   return (
@@ -106,7 +105,7 @@ function NotesPage() {
         </Button>
       </div>
 
-      {noteList.length === 0 && (
+      {notes.length === 0 && (
         <div className="flex flex-col items-center gap-3 pt-16 text-center">
           <p className="text-muted-foreground text-sm">No notes yet. Create one to get started.</p>
           <Button onClick={createNote} variant="outline">
@@ -122,16 +121,18 @@ function NotesPage() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <SortableContext items={noteList.map((n) => n.id)} strategy={rectSortingStrategy}>
-          <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
-            {noteList.map((note) => (
-              <NoteCard key={note.id} note={note} onUpdate={updateNote} onDelete={deleteNote} />
-            ))}
-          </div>
+        <SortableContext items={noteIds} strategy={rectSwappingStrategy}>
+          <MasonryGrid
+            items={notes}
+            itemKey={(note) => note.id}
+            columnWidth={280}
+            gap={16}
+            renderItem={(note) => <NoteCard key={note.id} note={note} />}
+          />
         </SortableContext>
 
-        <DragOverlay dropAnimation={null}>
-          {activeNote ? (
+        <DragOverlay>
+          {activeNote && (
             <div className="rotate-1 rounded-lg border bg-card opacity-90 shadow-xl">
               <div className="px-4 py-3">
                 {activeNote.title && (
@@ -147,7 +148,7 @@ function NotesPage() {
                 )}
               </div>
             </div>
-          ) : null}
+          )}
         </DragOverlay>
       </DndContext>
     </div>
