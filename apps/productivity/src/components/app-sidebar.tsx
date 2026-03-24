@@ -1,13 +1,12 @@
 import type { DragEndEvent } from "@dnd-kit/core";
+import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import { arraySwap, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+  arraySwap,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Link, useMatches, useNavigate, useRouter } from "@tanstack/react-router";
 import {
@@ -91,7 +90,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="flex h-14 items-center justify-between px-4">
-        <Link to="/" className="font-semibold text-base tracking-tight">Productivity</Link>
+        <Link to="/" className="font-semibold text-base tracking-tight">
+          Productivity
+        </Link>
         <RemoteStateIndicator />
       </div>
 
@@ -186,7 +187,14 @@ function formatCompactBalance(balance: number, currency: string): string {
   }
 }
 
-type AccountRow = { id: string; labelColor: string; labelText: string; balance: number; currency: string; order: number };
+type AccountRow = {
+  id: string;
+  labelColor: string;
+  labelText: string;
+  balance: number;
+  currency: string;
+  order: number;
+};
 
 function SortableAccountRow({ account, onNavigate }: { account: AccountRow; onNavigate?: () => void }) {
   const sortable = useSortable({ id: account.id, data: { order: account.order } });
@@ -225,7 +233,10 @@ function SortableAccountRow({ account, onNavigate }: { account: AccountRow; onNa
 function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | undefined; onNavigate?: () => void }) {
   const db = useDb();
   const { data: accounts } = useDbQuery((db) =>
-    db.selectFrom("account").select(["id", "labelColor", "labelText", "balance", "currency", "order"]).orderBy("order", "asc"),
+    db
+      .selectFrom("account")
+      .select(["id", "labelColor", "labelText", "balance", "currency", "order"])
+      .orderBy("order", "asc"),
   );
 
   const isActive = currentPath === "/accounts";
@@ -245,10 +256,16 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
 
     db.db.executeTransaction((trx) => {
       trx.executeKysely((q) =>
-        q.updateTable("account").set({ order: oldOrder }).where("id", "=", active.id as string),
+        q
+          .updateTable("account")
+          .set({ order: oldOrder })
+          .where("id", "=", active.id as string),
       );
       trx.executeKysely((q) =>
-        q.updateTable("account").set({ order: newOrder }).where("id", "=", over.id as string),
+        q
+          .updateTable("account")
+          .set({ order: newOrder })
+          .where("id", "=", over.id as string),
       );
     });
   }

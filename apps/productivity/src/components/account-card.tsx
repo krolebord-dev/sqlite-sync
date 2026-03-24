@@ -43,10 +43,7 @@ export function AccountCard({ account }: AccountCardProps) {
           </button>
         </div>
 
-        <div
-          className="cursor-pointer select-none px-4 py-3"
-          onClick={() => openAccountDialog(account.id)}
-        >
+        <div className="cursor-pointer select-none px-4 py-3" onClick={() => openAccountDialog(account.id)}>
           <div className="mb-2 flex items-center gap-2">
             <span
               className="inline-block size-3 shrink-0 rounded-full"

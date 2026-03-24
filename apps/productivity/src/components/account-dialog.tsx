@@ -9,9 +9,37 @@ import { useAppForm } from "./ui/form";
 import { SelectItem } from "./ui/select";
 
 const CURRENCIES = [
-  "AUD", "BRL", "CAD", "CHF", "CNY", "CZK", "DKK", "EUR", "GBP", "HKD",
-  "HUF", "IDR", "ILS", "INR", "ISK", "JPY", "KRW", "MXN", "MYR", "NOK",
-  "NZD", "PHP", "PLN", "RON", "SEK", "SGD", "THB", "TRY", "UAH", "USD", "ZAR",
+  "AUD",
+  "BRL",
+  "CAD",
+  "CHF",
+  "CNY",
+  "CZK",
+  "DKK",
+  "EUR",
+  "GBP",
+  "HKD",
+  "HUF",
+  "IDR",
+  "ILS",
+  "INR",
+  "ISK",
+  "JPY",
+  "KRW",
+  "MXN",
+  "MYR",
+  "NOK",
+  "NZD",
+  "PHP",
+  "PLN",
+  "RON",
+  "SEK",
+  "SGD",
+  "THB",
+  "TRY",
+  "UAH",
+  "USD",
+  "ZAR",
 ] as const;
 
 const LABEL_COLORS = [
@@ -54,7 +82,10 @@ function AccountDialogContent() {
   const db = useDb();
 
   const { data: existingAccounts } = useDbQuery((q) =>
-    q.selectFrom("account").selectAll().where("id", "=", accountId ?? ""),
+    q
+      .selectFrom("account")
+      .selectAll()
+      .where("id", "=", accountId ?? ""),
   );
   const existing = mode === "edit" ? existingAccounts[0] : undefined;
 
@@ -148,9 +179,7 @@ function AccountDialogContent() {
                       style={{
                         backgroundColor: color,
                         boxShadow:
-                          field.state.value === color
-                            ? `0 0 0 2px var(--background), 0 0 0 4px ${color}`
-                            : undefined,
+                          field.state.value === color ? `0 0 0 2px var(--background), 0 0 0 4px ${color}` : undefined,
                       }}
                       onClick={() => field.handleChange(color)}
                       aria-label={`Select color ${color}`}
@@ -178,10 +207,7 @@ function AccountDialogContent() {
 
             <form.AppField name="balance">
               {(field) => (
-                <field.FieldContainer
-                  labelText={mode === "create" ? "Initial balance" : "Balance"}
-                  className="flex-1"
-                >
+                <field.FieldContainer labelText={mode === "create" ? "Initial balance" : "Balance"} className="flex-1">
                   <field.FormInput
                     type="number"
                     step="0.01"
