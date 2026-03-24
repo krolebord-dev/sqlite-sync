@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { AccountDialog } from "@/components/account-dialog";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { NoteDialog } from "@/components/note-dialog";
@@ -39,6 +40,7 @@ function RouteComponent() {
       </div>
       <CommandPalette />
       <NoteDialog />
+      <AccountDialog />
     </DbProvider>
   );
 }

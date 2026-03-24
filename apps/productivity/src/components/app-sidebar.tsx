@@ -1,12 +1,37 @@
-import { Link, useMatches, useRouter } from "@tanstack/react-router";
-import { ChevronsUpDown, Home, Loader2, LogOut, Menu, PlusIcon, Search, StickyNote, Wifi, WifiOff } from "lucide-react";
+import type { DragEndEvent } from "@dnd-kit/core";
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { arraySwap, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Link, useMatches, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  ChevronDown,
+  ChevronsUpDown,
+  Home,
+  Loader2,
+  LogOut,
+  Menu,
+  PlusIcon,
+  Search,
+  StickyNote,
+  Wallet,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth, useSignOut } from "@/lib/auth-client";
 import { useCommandStore } from "@/lib/command-store";
 import { cn } from "@/lib/utils";
-import { useDb, useDbState } from "@/user-db/user-db";
+import { useDb, useDbQuery, useDbState } from "@/user-db/user-db";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Button } from "./ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,7 +91,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="flex h-14 items-center justify-between px-4">
-        <span className="font-semibold text-base tracking-tight">Productivity</span>
+        <Link to="/" className="font-semibold text-base tracking-tight">Productivity</Link>
         <RemoteStateIndicator />
       </div>
 
@@ -103,6 +128,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             {item.label}
           </Link>
         ))}
+        <AccountsNavItem currentPath={currentPath} onNavigate={onNavigate} />
       </nav>
 
       <Separator />
@@ -143,6 +169,128 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </DropdownMenuContent>
       </DropdownMenu>
     </>
+  );
+}
+
+function formatCompactBalance(balance: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      currencyDisplay: "narrowSymbol",
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(balance);
+  } catch {
+    return `${currency} ${balance.toFixed(0)}`;
+  }
+}
+
+type AccountRow = { id: string; labelColor: string; labelText: string; balance: number; currency: string; order: number };
+
+function SortableAccountRow({ account, onNavigate }: { account: AccountRow; onNavigate?: () => void }) {
+  const sortable = useSortable({ id: account.id, data: { order: account.order } });
+  const navigate = useNavigate();
+
+  return (
+    <button
+      type="button"
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(sortable.transform),
+        transition: sortable.transition,
+      }}
+      {...sortable.attributes}
+      {...sortable.listeners}
+      onClick={() => {
+        if (!sortable.isDragging) {
+          navigate({ to: "/accounts" });
+          onNavigate?.();
+        }
+      }}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/70 text-sm transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+        sortable.isDragging && "opacity-50",
+      )}
+    >
+      <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ backgroundColor: account.labelColor }} />
+      <span className="flex-1 truncate text-left">{account.labelText || "Untitled"}</span>
+      <span className="text-muted-foreground text-xs tabular-nums">
+        {formatCompactBalance(account.balance, account.currency)}
+      </span>
+    </button>
+  );
+}
+
+function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | undefined; onNavigate?: () => void }) {
+  const db = useDb();
+  const { data: accounts } = useDbQuery((db) =>
+    db.selectFrom("account").select(["id", "labelColor", "labelText", "balance", "currency", "order"]).orderBy("order", "asc"),
+  );
+
+  const isActive = currentPath === "/accounts";
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldOrder = over.data.current?.order;
+    const newOrder = active.data.current?.order;
+    if (oldOrder === undefined || newOrder === undefined) return;
+
+    db.db.executeTransaction((trx) => {
+      trx.executeKysely((q) =>
+        q.updateTable("account").set({ order: oldOrder }).where("id", "=", active.id as string),
+      );
+      trx.executeKysely((q) =>
+        q.updateTable("account").set({ order: newOrder }).where("id", "=", over.id as string),
+      );
+    });
+  }
+
+  return (
+    <Collapsible defaultOpen={accounts.length > 0}>
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-md font-medium text-sm transition-colors",
+          isActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+        )}
+      >
+        <Link to="/accounts" onClick={onNavigate} className="flex flex-1 items-center gap-2 px-3 py-2">
+          <Wallet className="size-4 shrink-0" />
+          Accounts
+        </Link>
+        {accounts.length > 0 && (
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="mr-2 rounded-sm p-0.5 opacity-60 transition-opacity hover:opacity-100"
+              aria-label="Toggle accounts list"
+            >
+              <ChevronDown className="size-3.5 transition-transform [[data-state=closed]_&]:-rotate-90" />
+            </button>
+          </CollapsibleTrigger>
+        )}
+      </div>
+      <CollapsibleContent>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={accounts.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+            <div className="mt-0.5 ml-4 flex flex-col gap-0.5 border-l border-sidebar-border/50 pl-3">
+              {accounts.map((account) => (
+                <SortableAccountRow key={account.id} account={account} onNavigate={onNavigate} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

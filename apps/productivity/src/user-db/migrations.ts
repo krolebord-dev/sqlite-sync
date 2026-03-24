@@ -52,6 +52,19 @@ export type CurrencyRateItem = {
   ZAR: number | null;
 };
 
+export type AccountItem = {
+  id: string;
+  currency: string;
+  initialBalance: number;
+  balance: number;
+  description: string;
+  labelColor: string;
+  labelText: string;
+  order: number;
+  createdAt: number;
+  tombstone?: boolean;
+};
+
 const migrations = createMigrations((b) => ({
   0: [
     b.createTable("_item", (t) =>
@@ -108,6 +121,21 @@ const migrations = createMigrations((b) => ({
     ),
   ],
   3: [],
+  4: [
+    b.createTable("_account", (t) =>
+      t
+        .addColumn("id", "text", (col) => col.primaryKey().notNull())
+        .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false))
+        .addColumn("currency", "text", (col) => col.notNull())
+        .addColumn("initialBalance", "real", (col) => col.notNull().defaultTo(0))
+        .addColumn("balance", "real", (col) => col.notNull().defaultTo(0))
+        .addColumn("description", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("labelColor", "text", (col) => col.notNull().defaultTo("#8b5cf6"))
+        .addColumn("labelText", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("order", "real", (col) => col.notNull().defaultTo(0))
+        .addColumn("createdAt", "integer", (col) => col.notNull()),
+    ),
+  ],
 }));
 
 export type UserDb = (typeof syncDbSchema)["~clientSchema"];
@@ -121,4 +149,6 @@ export const syncDbSchema = createSyncDbSchema({
   .withConfig({ baseTableName: "_item", crdtTableName: "item" })
   .addTable<CurrencyRateItem>()
   .withConfig({ baseTableName: "_currency_rate", crdtTableName: "currency_rate" })
+  .addTable<AccountItem>()
+  .withConfig({ baseTableName: "_account", crdtTableName: "account" })
   .build();

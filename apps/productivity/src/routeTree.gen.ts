@@ -15,6 +15,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AuthSignInRouteImport } from './routes/_auth/sign-in'
 import { Route as AuthMagicLinkVerifyRouteImport } from './routes/_auth/magic-link-verify'
 import { Route as AppNotesRouteImport } from './routes/_app/notes'
+import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
 
 const AuthRouteRoute = AuthRouteRouteImport.update({
   id: '/_auth',
@@ -44,15 +45,22 @@ const AppNotesRoute = AppNotesRouteImport.update({
   path: '/notes',
   getParentRoute: () => AppRouteRoute,
 } as any)
+const AppAccountsRoute = AppAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => AppRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/accounts': typeof AppAccountsRoute
   '/notes': typeof AppNotesRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
+  '/accounts': typeof AppAccountsRoute
   '/notes': typeof AppNotesRoute
   '/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/sign-in': typeof AuthSignInRoute
@@ -61,6 +69,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteRouteWithChildren
   '/_auth': typeof AuthRouteRouteWithChildren
+  '/_app/accounts': typeof AppAccountsRoute
   '/_app/notes': typeof AppNotesRoute
   '/_auth/magic-link-verify': typeof AuthMagicLinkVerifyRoute
   '/_auth/sign-in': typeof AuthSignInRoute
@@ -68,13 +77,14 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/notes' | '/magic-link-verify' | '/sign-in'
+  fullPaths: '/' | '/accounts' | '/notes' | '/magic-link-verify' | '/sign-in'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/notes' | '/magic-link-verify' | '/sign-in'
+  to: '/' | '/accounts' | '/notes' | '/magic-link-verify' | '/sign-in'
   id:
     | '__root__'
     | '/_app'
     | '/_auth'
+    | '/_app/accounts'
     | '/_app/notes'
     | '/_auth/magic-link-verify'
     | '/_auth/sign-in'
@@ -130,15 +140,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppNotesRouteImport
       parentRoute: typeof AppRouteRoute
     }
+    '/_app/accounts': {
+      id: '/_app/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRouteRoute
+    }
   }
 }
 
 interface AppRouteRouteChildren {
+  AppAccountsRoute: typeof AppAccountsRoute
   AppNotesRoute: typeof AppNotesRoute
   AppIndexRoute: typeof AppIndexRoute
 }
 
 const AppRouteRouteChildren: AppRouteRouteChildren = {
+  AppAccountsRoute: AppAccountsRoute,
   AppNotesRoute: AppNotesRoute,
   AppIndexRoute: AppIndexRoute,
 }

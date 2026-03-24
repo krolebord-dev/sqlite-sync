@@ -1,11 +1,12 @@
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
-import { Home, PlusIcon, StickyNote } from "lucide-react";
+import { Home, PlusIcon, StickyNote, Wallet } from "lucide-react";
 import { useSyncExternalStore } from "react";
+import { useCreateAccount } from "@/components/account-dialog";
 import { useCreateNote } from "@/components/note-dialog";
 import { useCommandStore } from "@/lib/command-store";
-import { NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
+import { NEW_ACCOUNT_HOTKEY, NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
 import {
   CommandDialog,
   CommandEmpty,
@@ -33,6 +34,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
   const createNote = useCreateNote();
+  const createAccount = useCreateAccount();
 
   useHotkey("Mod+K", (e) => {
     e.preventDefault();
@@ -42,6 +44,11 @@ export function CommandPalette() {
   useHotkey(NEW_NOTE_HOTKEY, (e) => {
     e.preventDefault();
     createNote();
+  });
+
+  useHotkey(NEW_ACCOUNT_HOTKEY, (e) => {
+    e.preventDefault();
+    createAccount();
   });
 
   function runAndClose(fn: () => void) {
@@ -60,6 +67,11 @@ export function CommandPalette() {
             New note
             <CommandShortcut>{formatForDisplay(NEW_NOTE_HOTKEY)}</CommandShortcut>
           </CommandItem>
+          <CommandItem onSelect={() => runAndClose(createAccount)}>
+            <PlusIcon className="size-4" />
+            New account
+            <CommandShortcut>{formatForDisplay(NEW_ACCOUNT_HOTKEY)}</CommandShortcut>
+          </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Navigation">
           <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/" }))}>
@@ -69,6 +81,10 @@ export function CommandPalette() {
           <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/notes" }))}>
             <StickyNote className="size-4" />
             Notes
+          </CommandItem>
+          <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/accounts" }))}>
+            <Wallet className="size-4" />
+            Accounts
           </CommandItem>
         </CommandGroup>
       </CommandList>
