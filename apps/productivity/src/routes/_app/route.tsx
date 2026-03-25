@@ -3,6 +3,7 @@ import { AccountDialog } from "@/components/account-dialog";
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { NoteDialog } from "@/components/note-dialog";
+import { TransactionDialog } from "@/components/transaction-dialog";
 import { orpc } from "@/orpc/orpc-client";
 import { DbProvider, initUserDb } from "@/user-db/user-db";
 
@@ -41,6 +42,7 @@ function RouteComponent() {
       <CommandPalette />
       <NoteDialog />
       <AccountDialog />
+      <TransactionDialog />
     </DbProvider>
   );
 }

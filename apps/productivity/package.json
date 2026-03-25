@@ -12,7 +12,7 @@
     "db:new-migration": "echo 'Enter migration name: ' && read MIGRATION_NAME && wrangler d1 migrations create productivity-db $MIGRATION_NAME",
     "generate:types:db": "DB_PATH=$(find ./.wrangler/state/v3/d1/miniflare-D1DatabaseObject -type f -name \"*.sqlite\" -print -quit) && kysely-codegen --dialect=sqlite --url=$DB_PATH --out-file=src/lib/db-types.ts --exclude-pattern=\"_cf_METADATA\"",
     "generate:types:env": "wrangler types",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@cloudflare/vite-plugin": "^1.21.2",

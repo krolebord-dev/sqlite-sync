@@ -1,6 +1,10 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { useCreateExpense } from "@/components/transaction-dialog";
 import type { AccountItem } from "@/user-db/migrations";
 import { useDb } from "@/user-db/user-db";
+import { Button } from "./ui/button";
 import { useAccountDialogStore } from "./account-dialog";
 
 function formatBalance(balance: number, currency: string): string {
@@ -23,7 +27,9 @@ type AccountCardProps = {
 
 export function AccountCard({ account }: AccountCardProps) {
   const db = useDb();
+  const navigate = useNavigate();
   const openAccountDialog = useAccountDialogStore((s) => s.openEdit);
+  const createExpense = useCreateExpense({ accountId: account.id });
 
   return (
     <div className="group">
@@ -36,6 +42,19 @@ export function AccountCard({ account }: AccountCardProps) {
             aria-label="Delete account"
             onClick={(e) => {
               e.stopPropagation();
+              const linkedTransactions = db.db.executeKysely((q) =>
+                q
+                  .selectFrom("transaction_entry")
+                  .select(["id"])
+                  .where((eb) => eb.or([eb("accountId", "=", account.id), eb("counterpartyAccountId", "=", account.id)]))
+                  .limit(1),
+              ).rows;
+
+              if (linkedTransactions.length > 0) {
+                toast.error("Delete or move related transactions before removing this account.");
+                return;
+              }
+
               db.db.executeKysely((q) => q.deleteFrom("account").where("id", "=", account.id));
             }}
           >
@@ -61,6 +80,31 @@ export function AccountCard({ account }: AccountCardProps) {
           {account.description && (
             <p className="mt-1 line-clamp-2 text-muted-foreground text-sm">{account.description}</p>
           )}
+        </div>
+
+        <div className="flex items-center justify-between border-t px-4 py-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              navigate({ to: "/transactions", search: { accountId: account.id } });
+            }}
+          >
+            Activity
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              createExpense();
+            }}
+          >
+            New entry
+          </Button>
         </div>
       </div>
     </div>

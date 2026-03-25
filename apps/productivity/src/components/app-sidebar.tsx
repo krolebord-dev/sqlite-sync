@@ -1,7 +1,6 @@
 import type { DragEndEvent } from "@dnd-kit/core";
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import {
-  arraySwap,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
@@ -10,6 +9,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Link, useMatches, useNavigate, useRouter } from "@tanstack/react-router";
 import {
+  ArrowRightLeft,
   ChevronDown,
   ChevronsUpDown,
   Home,
@@ -46,6 +46,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 const navItems = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/notes", label: "Notes", icon: StickyNote },
+  { to: "/transactions", label: "Transactions", icon: ArrowRightLeft },
 ] as const;
 
 const remoteStateConfig = {

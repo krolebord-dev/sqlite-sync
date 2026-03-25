@@ -1,12 +1,19 @@
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
-import { Home, PlusIcon, StickyNote, Wallet } from "lucide-react";
+import { ArrowRightLeft, Home, PlusIcon, StickyNote, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCreateAccount } from "@/components/account-dialog";
 import { useCreateNote } from "@/components/note-dialog";
+import { useCreateExpense, useCreateIncome, useCreateTransfer } from "@/components/transaction-dialog";
 import { useCommandStore } from "@/lib/command-store";
-import { NEW_ACCOUNT_HOTKEY, NEW_NOTE_HOTKEY } from "@/lib/hotkeys";
+import {
+  NEW_ACCOUNT_HOTKEY,
+  NEW_EXPENSE_HOTKEY,
+  NEW_INCOME_HOTKEY,
+  NEW_NOTE_HOTKEY,
+  NEW_TRANSFER_HOTKEY,
+} from "@/lib/hotkeys";
 import {
   CommandDialog,
   CommandEmpty,
@@ -35,6 +42,9 @@ export function CommandPalette() {
   const isDesktop = useIsDesktop();
   const createNote = useCreateNote();
   const createAccount = useCreateAccount();
+  const createExpense = useCreateExpense();
+  const createIncome = useCreateIncome();
+  const createTransfer = useCreateTransfer();
 
   useHotkey("Mod+K", (e) => {
     e.preventDefault();
@@ -49,6 +59,21 @@ export function CommandPalette() {
   useHotkey(NEW_ACCOUNT_HOTKEY, (e) => {
     e.preventDefault();
     createAccount();
+  });
+
+  useHotkey(NEW_EXPENSE_HOTKEY, (e) => {
+    e.preventDefault();
+    createExpense();
+  });
+
+  useHotkey(NEW_INCOME_HOTKEY, (e) => {
+    e.preventDefault();
+    createIncome();
+  });
+
+  useHotkey(NEW_TRANSFER_HOTKEY, (e) => {
+    e.preventDefault();
+    createTransfer();
   });
 
   function runAndClose(fn: () => void) {
@@ -72,6 +97,21 @@ export function CommandPalette() {
             New account
             <CommandShortcut>{formatForDisplay(NEW_ACCOUNT_HOTKEY)}</CommandShortcut>
           </CommandItem>
+          <CommandItem onSelect={() => runAndClose(createExpense)}>
+            <TrendingDown className="size-4" />
+            New expense
+            <CommandShortcut>{formatForDisplay(NEW_EXPENSE_HOTKEY)}</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={() => runAndClose(createIncome)}>
+            <TrendingUp className="size-4" />
+            New income
+            <CommandShortcut>{formatForDisplay(NEW_INCOME_HOTKEY)}</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={() => runAndClose(createTransfer)}>
+            <ArrowRightLeft className="size-4" />
+            New transfer
+            <CommandShortcut>{formatForDisplay(NEW_TRANSFER_HOTKEY)}</CommandShortcut>
+          </CommandItem>
         </CommandGroup>
         <CommandGroup heading="Navigation">
           <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/" }))}>
@@ -85,6 +125,10 @@ export function CommandPalette() {
           <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/accounts" }))}>
             <Wallet className="size-4" />
             Accounts
+          </CommandItem>
+          <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/transactions" }))}>
+            <ArrowRightLeft className="size-4" />
+            Transactions
           </CommandItem>
         </CommandGroup>
       </CommandList>

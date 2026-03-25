@@ -65,6 +65,24 @@ export type AccountItem = {
   tombstone?: boolean;
 };
 
+export type TransactionEntryItem = {
+  id: string;
+  type: string;
+  accountId: string;
+  accountCurrency: string;
+  amount: number;
+  counterpartyAccountId: string;
+  counterpartyCurrency: string;
+  counterpartyAmount: number | null;
+  title: string;
+  category: string;
+  notes: string;
+  effectiveAt: number;
+  createdAt: number;
+  updatedAt: number;
+  tombstone?: boolean;
+};
+
 const migrations = createMigrations((b) => ({
   0: [
     b.createTable("_item", (t) =>
@@ -136,6 +154,26 @@ const migrations = createMigrations((b) => ({
         .addColumn("createdAt", "integer", (col) => col.notNull()),
     ),
   ],
+  5: [
+    b.createTable("_transaction_entry", (t) =>
+      t
+        .addColumn("id", "text", (col) => col.primaryKey().notNull())
+        .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false))
+        .addColumn("type", "text", (col) => col.notNull().defaultTo("expense"))
+        .addColumn("accountId", "text", (col) => col.notNull())
+        .addColumn("accountCurrency", "text", (col) => col.notNull())
+        .addColumn("amount", "real", (col) => col.notNull())
+        .addColumn("counterpartyAccountId", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("counterpartyCurrency", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("counterpartyAmount", "real")
+        .addColumn("title", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("category", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("notes", "text", (col) => col.notNull().defaultTo(""))
+        .addColumn("effectiveAt", "integer", (col) => col.notNull())
+        .addColumn("createdAt", "integer", (col) => col.notNull())
+        .addColumn("updatedAt", "integer", (col) => col.notNull()),
+    ),
+  ],
 }));
 
 export type UserDb = (typeof syncDbSchema)["~clientSchema"];
@@ -151,4 +189,6 @@ export const syncDbSchema = createSyncDbSchema({
   .withConfig({ baseTableName: "_currency_rate", crdtTableName: "currency_rate" })
   .addTable<AccountItem>()
   .withConfig({ baseTableName: "_account", crdtTableName: "account" })
+  .addTable<TransactionEntryItem>()
+  .withConfig({ baseTableName: "_transaction_entry", crdtTableName: "transaction_entry" })
   .build();

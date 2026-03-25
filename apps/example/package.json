@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "wrangler dev",
-    "build": "tsc -b && vite build",
+    "build": "tsgo --noEmit && vite build",
     "preview": "vite preview",
     "cf-typegen": "wrangler types",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
     "@sqlite-sync/cloudflare": "workspace:*",
