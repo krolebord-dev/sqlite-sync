@@ -331,7 +331,9 @@ function TransactionsPage() {
                   <div className="shrink-0 text-right">
                     {isTransfer && !search.accountId ? (
                       <div className="space-y-1">
-                        <p className="font-medium tabular-nums">{formatBalance(transaction.amount, transaction.accountCurrency)}</p>
+                        <p className="font-medium tabular-nums">
+                          {formatBalance(transaction.amount, transaction.accountCurrency)}
+                        </p>
                         {transaction.counterpartyAmount !== null ? (
                           <p className="text-muted-foreground text-sm tabular-nums">
                             {formatBalance(transaction.counterpartyAmount, transaction.counterpartyCurrency)}

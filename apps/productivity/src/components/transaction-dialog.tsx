@@ -1,8 +1,8 @@
 import { useStore } from "@tanstack/react-form";
 import { useCallback } from "react";
+import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
-import { toast } from "sonner";
 import { formatDateTimeLocal, parseDateTimeLocal } from "@/lib/date-time";
 import {
   createTransaction,
@@ -119,15 +119,14 @@ function TransactionDialogContent() {
   const existing = mode === "edit" ? existingTransactions[0] : undefined;
   const selectedType = (existing?.type ?? draft?.type ?? "expense") as TransactionType;
   const fallbackAccountId = accounts[0]?.id ?? "";
-  const fallbackTransferAccountId = accounts.find((account) => account.id !== (draft?.accountId ?? fallbackAccountId))?.id ?? "";
+  const fallbackTransferAccountId =
+    accounts.find((account) => account.id !== (draft?.accountId ?? fallbackAccountId))?.id ?? "";
 
   const form = useAppForm({
     defaultValues: {
       accountId: existing?.accountId ?? draft?.accountId ?? fallbackAccountId,
       amount:
-        existing?.type === "adjustment"
-          ? String(existing.amount)
-          : String(Math.abs(Number(existing?.amount ?? 0))),
+        existing?.type === "adjustment" ? String(existing.amount) : String(Math.abs(Number(existing?.amount ?? 0))),
       category: existing?.category ?? "",
       counterpartyAccountId:
         existing?.counterpartyAccountId ?? draft?.counterpartyAccountId ?? fallbackTransferAccountId,
@@ -198,11 +197,7 @@ function TransactionDialogContent() {
     },
   });
 
-  function createOrUpdate(
-    input:
-      | Parameters<typeof createTransaction>[1]
-      | Parameters<typeof updateTransaction>[2],
-  ) {
+  function createOrUpdate(input: Parameters<typeof createTransaction>[1] | Parameters<typeof updateTransaction>[2]) {
     if (mode === "edit" && transactionId) {
       updateTransaction(db.db, transactionId, input);
       return;
@@ -227,13 +222,13 @@ function TransactionDialogContent() {
     <Dialog open={isOpen} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent className="sm:max-w-xl">
         <DialogTitle>{getDialogTitle(mode, currentType)}</DialogTitle>
-        <DialogDescription className="sr-only">
-          Create or edit a balance-affecting transaction.
-        </DialogDescription>
+        <DialogDescription className="sr-only">Create or edit a balance-affecting transaction.</DialogDescription>
 
         {accounts.length === 0 ? (
           <div className="flex flex-col gap-4 py-2">
-            <p className="text-muted-foreground text-sm">Create an account before adding income, expenses, or transfers.</p>
+            <p className="text-muted-foreground text-sm">
+              Create an account before adding income, expenses, or transfers.
+            </p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancel
@@ -395,11 +390,14 @@ function TransactionDialogContent() {
               )}
             </form.AppField>
 
-            {currentType === "transfer" && sourceAccount && destinationAccount && sourceAccount.currency !== destinationAccount.currency && (
-              <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
-                This transfer stores both entered amounts exactly. No exchange-rate conversion is applied.
-              </p>
-            )}
+            {currentType === "transfer" &&
+              sourceAccount &&
+              destinationAccount &&
+              sourceAccount.currency !== destinationAccount.currency && (
+                <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+                  This transfer stores both entered amounts exactly. No exchange-rate conversion is applied.
+                </p>
+              )}
 
             <div className="flex justify-between gap-2">
               <div>

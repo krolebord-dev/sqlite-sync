@@ -272,7 +272,10 @@ function AccountDialogContent() {
 
               <form.AppField name="balance">
                 {(field) => (
-                  <field.FieldContainer labelText={mode === "create" ? "Initial balance" : "Balance"} className="flex-1">
+                  <field.FieldContainer
+                    labelText={mode === "create" ? "Initial balance" : "Balance"}
+                    className="flex-1"
+                  >
                     <field.FormInput
                       type="number"
                       step="0.01"
@@ -285,7 +288,8 @@ function AccountDialogContent() {
 
             {mode === "edit" && hasTransactionHistory && existing?.currency !== selectedCurrency && (
               <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
-                Changing the account currency only affects future transactions. Existing transaction amounts keep their original currency.
+                Changing the account currency only affects future transactions. Existing transaction amounts keep their
+                original currency.
               </p>
             )}
 
@@ -311,7 +315,8 @@ function AccountDialogContent() {
         <DialogContent className="sm:max-w-md">
           <DialogTitle>Balance change detected</DialogTitle>
           <DialogDescription>
-            This account already has transaction history. Choose whether to keep an adjustment entry or overwrite the current balance directly.
+            This account already has transaction history. Choose whether to keep an adjustment entry or overwrite the
+            current balance directly.
           </DialogDescription>
           <div className="flex flex-col gap-3">
             <Button

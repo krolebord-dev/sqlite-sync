@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import { useCreateExpense } from "@/components/transaction-dialog";
 import type { AccountItem } from "@/user-db/migrations";
 import { useDb } from "@/user-db/user-db";
-import { Button } from "./ui/button";
 import { useAccountDialogStore } from "./account-dialog";
+import { Button } from "./ui/button";
 
 function formatBalance(balance: number, currency: string): string {
   try {
@@ -46,7 +46,9 @@ export function AccountCard({ account }: AccountCardProps) {
                 q
                   .selectFrom("transaction_entry")
                   .select(["id"])
-                  .where((eb) => eb.or([eb("accountId", "=", account.id), eb("counterpartyAccountId", "=", account.id)]))
+                  .where((eb) =>
+                    eb.or([eb("accountId", "=", account.id), eb("counterpartyAccountId", "=", account.id)]),
+                  )
                   .limit(1),
               ).rows;
 

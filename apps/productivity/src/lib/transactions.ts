@@ -173,7 +173,10 @@ function materializeTransaction(
   }
 }
 
-function applyTransactionBalanceEffect(trx: SQLiteTransactionWrapper<UserDb>, transaction: MaterializedTransaction | TransactionRow) {
+function applyTransactionBalanceEffect(
+  trx: SQLiteTransactionWrapper<UserDb>,
+  transaction: MaterializedTransaction | TransactionRow,
+) {
   applyAccountDelta(trx, transaction.accountId, Number(transaction.amount));
 
   if (transaction.counterpartyAccountId && transaction.counterpartyAmount !== null) {
@@ -254,7 +257,10 @@ export function deleteTransaction(db: TransactionDatabase, transactionId: string
   });
 }
 
-export function createBalanceAdjustment(db: TransactionDatabase, opts: { accountId: string; amount: number; title?: string }) {
+export function createBalanceAdjustment(
+  db: TransactionDatabase,
+  opts: { accountId: string; amount: number; title?: string },
+) {
   return createTransaction(db, {
     type: "adjustment",
     accountId: opts.accountId,
