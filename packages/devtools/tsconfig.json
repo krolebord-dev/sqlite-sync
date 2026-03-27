@@ -7,15 +7,15 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "customConditions": ["@sqlite-sync/source"]
   },
-  "references": [
-    { "path": "./packages/core" },
-    { "path": "./packages/react" },
-    { "path": "./packages/devtools" },
-    { "path": "./apps/example" },
-    { "path": "./packages/cloudflare" }
-  ]
+  "include": ["src/**/*"]
 }

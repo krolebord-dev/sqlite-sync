@@ -1,4 +1,5 @@
 import { generateId } from "@sqlite-sync/core";
+import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
 import { useEffect, useState } from "react";
 import { useDb, useDbQuery, useDbState } from "./db";
 import { QueryShell } from "./QueryShell";
@@ -88,6 +89,7 @@ export function App() {
       <BlockingIndicator />
 
       <QueryShell />
+      <SQLiteSyncDevtools />
 
       <div className="mt-6 rounded bg-gray-100 p-4">
         <p className="text-sm">

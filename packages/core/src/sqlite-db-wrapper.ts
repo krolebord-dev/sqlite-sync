@@ -158,16 +158,21 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       }
 
       const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
-      if (params.length > 0) {
-        stmt.bind(params);
+      try {
+        if (params.length > 0) {
+          stmt.bind(params);
+        }
+
+        const results = [] as TResult[];
+        while (stmt.step()) {
+          results.push(stmt.get({}) as TResult);
+        }
+
+        return results;
+      } finally {
+        stmt.reset(true);
+        perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       }
-      const results = [] as TResult[];
-      while (stmt.step()) {
-        results.push(stmt.get({}) as TResult);
-      }
-      stmt.reset(true);
-      perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
-      return results;
     };
 
     const finalize = () => {

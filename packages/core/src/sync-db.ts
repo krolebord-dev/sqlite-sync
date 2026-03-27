@@ -1,4 +1,5 @@
 import { validateDbId } from "./db-id";
+import { getOrCreateSQLiteSyncDevtoolsRegistry } from "./devtools-registry";
 import { HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb } from "./memory-db/memory-db";
@@ -41,12 +42,37 @@ const defaultLogger: Logger = (type, message, level = "info") => {
   }
 };
 
+const devtoolsClearKey = (dbId: string) => `__sqlite_sync_devtools_clear_${dbId}`;
+
+function readDevtoolsClearFlag(clearKey: string): boolean {
+  try {
+    return globalThis.localStorage?.getItem(clearKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function consumeDevtoolsClearFlag(clearKey: string): void {
+  try {
+    globalThis.localStorage?.removeItem(clearKey);
+  } catch {
+    // Ignore environments where storage is unavailable or blocked.
+  }
+}
+
 export async function createSyncedDb<Database, Props = undefined>(options: SyncedDbOptions<Database, Props>) {
   validateDbId(options.dbId);
 
   const perf = startPerformanceLogger(defaultLogger);
 
+  const instanceId = generateId();
   const tabId = generateId();
+
+  const clearKey = devtoolsClearKey(options.dbId);
+  const devtoolsClear = readDevtoolsClearFlag(clearKey);
+  if (devtoolsClear) {
+    consumeDevtoolsClearFlag(clearKey);
+  }
 
   const broadcastChannels = createBroadcastChannels(options.dbId);
 
@@ -63,7 +89,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     config: {
       clientId: generateId(),
       dbId: options.dbId,
-      clearOnInit: options.clearOnInit,
+      clearOnInit: options.clearOnInit || devtoolsClear,
       props: options.workerProps as never,
     },
     broadcastChannels,
@@ -134,10 +160,12 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
   perf.logEnd("createSyncedDb", "initialized", "info");
 
   let isDisposed = false;
+  let unregisterDevtools: (() => void) | undefined;
   const dispose = async () => {
     if (isDisposed) return;
     isDisposed = true;
 
+    unregisterDevtools?.();
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();
     broadcastChannels.requests.close();
@@ -146,7 +174,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     reactiveDb.dispose();
   };
 
-  return {
+  const syncedDb = {
     db: {
       execute: reactiveDb.db.execute.bind(reactiveDb.db),
       executeKysely: reactiveDb.db.executeKysely.bind(reactiveDb.db),
@@ -167,8 +195,25 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     dispose,
     _internal: {
       executeAsync: workerClient.execute.bind(workerClient),
+      getMemoryQueryTables: reactiveDb.getTablesUsed.bind(reactiveDb),
+      crdtTableNames: options.syncDbSchema.tablesConfig.map((table) => table.crdtTableName),
+      crdtTablesConfig: options.syncDbSchema.tablesConfig,
+      schemaVersion: workerClientSnapshot.schemaVersion,
+      migrationVersions: Object.keys(options.syncDbSchema.migrations)
+        .map(Number)
+        .sort((a, b) => a - b),
+      devtoolsClearKey: clearKey,
     },
   };
+
+  unregisterDevtools = getOrCreateSQLiteSyncDevtoolsRegistry().register({
+    instanceId,
+    dbId: options.dbId,
+    createdAt: Date.now(),
+    instance: syncedDb,
+  });
+
+  return syncedDb;
 }
 
 export type SyncedDb<Database> = Awaited<ReturnType<typeof createSyncedDb<Database>>>;

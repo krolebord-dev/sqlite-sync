@@ -8,10 +8,11 @@
     "model": "gpt-5.4",
     "permissionMode": "yolo",
     "modelReasoningEffort": "high",
-    "fastMode": "fast"
+    "fastMode": "off"
   },
   "localCursor": {
     "model": "gpt-5.3-codex-high",
     "permissionMode": "yolo"
-  }
+  },
+  "worktreeSetupCommands": "pnpm install"
 }

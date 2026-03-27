@@ -1,0 +1,60 @@
+{
+  "name": "@sqlite-sync/devtools",
+  "version": "0.1.1",
+  "description": "Embeddable devtools for @sqlite-sync",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krolebord-dev/sqlite-sync",
+    "directory": "packages/devtools"
+  },
+  "keywords": [
+    "sqlite",
+    "sync",
+    "devtools",
+    "react",
+    "offline-first",
+    "local-first"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@sqlite-sync/source": "./src/index.ts",
+      "workerd": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsgo --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@sqlite-sync/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.9",
+    "react": "^19.2.3",
+    "tsup": "^8.3.5",
+    "typescript": "~5.9.3"
+  }
+}

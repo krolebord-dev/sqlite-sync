@@ -57,7 +57,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
     }
     lastRef.current = { db, sql, parameters };
 
-    const data = useSyncExternalStore(liveQuery.subscribe, liveQuery.getRows);
+    const data = useSyncExternalStore<TResult[]>(liveQuery.subscribe, liveQuery.getRows);
 
     const mapDataRef = useRef(mapData);
     mapDataRef.current = mapData;

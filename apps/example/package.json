@@ -14,6 +14,7 @@
   "dependencies": {
     "@sqlite-sync/cloudflare": "workspace:*",
     "@sqlite-sync/core": "workspace:*",
+    "@sqlite-sync/devtools": "workspace:*",
     "@sqlite-sync/react": "workspace:*",
     "@tailwindcss/vite": "^4.1.18",
     "jotai": "^2.16.2",
