@@ -18,6 +18,7 @@ Offline-first SQLite synchronization with CRDT event replication for local-first
 | --- | --- | --- |
 | `@sqlite-sync/core` | Core sync engine, schema builder, worker runtime, CRDT primitives | You need SQLite sync in browser/runtime code |
 | `@sqlite-sync/react` | React context + hooks (`useDb`, `useDbQuery`, `useDbState`) | You want idiomatic React bindings |
+| `@sqlite-sync/devtools` | Floating in-app devtools dialog for inspecting registered databases | You want a browser-side debug UI while developing |
 | `@sqlite-sync/cloudflare` | Durable Object adapter + execution helpers | You run sync backend on Cloudflare |
 
 ## Quick Start (Browser + Worker + React)
@@ -26,6 +27,9 @@ Offline-first SQLite synchronization with CRDT event replication for local-first
 
 ```bash
 pnpm add @sqlite-sync/core @sqlite-sync/react kysely
+
+# Optional: floating browser devtools UI
+pnpm add @sqlite-sync/devtools
 ```
 
 ### 2) Define schema and db context
@@ -138,6 +142,30 @@ export function TodoList() {
 }
 ```
 
+### 5) Optional: mount devtools
+
+`@sqlite-sync/devtools` renders a floating `SQLite Sync` button that opens a dialog with a sidebar, database selector, and query tooling.
+
+```tsx
+import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
+
+export function AppShell() {
+  return (
+    <>
+      <App />
+      <SQLiteSyncDevtools />
+    </>
+  );
+}
+```
+
+Database instances register automatically when `createSyncedDb()` completes and unregister on `dispose()`, so mounting the component once near the app root is enough.
+
+Current query runner rules:
+- Worker DB queries are read-only.
+- Memory DB queries may write only to CRDT tables.
+- The UI executes a single SQL statement at a time and shows raw JSON results.
+
 ## Cloudflare Sync Backend (Durable Object)
 
 `@sqlite-sync/cloudflare` provides a Durable Object adapter for deployments that need remote sync.
@@ -231,6 +259,7 @@ Runtime model:
 - `createSyncedDb()` for client orchestration (worker attach, snapshot hydration, sync state).
 - Live query primitives via `db.createLiveQuery(...)`.
 - React hooks over the same engine: `useDbQuery`, `useDbState`.
+- Optional floating devtools UI via `@sqlite-sync/devtools`.
 - Online/offline toggles with explicit sync state (`online | offline | pending`).
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.
 - Extensible CRDT schema and migrations (`createSyncDbSchema`, `createMigrations`).

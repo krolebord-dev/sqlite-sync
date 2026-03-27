@@ -9,6 +9,7 @@
 - [Schema Definition](#schema-definition)
 - [Client Setup](#client-setup)
 - [React Integration](#react-integration)
+- [Devtools](#devtools)
 - [Server Setup](#server-setup)
 - [Queries](#queries)
 - [Mutations](#mutations)
@@ -29,6 +30,9 @@ pnpm add @sqlite-sync/core
 # React bindings
 pnpm add @sqlite-sync/react
 
+# Optional: floating browser devtools UI
+pnpm add @sqlite-sync/devtools
+
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
 
@@ -45,6 +49,7 @@ Peer dependencies:
 |---------|-------|
 | `@sqlite-sync/core` | `@sqlite.org/sqlite-wasm`, `kysely` |
 | `@sqlite-sync/react` | `react ^18 \|\| ^19`, `kysely` |
+| `@sqlite-sync/devtools` | `react ^18 \|\| ^19` |
 | `@sqlite-sync/cloudflare` | `@cloudflare/workers-types`, `kysely` |
 
 ---
@@ -495,6 +500,55 @@ db.execute("DELETE FROM todo WHERE completed = 1");
 
 ---
 
+## Devtools
+
+`@sqlite-sync/devtools` provides a floating in-app debug UI for browser apps using `createSyncedDb()`.
+
+### Mounting the Devtools
+
+Render `SQLiteSyncDevtools` once near the root of your app:
+
+```tsx
+import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
+
+function Root({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      {children}
+      <SQLiteSyncDevtools />
+    </>
+  );
+}
+```
+
+The component renders a floating `SQLite Sync` button. Clicking it opens a dialog with:
+- a left sidebar for navigation and database selection
+- a main pane for the active tool
+
+### Instance Discovery
+
+Synced database instances register automatically when `createSyncedDb()` finishes initialization and unregister automatically when `dispose()` is called.
+
+You do not need to pass instances manually to the devtools component. Mounting `SQLiteSyncDevtools` is enough, as long as your app creates databases through `createSyncedDb()`.
+
+### Current Tools
+
+The current devtools prototype includes:
+- an overview tab for selecting a detected database
+- a query runner tab for executing SQL against the selected instance
+
+### Query Runner Rules
+
+The query runner currently enforces the following rules:
+- **Worker DB** queries are read-only. Only `SELECT`, `PRAGMA`, and `EXPLAIN` are allowed.
+- **Memory DB** queries may read any table, but writes are only allowed when every written table is a configured CRDT table.
+- Only a single SQL statement is executed at a time.
+- Results and errors are shown as raw JSON.
+
+These constraints are intentional for the current prototype so that devtools can inspect live databases without bypassing sqlite-sync’s CRDT write path.
+
+---
+
 ## Sync State
 
 ### Reading State
@@ -878,6 +932,22 @@ function createDbContext<Schema extends SyncDbSchema>(schema: Schema): {
   useDbState: () => WorkerState;
 }
 ```
+
+### `@sqlite-sync/devtools`
+
+#### `SQLiteSyncDevtools`
+
+Renders a floating browser devtools button and dialog for databases created with `createSyncedDb()`.
+
+```tsx
+function SQLiteSyncDevtools(props?: { className?: string }): React.ReactElement
+```
+
+Behavior:
+- auto-discovers currently registered `SyncedDb` instances
+- updates when instances are created or disposed
+- provides a sidebar-based dialog UI
+- includes the prototype query runner described above
 
 ### `@sqlite-sync/cloudflare`
 
