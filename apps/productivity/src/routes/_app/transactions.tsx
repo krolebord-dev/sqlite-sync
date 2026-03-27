@@ -1,5 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRightLeft, Landmark, PlusIcon, TrendingDown, TrendingUp } from "lucide-react";
+import {
+  ArrowDownLeftIcon,
+  ArrowLeftRightIcon,
+  ArrowUpRightIcon,
+  Landmark,
+  PlusIcon,
+  SlidersHorizontalIcon,
+} from "lucide-react";
 import { z } from "zod";
 import { formatBalance } from "@/components/account-card";
 import {
@@ -28,13 +35,40 @@ export const Route = createFileRoute("/_app/transactions")({
   validateSearch: transactionsSearchSchema,
 });
 
+const TYPE_STYLE = {
+  expense: {
+    icon: ArrowDownLeftIcon,
+    dot: "bg-red-500",
+    badge: "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400",
+    accent: "text-red-600 dark:text-red-400",
+  },
+  income: {
+    icon: ArrowUpRightIcon,
+    dot: "bg-emerald-500",
+    badge: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400",
+    accent: "text-emerald-600 dark:text-emerald-400",
+  },
+  transfer: {
+    icon: ArrowLeftRightIcon,
+    dot: "bg-blue-500",
+    badge: "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-400",
+    accent: "text-blue-600 dark:text-blue-400",
+  },
+  adjustment: {
+    icon: SlidersHorizontalIcon,
+    dot: "bg-amber-500",
+    badge: "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400",
+    accent: "text-amber-600 dark:text-amber-400",
+  },
+} satisfies Record<TransactionType, { icon: unknown; dot: string; badge: string; accent: string }>;
+
 function summaryAmountClass(amount: number) {
   if (amount > 0) {
-    return "text-emerald-600";
+    return "text-emerald-600 dark:text-emerald-400";
   }
 
   if (amount < 0) {
-    return "text-rose-600";
+    return "text-rose-600 dark:text-rose-400";
   }
 
   return "text-foreground";
@@ -42,13 +76,13 @@ function summaryAmountClass(amount: number) {
 
 function renderCurrencyBreakdown(summaryByCurrency: Map<string, number>) {
   if (summaryByCurrency.size === 0) {
-    return <span className="font-semibold text-lg">0</span>;
+    return <span className="font-mono font-semibold text-lg tabular-nums">0</span>;
   }
 
   return (
     <div className="space-y-1">
       {Array.from(summaryByCurrency.entries()).map(([currency, amount]) => (
-        <p key={currency} className={cn("font-semibold text-lg tabular-nums", summaryAmountClass(amount))}>
+        <p key={currency} className={cn("font-mono font-semibold text-lg tabular-nums", summaryAmountClass(amount))}>
           {formatBalance(amount, currency)}
         </p>
       ))}
@@ -157,15 +191,15 @@ function TransactionsPage() {
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={createExpense} size="sm">
-            <TrendingDown className="size-4" />
+            <ArrowDownLeftIcon className="size-4" />
             Expense
           </Button>
           <Button onClick={createIncome} size="sm" variant="outline">
-            <TrendingUp className="size-4" />
+            <ArrowUpRightIcon className="size-4" />
             Income
           </Button>
           <Button onClick={createTransfer} size="sm" variant="outline">
-            <ArrowRightLeft className="size-4" />
+            <ArrowLeftRightIcon className="size-4" />
             Transfer
           </Button>
         </div>
@@ -173,20 +207,32 @@ function TransactionsPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border bg-card p-4 shadow-xs">
-          <p className="text-muted-foreground text-xs uppercase tracking-wide">Income</p>
-          <div className="mt-1">{renderCurrencyBreakdown(summary.incomeByCurrency)}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            <p className="text-muted-foreground text-xs uppercase tracking-wide">Income</p>
+          </div>
+          <div className="mt-2">{renderCurrencyBreakdown(summary.incomeByCurrency)}</div>
         </div>
         <div className="rounded-lg border bg-card p-4 shadow-xs">
-          <p className="text-muted-foreground text-xs uppercase tracking-wide">Expenses</p>
-          <div className="mt-1">{renderCurrencyBreakdown(summary.expenseByCurrency)}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-red-500" />
+            <p className="text-muted-foreground text-xs uppercase tracking-wide">Expenses</p>
+          </div>
+          <div className="mt-2">{renderCurrencyBreakdown(summary.expenseByCurrency)}</div>
         </div>
         <div className="rounded-lg border bg-card p-4 shadow-xs">
-          <p className="text-muted-foreground text-xs uppercase tracking-wide">Net change</p>
-          <div className="mt-1">{renderCurrencyBreakdown(summary.netByCurrency)}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-blue-500" />
+            <p className="text-muted-foreground text-xs uppercase tracking-wide">Net change</p>
+          </div>
+          <div className="mt-2">{renderCurrencyBreakdown(summary.netByCurrency)}</div>
         </div>
         <div className="rounded-lg border bg-card p-4 shadow-xs">
-          <p className="text-muted-foreground text-xs uppercase tracking-wide">Entries</p>
-          <p className="mt-1 font-semibold text-lg">{transactions.length}</p>
+          <div className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-primary" />
+            <p className="text-muted-foreground text-xs uppercase tracking-wide">Entries</p>
+          </div>
+          <p className="mt-2 font-mono font-semibold text-lg tabular-nums">{transactions.length}</p>
           <p className="mt-1 text-muted-foreground text-xs">Transfers are excluded from the summary totals above.</p>
         </div>
       </div>
@@ -285,6 +331,7 @@ function TransactionsPage() {
                 : undefined;
               const display = getDisplayAmountForAccount(transaction, search.accountId);
               const isTransfer = transaction.type === "transfer";
+              const typeStyle = TYPE_STYLE[transaction.type as TransactionType] ?? TYPE_STYLE.expense;
               const title =
                 transaction.title ||
                 (transaction.type === "expense"
@@ -305,7 +352,13 @@ function TransactionsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate font-medium">{title}</span>
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+                          typeStyle.badge,
+                        )}
+                      >
+                        <span className={cn("size-1.5 rounded-full", typeStyle.dot)} />
                         {transaction.type}
                       </span>
                       {transaction.category ? (
@@ -319,7 +372,7 @@ function TransactionsPage() {
                       <span>{formatDateTimeDisplay(transaction.effectiveAt)}</span>
                       <span>
                         {primaryAccount?.labelText || "Untitled"}
-                        {isTransfer && secondaryAccount ? ` -> ${secondaryAccount.labelText || "Untitled"}` : null}
+                        {isTransfer && secondaryAccount ? ` \u2192 ${secondaryAccount.labelText || "Untitled"}` : null}
                       </span>
                     </div>
 
@@ -331,17 +384,17 @@ function TransactionsPage() {
                   <div className="shrink-0 text-right">
                     {isTransfer && !search.accountId ? (
                       <div className="space-y-1">
-                        <p className="font-medium tabular-nums">
+                        <p className="font-mono font-medium tabular-nums">
                           {formatBalance(transaction.amount, transaction.accountCurrency)}
                         </p>
                         {transaction.counterpartyAmount !== null ? (
-                          <p className="text-muted-foreground text-sm tabular-nums">
+                          <p className="font-mono text-muted-foreground text-sm tabular-nums">
                             {formatBalance(transaction.counterpartyAmount, transaction.counterpartyCurrency)}
                           </p>
                         ) : null}
                       </div>
                     ) : (
-                      <p className={cn("font-medium tabular-nums", summaryAmountClass(display.amount))}>
+                      <p className={cn("font-mono font-medium tabular-nums", summaryAmountClass(display.amount))}>
                         {formatBalance(display.amount, display.currency)}
                       </p>
                     )}

@@ -11,7 +11,7 @@ import {
 import { arraySwap, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, StickyNote } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { MasonryGrid } from "@/components/masonry-grid";
 import { NoteCard } from "@/components/note-card";
@@ -106,8 +106,12 @@ function NotesPage() {
       </div>
 
       {notes.length === 0 && (
-        <div className="flex flex-col items-center gap-3 pt-16 text-center">
-          <p className="text-muted-foreground text-sm">No notes yet. Create one to get started.</p>
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card px-6 py-14 text-center">
+          <StickyNote className="size-8 text-muted-foreground" />
+          <div>
+            <p className="font-medium">No notes yet</p>
+            <p className="text-muted-foreground text-sm">Create one to start capturing your thoughts.</p>
+          </div>
           <Button onClick={createNote} variant="outline">
             <PlusIcon />
             New note

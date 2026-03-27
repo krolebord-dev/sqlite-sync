@@ -1,6 +1,6 @@
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, Wallet } from "lucide-react";
 import { AccountCard } from "@/components/account-card";
 import { useCreateAccount } from "@/components/account-dialog";
 import { Button } from "@/components/ui/button";
@@ -30,8 +30,12 @@ function AccountsPage() {
       </div>
 
       {accounts.length === 0 && (
-        <div className="flex flex-col items-center gap-3 pt-16 text-center">
-          <p className="text-muted-foreground text-sm">No accounts yet. Create one to get started.</p>
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed bg-card px-6 py-14 text-center">
+          <Wallet className="size-8 text-muted-foreground" />
+          <div>
+            <p className="font-medium">No accounts yet</p>
+            <p className="text-muted-foreground text-sm">Create one to start tracking your finances.</p>
+          </div>
           <Button onClick={createAccount} variant="outline">
             <PlusIcon />
             New account

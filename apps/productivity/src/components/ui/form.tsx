@@ -5,6 +5,8 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 import { Checkbox } from "./checkbox";
+import { ComboboxInput } from "./combobox-input";
+import { DateTimeInput } from "./date-time-input";
 import { Input } from "./input";
 import { Label } from "./label";
 import { RadioGroup, RadioGroupItem } from "./radio-group";
@@ -156,6 +158,10 @@ export function FormMessage({ children, className, ...props }: React.ComponentPr
   const { errors, showError } = useFieldMessageState();
   const body = showError ? getErrorMessage(errors[0]) : children;
 
+  if (!body) {
+    return null;
+  }
+
   return (
     <p
       data-slot="form-message"
@@ -165,7 +171,7 @@ export function FormMessage({ children, className, ...props }: React.ComponentPr
       className={cn("text-muted-foreground text-sm data-[error=true]:text-destructive", className)}
       {...props}
     >
-      {body ?? <>&nbsp;</>}
+      {body}
     </p>
   );
 }
@@ -392,6 +398,36 @@ export function FormCheckboxGroup({
   );
 }
 
+type FormComboboxInputProps = Omit<React.ComponentProps<typeof ComboboxInput>, "value" | "onChange" | "onBlur">;
+
+export function FormComboboxInput(props: FormComboboxInputProps) {
+  const field = useFieldContext<string>();
+
+  return (
+    <ComboboxInput
+      value={field.state.value ?? ""}
+      onChange={(value) => field.handleChange(value)}
+      onBlur={() => field.handleBlur()}
+      {...props}
+    />
+  );
+}
+
+type FormDateTimeInputProps = Omit<React.ComponentProps<typeof DateTimeInput>, "value" | "onChange" | "onBlur">;
+
+export function FormDateTimeInput(props: FormDateTimeInputProps) {
+  const field = useFieldContext<string>();
+
+  return (
+    <DateTimeInput
+      value={field.state.value ?? ""}
+      onChange={(value) => field.handleChange(value)}
+      onBlur={() => field.handleBlur()}
+      {...props}
+    />
+  );
+}
+
 const { useAppForm, withForm } = createFormHook({
   fieldContext,
   formContext,
@@ -401,8 +437,10 @@ const { useAppForm, withForm } = createFormHook({
     FieldLabel,
     FormCheckbox,
     FormCheckboxGroup,
+    FormComboboxInput,
     FormControl,
     FormInput,
+    FormDateTimeInput,
     FormItem,
     FormMessage,
     FormRadioGroup,

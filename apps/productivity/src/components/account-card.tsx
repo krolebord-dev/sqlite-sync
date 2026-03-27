@@ -77,7 +77,9 @@ export function AccountCard({ account }: AccountCardProps) {
             )}
           </div>
 
-          <p className="font-semibold text-lg tabular-nums">{formatBalance(account.balance, account.currency)}</p>
+          <p className="font-mono font-semibold text-lg tabular-nums">
+            {formatBalance(account.balance, account.currency)}
+          </p>
 
           {account.description && (
             <p className="mt-1 line-clamp-2 text-muted-foreground text-sm">{account.description}</p>

@@ -1,7 +1,15 @@
 import { formatForDisplay } from "@tanstack/hotkeys";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRightLeft, Home, PlusIcon, StickyNote, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import {
+  ArrowDownLeftIcon,
+  ArrowLeftRightIcon,
+  ArrowUpRightIcon,
+  Home,
+  PlusIcon,
+  StickyNote,
+  Wallet,
+} from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCreateAccount } from "@/components/account-dialog";
 import { useCreateNote } from "@/components/note-dialog";
@@ -98,17 +106,17 @@ export function CommandPalette() {
             <CommandShortcut>{formatForDisplay(NEW_ACCOUNT_HOTKEY)}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => runAndClose(createExpense)}>
-            <TrendingDown className="size-4" />
+            <ArrowDownLeftIcon className="size-4 text-red-500" />
             New expense
             <CommandShortcut>{formatForDisplay(NEW_EXPENSE_HOTKEY)}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => runAndClose(createIncome)}>
-            <TrendingUp className="size-4" />
+            <ArrowUpRightIcon className="size-4 text-emerald-500" />
             New income
             <CommandShortcut>{formatForDisplay(NEW_INCOME_HOTKEY)}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => runAndClose(createTransfer)}>
-            <ArrowRightLeft className="size-4" />
+            <ArrowLeftRightIcon className="size-4 text-blue-500" />
             New transfer
             <CommandShortcut>{formatForDisplay(NEW_TRANSFER_HOTKEY)}</CommandShortcut>
           </CommandItem>
@@ -127,7 +135,7 @@ export function CommandPalette() {
             Accounts
           </CommandItem>
           <CommandItem onSelect={() => runAndClose(() => navigate({ to: "/transactions" }))}>
-            <ArrowRightLeft className="size-4" />
+            <ArrowLeftRightIcon className="size-4" />
             Transactions
           </CommandItem>
         </CommandGroup>

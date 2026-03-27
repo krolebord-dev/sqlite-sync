@@ -46,7 +46,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 const navItems = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/notes", label: "Notes", icon: StickyNote },
-  { to: "/transactions", label: "Transactions", icon: ArrowRightLeft },
 ] as const;
 
 const remoteStateConfig = {
@@ -91,7 +90,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="flex h-14 items-center justify-between px-4">
-        <Link to="/" className="font-semibold text-base tracking-tight">
+        <Link to="/" viewTransition className="font-semibold text-base tracking-tight">
           Productivity
         </Link>
         <RemoteStateIndicator />
@@ -119,6 +118,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             key={item.to}
             to={item.to}
             onClick={onNavigate}
+            viewTransition
             className={cn(
               "flex items-center gap-2 rounded-md px-3 py-2 font-medium text-sm transition-colors",
               currentPath === item.to
@@ -197,7 +197,15 @@ type AccountRow = {
   order: number;
 };
 
-function SortableAccountRow({ account, onNavigate }: { account: AccountRow; onNavigate?: () => void }) {
+function SortableAccountRow({
+  account,
+  isActive,
+  onNavigate,
+}: {
+  account: AccountRow;
+  isActive: boolean;
+  onNavigate?: () => void;
+}) {
   const sortable = useSortable({ id: account.id, data: { order: account.order } });
   const navigate = useNavigate();
 
@@ -213,18 +221,19 @@ function SortableAccountRow({ account, onNavigate }: { account: AccountRow; onNa
       {...sortable.listeners}
       onClick={() => {
         if (!sortable.isDragging) {
-          navigate({ to: "/accounts" });
+          navigate({ to: "/transactions", search: { accountId: account.id }, viewTransition: true });
           onNavigate?.();
         }
       }}
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sidebar-foreground/70 text-sm transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+        isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/70",
         sortable.isDragging && "opacity-50",
       )}
     >
       <span className="inline-block size-2.5 shrink-0 rounded-full" style={{ backgroundColor: account.labelColor }} />
       <span className="flex-1 truncate text-left">{account.labelText || "Untitled"}</span>
-      <span className="text-muted-foreground text-xs tabular-nums">
+      <span className="font-mono text-muted-foreground text-xs tabular-nums">
         {formatCompactBalance(account.balance, account.currency)}
       </span>
     </button>
@@ -240,7 +249,12 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
       .orderBy("order", "asc"),
   );
 
-  const isActive = currentPath === "/accounts";
+  const matches = useMatches();
+  const lastMatch = matches[matches.length - 1];
+  const activeAccountId =
+    lastMatch?.fullPath === "/transactions" ? (lastMatch.search as { accountId?: string }).accountId : undefined;
+
+  const isActive = currentPath === "/transactions";
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -281,7 +295,12 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
         )}
       >
-        <Link to="/accounts" onClick={onNavigate} className="flex flex-1 items-center gap-2 px-3 py-2">
+        <Link
+          to="/transactions"
+          viewTransition
+          onClick={onNavigate}
+          className="flex flex-1 items-center gap-2 px-3 py-2"
+        >
           <Wallet className="size-4 shrink-0" />
           Accounts
         </Link>
@@ -302,7 +321,12 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
           <SortableContext items={accounts.map((a) => a.id)} strategy={verticalListSortingStrategy}>
             <div className="mt-0.5 ml-4 flex flex-col gap-0.5 border-l border-sidebar-border/50 pl-3">
               {accounts.map((account) => (
-                <SortableAccountRow key={account.id} account={account} onNavigate={onNavigate} />
+                <SortableAccountRow
+                  key={account.id}
+                  account={account}
+                  isActive={activeAccountId === account.id}
+                  onNavigate={onNavigate}
+                />
               ))}
             </div>
           </SortableContext>

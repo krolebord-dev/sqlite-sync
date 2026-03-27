@@ -1,4 +1,11 @@
 import { useStore } from "@tanstack/react-form";
+import {
+  ArrowDownLeftIcon,
+  ArrowLeftRightIcon,
+  ArrowUpRightIcon,
+  SlidersHorizontalIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -11,10 +18,11 @@ import {
   type TransactionType,
   updateTransaction,
 } from "@/lib/transactions";
+import { cn } from "@/lib/utils";
 import { useDb, useDbQuery } from "@/user-db/user-db";
 import { useCreateAccount } from "./account-dialog";
 import { Button } from "./ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 import { useAppForm } from "./ui/form";
 import { SelectItem } from "./ui/select";
 
@@ -84,6 +92,33 @@ export function useCreateTransfer(defaults?: Omit<TransactionDialogDraft, "type"
   return useOpenTransaction({ ...defaults, type: "transfer" });
 }
 
+const TYPE_CONFIG = {
+  expense: {
+    icon: ArrowDownLeftIcon,
+    label: "Expense",
+    activeClass: "bg-background text-red-600 shadow-sm dark:bg-input/50 dark:text-red-400",
+    dotColor: "bg-red-500",
+  },
+  income: {
+    icon: ArrowUpRightIcon,
+    label: "Income",
+    activeClass: "bg-background text-emerald-600 shadow-sm dark:bg-input/50 dark:text-emerald-400",
+    dotColor: "bg-emerald-500",
+  },
+  transfer: {
+    icon: ArrowLeftRightIcon,
+    label: "Transfer",
+    activeClass: "bg-background text-blue-600 shadow-sm dark:bg-input/50 dark:text-blue-400",
+    dotColor: "bg-blue-500",
+  },
+  adjustment: {
+    icon: SlidersHorizontalIcon,
+    label: "Adjust",
+    activeClass: "bg-background text-amber-600 shadow-sm dark:bg-input/50 dark:text-amber-400",
+    dotColor: "bg-amber-500",
+  },
+};
+
 function getDialogTitle(mode: "create" | "edit" | null, type: TransactionType | undefined) {
   if (mode === "edit") {
     return type === "adjustment" ? "Edit adjustment" : "Edit transaction";
@@ -115,6 +150,15 @@ function TransactionDialogContent() {
       .selectAll()
       .where("id", "=", transactionId ?? ""),
   );
+  const { data: categoryRows } = useDbQuery((query) =>
+    query
+      .selectFrom("transaction_entry")
+      .select("category")
+      .distinct()
+      .where("category", "!=", "")
+      .orderBy("category", "asc"),
+  );
+  const categories = categoryRows.map((row) => row.category);
 
   const existing = mode === "edit" ? existingTransactions[0] : undefined;
   const selectedType = (existing?.type ?? draft?.type ?? "expense") as TransactionType;
@@ -218,18 +262,23 @@ function TransactionDialogContent() {
     createAccount();
   }
 
+  const typeConfig = TYPE_CONFIG[currentType];
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent className="sm:max-w-xl">
-        <DialogTitle>{getDialogTitle(mode, currentType)}</DialogTitle>
+        <div className="flex items-center gap-2">
+          <span className={cn("size-2 rounded-full shrink-0 transition-colors", typeConfig.dotColor)} />
+          <DialogTitle>{getDialogTitle(mode, currentType)}</DialogTitle>
+        </div>
         <DialogDescription className="sr-only">Create or edit a balance-affecting transaction.</DialogDescription>
 
         {accounts.length === 0 ? (
-          <div className="flex flex-col gap-4 py-2">
+          <div className="flex flex-col items-center gap-4 py-4 text-center">
             <p className="text-muted-foreground text-sm">
               Create an account before adding income, expenses, or transfers.
             </p>
-            <div className="flex justify-end gap-2">
+            <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancel
               </Button>
@@ -248,15 +297,29 @@ function TransactionDialogContent() {
           >
             <form.AppField name="type">
               {(field) => (
-                <field.FieldContainer labelText="Type">
-                  <field.FormRadioGroup
-                    orientation="horizontal"
-                    options={TRANSACTION_TYPES.map((type) => ({
-                      label: type[0].toUpperCase() + type.slice(1),
-                      value: type,
-                    }))}
-                  />
-                </field.FieldContainer>
+                <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted/50 p-1">
+                  {TRANSACTION_TYPES.map((type) => {
+                    const config = TYPE_CONFIG[type];
+                    const Icon = config.icon;
+                    const isActive = field.state.value === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => field.handleChange(type)}
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-all",
+                          isActive
+                            ? config.activeClass
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                        )}
+                      >
+                        <Icon className="size-3.5 shrink-0" />
+                        <span className="hidden sm:inline">{config.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </form.AppField>
 
@@ -306,7 +369,7 @@ function TransactionDialogContent() {
                       type="number"
                       step="0.01"
                       placeholder={currentType === "adjustment" ? "-12.50 or 12.50" : "0.00"}
-                      className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                      className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                     />
                   </field.FieldContainer>
                 )}
@@ -322,7 +385,7 @@ function TransactionDialogContent() {
                         type="number"
                         step="0.01"
                         placeholder="0.00"
-                        className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                        className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                       />
                     </field.FieldContainer>
                   )}
@@ -331,7 +394,7 @@ function TransactionDialogContent() {
                 <form.AppField name="effectiveAt">
                   {(field) => (
                     <field.FieldContainer labelText="Date and time">
-                      <field.FormInput type="datetime-local" />
+                      <field.FormDateTimeInput />
                     </field.FieldContainer>
                   )}
                 </form.AppField>
@@ -342,14 +405,14 @@ function TransactionDialogContent() {
               <form.AppField name="effectiveAt">
                 {(field) => (
                   <field.FieldContainer labelText="Date and time">
-                    <field.FormInput type="datetime-local" />
+                    <field.FormDateTimeInput />
                   </field.FieldContainer>
                 )}
               </form.AppField>
             )}
 
             {currentType === "transfer" && accounts.length < 2 && (
-              <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 Transfers require at least two accounts.
               </p>
             )}
@@ -376,7 +439,7 @@ function TransactionDialogContent() {
               <form.AppField name="category">
                 {(field) => (
                   <field.FieldContainer labelText="Category">
-                    <field.FormInput placeholder="Optional category" list="transaction-categories" />
+                    <field.FormComboboxInput options={categories} placeholder="Optional category" />
                   </field.FieldContainer>
                 )}
               </form.AppField>
@@ -394,22 +457,25 @@ function TransactionDialogContent() {
               sourceAccount &&
               destinationAccount &&
               sourceAccount.currency !== destinationAccount.currency && (
-                <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                   This transfer stores both entered amounts exactly. No exchange-rate conversion is applied.
                 </p>
               )}
 
-            <div className="flex justify-between gap-2">
+            <DialogFooter className="justify-between">
               <div>
                 {mode === "edit" && transactionId ? (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
                     onClick={() => {
                       deleteTransaction(db.db, transactionId);
                       closeDialog();
                     }}
                   >
+                    <Trash2Icon />
                     Delete
                   </Button>
                 ) : null}
@@ -421,20 +487,9 @@ function TransactionDialogContent() {
                 </Button>
                 <Button type="submit">{mode === "edit" ? "Save" : "Create"}</Button>
               </div>
-            </div>
+            </DialogFooter>
           </form>
         )}
-
-        <datalist id="transaction-categories">
-          <option value="Bills" />
-          <option value="Food" />
-          <option value="Groceries" />
-          <option value="Health" />
-          <option value="Housing" />
-          <option value="Salary" />
-          <option value="Shopping" />
-          <option value="Transport" />
-        </datalist>
       </DialogContent>
     </Dialog>
   );

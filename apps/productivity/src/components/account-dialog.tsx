@@ -8,7 +8,7 @@ import { APP_CURRENCIES } from "@/lib/currency/currencies";
 import { createTransactionInTransaction } from "@/lib/transactions";
 import { useDb, useDbQuery } from "@/user-db/user-db";
 import { Button } from "./ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "./ui/dialog";
 import { useAppForm } from "./ui/form";
 import { SelectItem } from "./ui/select";
 
@@ -279,7 +279,7 @@ function AccountDialogContent() {
                     <field.FormInput
                       type="number"
                       step="0.01"
-                      className="[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                      className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
                     />
                   </field.FieldContainer>
                 )}
@@ -287,7 +287,7 @@ function AccountDialogContent() {
             </div>
 
             {mode === "edit" && hasTransactionHistory && existing?.currency !== selectedCurrency && (
-              <p className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-amber-900 text-sm">
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800 text-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 Changing the account currency only affects future transactions. Existing transaction amounts keep their
                 original currency.
               </p>
@@ -301,12 +301,12 @@ function AccountDialogContent() {
               )}
             </form.AppField>
 
-            <div className="flex justify-end gap-2">
+            <DialogFooter>
               <Button type="button" variant="outline" onClick={closeDialog}>
                 Cancel
               </Button>
               <Button type="submit">{mode === "create" ? "Create" : "Save"}</Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
