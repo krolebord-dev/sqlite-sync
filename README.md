@@ -230,7 +230,7 @@ Runtime model:
 
 - `createSyncedDb()` for client orchestration (worker attach, snapshot hydration, sync state).
 - Live query primitives via `db.createLiveQuery(...)`.
-- React hooks over the same engine: `useDbQuery`, `useDbState`.
+- React hooks over the same engine: `useDbQuery`, `useDbState`. Identical `useDbQuery` calls within the same provider share one live query when SQL and parameter values match.
 - Online/offline toggles with explicit sync state (`online | offline | pending`).
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.
 - Extensible CRDT schema and migrations (`createSyncDbSchema`, `createMigrations`).

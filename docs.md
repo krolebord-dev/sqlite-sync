@@ -316,6 +316,8 @@ createRoot(document.getElementById("root")!).render(
 
 `useDbQuery` creates a **reactive subscription** — the query re-runs automatically when underlying tables change (via SQLite update hooks). It uses `useSyncExternalStore` for concurrent-safe React integration.
 
+Identical `useDbQuery` calls within the same `DbProvider` reuse the same live query when both the SQL string and parameter values match. Each component still receives its own `mapData` result, but the underlying live subscription is shared.
+
 **Kysely query builder (recommended):**
 
 ```tsx
@@ -354,7 +356,7 @@ function FilteredTodos({ search }: { search: string }) {
 }
 ```
 
-When the SQL string stays the same but parameters change, the existing prepared statement is reused with the new parameters — no re-compilation overhead.
+When the SQL string stays the same but parameters change, the prepared statement is reused with the new parameters — no re-compilation overhead. If both SQL and parameter values stay the same, React consumers also share the same live query subscription.
 
 **Transforming results with `mapData`:**
 
@@ -393,8 +395,8 @@ const { data, refresh } = useDbQuery((db) =>
   db.selectFrom("todo").selectAll()
 );
 
-// Force re-fetch with new parameters
-refresh([newParam1, newParam2]);
+// Force re-fetch for the current query
+refresh();
 ```
 
 ---
@@ -874,7 +876,7 @@ function createDbContext<Schema extends SyncDbSchema>(schema: Schema): {
   useDbQuery: <TResult, TMapResult = TResult[]>(
     query: DbQueryParams<Schema["~clientSchema"], TResult>,
     options?: { mapData?: (data: TResult[]) => TMapResult }
-  ) => { data: TMapResult; refresh: (parameters?: readonly unknown[]) => void };
+  ) => { data: TMapResult; refresh: () => void };
   useDbState: () => WorkerState;
 }
 ```
