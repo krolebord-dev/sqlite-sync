@@ -13,10 +13,10 @@ import {
   type SyncBenchmarkDbSchema,
 } from "../src/benchmark-db";
 import {
+  type MeasurementRow,
   renderBenchmarksShell,
   renderSanitySection,
   summarizeDurations,
-  type MeasurementRow,
 } from "../src/benchmarks-common";
 
 type ThroughputMeasurementRow = MeasurementRow & {

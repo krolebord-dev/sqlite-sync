@@ -74,9 +74,11 @@ export async function createMemoryDb<Database>({
 }
 
 function getCurrentSyncId(db: SQLiteDbWrapper<MemoryDbSchema>) {
-  return db.execute<{ syncId: number }>("SELECT coalesce(max(sync_id), 0) AS syncId FROM persisted_crdt_events", {
-    loggerLevel: "system",
-  }).rows[0]?.syncId ?? 0;
+  return (
+    db.execute<{ syncId: number }>("SELECT coalesce(max(sync_id), 0) AS syncId FROM persisted_crdt_events", {
+      loggerLevel: "system",
+    }).rows[0]?.syncId ?? 0
+  );
 }
 
 function persistEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {

@@ -3,12 +3,12 @@ import {
   createMigrator,
   createStoredValue,
   HLCCounter,
-  serializeHLC,
   type PendingCrdtEvent,
   type PersistedCrdtEvent,
   quoteId,
   type SQLiteDbWrapper,
   SQLiteReactiveDb,
+  serializeHLC,
 } from "@sqlite-sync/core";
 import { createMemoryDb } from "../../../packages/core/src/memory-db/memory-db";
 import { createBenchmarkDb, noopLogger } from "./benchmarks-common";
@@ -65,11 +65,7 @@ export async function createPlainBenchmarkTable() {
   return db;
 }
 
-export async function createSyncBenchmarkHarness({
-  snapshot,
-}: {
-  snapshot?: Uint8Array<ArrayBufferLike>;
-} = {}) {
+export async function createSyncBenchmarkHarness({ snapshot }: { snapshot?: Uint8Array<ArrayBufferLike> } = {}) {
   const reactiveDb = await SQLiteReactiveDb.create<SyncBenchmarkDbSchema>({
     snapshot: snapshot ?? new Uint8Array(),
     logger: noopLogger,

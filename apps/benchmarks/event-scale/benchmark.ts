@@ -8,11 +8,7 @@ import {
   measureSyncSnapshotDurations,
   updateRows,
 } from "../src/benchmark-db";
-import {
-  renderBenchmarksShell,
-  renderSanitySection,
-  summarizeDurations,
-} from "../src/benchmarks-common";
+import { renderBenchmarksShell, renderSanitySection, summarizeDurations } from "../src/benchmarks-common";
 
 type ScaleResult = {
   eventCount: number;
