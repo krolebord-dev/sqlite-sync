@@ -13,5 +13,5 @@
     "noEmit": true,
     "customConditions": ["@sqlite-sync/source"]
   },
-  "include": ["src/**/*", "sqlite-batch-inserts/**/*", "*.config.ts"]
+  "include": ["**/*.ts", "**/*.tsx"]
 }

@@ -17,6 +17,8 @@ type MemoryDbOptions<Database> = {
   reactiveDb: SQLiteReactiveDb<Database>;
   hlcCounter: HLCCounter;
   crdtTables: CrdtTableConfig[];
+  initializeSchema?: boolean;
+  initialSyncId?: number;
 };
 
 export async function createMemoryDb<Database>({
@@ -25,21 +27,25 @@ export async function createMemoryDb<Database>({
   reactiveDb: _reactiveDb,
   hlcCounter,
   crdtTables,
+  initializeSchema = true,
+  initialSyncId,
 }: MemoryDbOptions<Database>) {
   const reactiveDb = _reactiveDb as unknown as SQLiteReactiveDb<MemoryDbSchema>;
   const db = reactiveDb.db;
 
-  applyMemoryDbSchema(db);
-  for (const table of crdtTables) {
-    makeCrdtTable({
-      db,
-      baseTableName: table.baseTableName,
-      crdtTableName: table.crdtTableName,
-    });
+  if (initializeSchema) {
+    applyMemoryDbSchema(db);
+    for (const table of crdtTables) {
+      makeCrdtTable({
+        db,
+        baseTableName: table.baseTableName,
+        crdtTableName: table.crdtTableName,
+      });
+    }
   }
 
   const localSyncId = createStoredValue({
-    initialValue: 0,
+    initialValue: initialSyncId ?? getCurrentSyncId(db),
   });
 
   const crdtStorage = createCrdtStorage({
@@ -65,6 +71,12 @@ export async function createMemoryDb<Database>({
   return {
     crdtStorage,
   };
+}
+
+function getCurrentSyncId(db: SQLiteDbWrapper<MemoryDbSchema>) {
+  return db.execute<{ syncId: number }>("SELECT coalesce(max(sync_id), 0) AS syncId FROM persisted_crdt_events", {
+    loggerLevel: "system",
+  }).rows[0]?.syncId ?? 0;
 }
 
 function persistEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {

@@ -97,7 +97,7 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
 
 export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   db.execute(
-    `CREATE TABLE "persisted_crdt_events" (
+    `CREATE TABLE IF NOT EXISTS "persisted_crdt_events" (
   "sync_id" integer NOT NULL PRIMARY KEY,
   "schema_version" integer NOT NULL,
   "status" text NOT NULL,
@@ -108,6 +108,15 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   "dataset" text NOT NULL,
   "item_id" text NOT NULL,
   "payload" text NOT NULL
+)`,
+    { loggerLevel: "system" },
+  );
+  db.execute(
+    `CREATE TABLE IF NOT EXISTS "crdt_update_log" (
+  "dataset" text NOT NULL,
+  "item_id" text NOT NULL,
+  "payload" text NOT NULL,
+  PRIMARY KEY ("item_id", "dataset")
 )`,
     { loggerLevel: "system" },
   );
