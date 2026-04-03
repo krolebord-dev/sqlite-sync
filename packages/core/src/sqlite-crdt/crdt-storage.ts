@@ -231,11 +231,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         break;
       }
 
-      for (const event of events) {
-        transaction(() => {
+      transaction(() => {
+        for (const event of events) {
           processPersistedEvent(event);
-        });
-      }
+        }
+      });
 
       dispatchEventsApplied();
     }
