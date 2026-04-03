@@ -168,30 +168,32 @@ function getOrCreateQueryCache(db: object) {
 
 function scheduleEntryCleanup(db: object, entry: SharedLiveQueryEntry) {
   cancelEntryCleanup(entry);
-  entry.cleanupTimeout = setTimeout(() => {
-    entry.cleanupTimeout = null;
+  entry.cleanupTimeout = setTimeout(cleanupEntry, 0, db, entry);
+}
 
-    if (entry.listeners.size > 0 || entry.unsubscribeFromLiveQuery) {
-      return;
-    }
+function cleanupEntry(db: object, entry: SharedLiveQueryEntry) {
+  entry.cleanupTimeout = null;
 
-    const queryCache = sharedLiveQueries.get(db);
-    const matchingSqlEntries = queryCache?.get(entry.sql);
-    if (!matchingSqlEntries) {
-      return;
-    }
+  if (entry.listeners.size > 0 || entry.unsubscribeFromLiveQuery) {
+    return;
+  }
 
-    const nextEntries = matchingSqlEntries.filter((candidate) => candidate !== entry);
-    if (nextEntries.length > 0) {
-      queryCache?.set(entry.sql, nextEntries);
-    } else {
-      queryCache?.delete(entry.sql);
-    }
+  const queryCache = sharedLiveQueries.get(db);
+  const matchingSqlEntries = queryCache?.get(entry.sql);
+  if (!matchingSqlEntries) {
+    return;
+  }
 
-    if (queryCache?.size === 0) {
-      sharedLiveQueries.delete(db);
-    }
-  }, 0);
+  const nextEntries = matchingSqlEntries.filter((candidate) => candidate !== entry);
+  if (nextEntries.length > 0) {
+    queryCache?.set(entry.sql, nextEntries);
+  } else {
+    queryCache?.delete(entry.sql);
+  }
+
+  if (queryCache?.size === 0) {
+    sharedLiveQueries.delete(db);
+  }
 }
 
 function cancelEntryCleanup(entry: SharedLiveQueryEntry) {

@@ -4,7 +4,12 @@ export type DeferredPromise<T> = {
   reject: (error: Error) => void;
 };
 
-export function createDeferredPromise<T>(opts?: { timeout?: number; onTimeout?: () => void }): DeferredPromise<T> {
+type DeferredPromiseOptions = {
+  timeout?: number;
+  onTimeout?: () => void;
+};
+
+export function createDeferredPromise<T>(opts?: DeferredPromiseOptions): DeferredPromise<T> {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -20,14 +25,16 @@ export function createDeferredPromise<T>(opts?: { timeout?: number; onTimeout?: 
     };
 
     if (opts?.timeout) {
-      timeoutId = setTimeout(() => {
-        _reject(new Error(`Promise timed out after ${opts.timeout}ms`));
-        tryCatch(() => opts?.onTimeout?.());
-      }, opts.timeout);
+      timeoutId = setTimeout(rejectTimeout, opts.timeout, _reject, opts);
     }
   });
 
   return { promise, resolve, reject };
+}
+
+function rejectTimeout(reject: (reason?: unknown) => void, opts: DeferredPromiseOptions) {
+  reject(new Error(`Promise timed out after ${opts.timeout}ms`));
+  tryCatch(() => opts?.onTimeout?.());
 }
 
 export const generateId = () => {
