@@ -158,6 +158,10 @@ export function createCrdtApplyFunction({
     let hasUpdates = false;
 
     for (const [key, value] of Object.entries(eventPayload)) {
+      if (key === "id") {
+        continue;
+      }
+
       const lastUpdateTimestamp = meta[key];
       const currentUpdateTimestamp = event.timestamp;
 

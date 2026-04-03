@@ -140,7 +140,16 @@ export function registerCrdtFunctions({
     directOnly: false,
     innocuous: false,
     callback: (dataset: string, oldPayloadRaw: string, newPayloadRaw: string) => {
+      if (oldPayloadRaw === newPayloadRaw) {
+        return undefined;
+      }
+
       const tableSchema = reactiveDb.db.dbSchema[dataset];
+
+      if (!tableSchema?.columns) {
+        throw new Error(`Schema not found for dataset: ${dataset}`);
+      }
+
       const oldPayload = JSON.parse(oldPayloadRaw);
       const newPayload = JSON.parse(newPayloadRaw);
 
@@ -153,6 +162,13 @@ export function registerCrdtFunctions({
         if (oldValue === newValue) {
           continue;
         }
+
+        if (column.name === "id") {
+          throw new Error(
+            `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
+          );
+        }
+
         hasDiff = true;
         updatePayload[column.name] = newValue;
       }
