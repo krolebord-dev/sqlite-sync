@@ -1,28 +1,7 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: benchmark page wiring */
-import { createDeferredPromise, type SQLiteDbWrapper } from "@sqlite-sync/core";
-import {
-  buildBenchmarkRows,
-  buildRemoteCreateEvents,
-  buildRemoteDeleteEvents,
-  buildRemoteUpdateEvents,
-  countEventsByStatus,
-  countRows,
-  createSyncBenchmarkHarness,
-  insertRows,
-  measureSyncSnapshotDurations,
-  type SyncBenchmarkDbSchema,
-} from "../src/benchmark-db";
-import {
-  type MeasurementRow,
-  renderBenchmarksShell,
-  renderSanitySection,
-  summarizeDurations,
-} from "../src/benchmarks-common";
-
-type ThroughputMeasurementRow = MeasurementRow & {
-  eventsPerWorkload: number;
-  throughputEventsPerSecond: number;
-};
+import { createSyncBenchmarkHarness } from "../src/benchmark-db";
+import { renderBenchmarksShell, renderSanitySection } from "../src/benchmarks-common";
+import { runCrdtEventThroughputBenchmark, type ThroughputMeasurementRow } from "./run-benchmark";
 
 export function renderCrdtEventThroughputPage(container: HTMLElement) {
   container.innerHTML = `
@@ -39,7 +18,7 @@ export function renderCrdtEventThroughputPage(container: HTMLElement) {
       <div class="panel grid grid-2">
         <label class="grid">
           <span class="muted">Events per workload</span>
-          <input class="input" data-field="event-count" type="number" min="1" step="100" value="1000" />
+          <input class="input" data-field="event-count" type="number" min="1" step="100" value="20000" />
         </label>
         <label class="grid">
           <span class="muted">Rounds</span>
@@ -158,89 +137,27 @@ export function renderCrdtEventThroughputPage(container: HTMLElement) {
 
     const eventCount = Math.max(1, Number(eventCountInput.value) || 1);
     const rounds = Math.max(1, Number(roundsInput.value) || 1);
-    const seedRows = buildBenchmarkRows(eventCount);
-    const baseTimestampMs = Date.now() + 60_000;
 
     setRunning(true);
     resultsSection.hidden = true;
     sanitySection.hidden = true;
-    updateStatus("preparing snapshots...");
-
-    const sourceHarness = await createSyncBenchmarkHarness();
 
     try {
-      const emptySnapshot = sourceHarness.reactiveDb.createSnapshot();
-      insertRows(sourceHarness.db, "benchmark", seedRows);
-      const seededSnapshot = sourceHarness.reactiveDb.createSnapshot();
+      const result = await runCrdtEventThroughputBenchmark({
+        eventCount,
+        rounds,
+        onStatus: updateStatus,
+      });
 
-      const createEvents = buildRemoteCreateEvents(eventCount, { baseTimestampMs });
-      const updateEvents = buildRemoteUpdateEvents(eventCount, { baseTimestampMs: baseTimestampMs + 1_000 });
-      const deleteEvents = buildRemoteDeleteEvents(eventCount, { baseTimestampMs: baseTimestampMs + 2_000 });
-
-      updateStatus("measuring workloads...");
-
-      const createStats = summarizeDurations(
-        "Remote create events",
-        await measureRemoteEventDurations({
-          rounds,
-          snapshot: emptySnapshot,
-          events: createEvents,
-          expectedVisibleRows: eventCount,
-        }),
-      );
-      const updateStats = summarizeDurations(
-        "Remote update events",
-        await measureRemoteEventDurations({
-          rounds,
-          snapshot: seededSnapshot,
-          events: updateEvents,
-          expectedVisibleRows: eventCount,
-        }),
-      );
-      const deleteStats = summarizeDurations(
-        "Remote delete events",
-        await measureRemoteEventDurations({
-          rounds,
-          snapshot: seededSnapshot,
-          events: deleteEvents,
-          expectedVisibleRows: 0,
-        }),
-      );
-
-      renderRows([
-        summarizeThroughputRow(createStats, eventCount),
-        summarizeThroughputRow(updateStats, eventCount),
-        summarizeThroughputRow(deleteStats, eventCount),
-      ]);
-
-      const createHarness = await createSyncBenchmarkHarness({ snapshot: emptySnapshot });
-      try {
-        await applyRemoteEvents(createHarness, createEvents);
-        createSanity.textContent = `Create sanity check: ${countRows(createHarness.db, "benchmark")} visible rows, ${countEventsByStatus(createHarness.db, "applied")} applied events`;
-      } finally {
-        createHarness.dispose();
-      }
-
-      const updateHarness = await createSyncBenchmarkHarness({ snapshot: seededSnapshot });
-      try {
-        await applyRemoteEvents(updateHarness, updateEvents);
-        updateSanity.textContent = `Update sanity check: item-1 value is ${getBenchmarkValue(updateHarness.db, "item-1")}`;
-      } finally {
-        updateHarness.dispose();
-      }
-
-      const deleteHarness = await createSyncBenchmarkHarness({ snapshot: seededSnapshot });
-      try {
-        await applyRemoteEvents(deleteHarness, deleteEvents);
-        deleteSanity.textContent = `Delete sanity check: ${countRows(deleteHarness.db, "benchmark")} visible rows remain`;
-      } finally {
-        deleteHarness.dispose();
-      }
-
+      renderRows(result.rows);
+      createSanity.textContent = result.sanity.create;
+      updateSanity.textContent = result.sanity.update;
+      deleteSanity.textContent = result.sanity.delete;
       sanitySection.hidden = false;
       updateStatus("ready");
+    } catch (error) {
+      updateStatus(error instanceof Error ? error.message : "Benchmark failed.");
     } finally {
-      sourceHarness.dispose();
       setRunning(false);
     }
   };
@@ -254,89 +171,4 @@ export function renderCrdtEventThroughputPage(container: HTMLElement) {
 
 export function renderCrdtEventThroughputShell(container: HTMLElement) {
   renderBenchmarksShell(container, renderCrdtEventThroughputPage);
-}
-
-async function measureRemoteEventDurations({
-  rounds,
-  snapshot,
-  events,
-  expectedVisibleRows,
-}: {
-  rounds: number;
-  snapshot: Uint8Array<ArrayBufferLike>;
-  events: Parameters<Awaited<ReturnType<typeof createSyncBenchmarkHarness>>["crdtStorage"]["enqueueRemoteEvents"]>[0];
-  expectedVisibleRows: number;
-}) {
-  return measureSyncSnapshotDurations({
-    rounds,
-    snapshot,
-    task: async (harness) => {
-      await applyRemoteEvents(harness, events);
-
-      const visibleRows = countRows(harness.db, "benchmark");
-      if (visibleRows !== expectedVisibleRows) {
-        throw new Error(`Expected ${expectedVisibleRows} visible rows after workload, got ${visibleRows}.`);
-      }
-    },
-  });
-}
-
-async function applyRemoteEvents(
-  harness: Awaited<ReturnType<typeof createSyncBenchmarkHarness>>,
-  events: Parameters<Awaited<ReturnType<typeof createSyncBenchmarkHarness>>["crdtStorage"]["enqueueRemoteEvents"]>[0],
-) {
-  const baselineApplied = countEventsByStatus(harness.db, "applied");
-  const baselineFailed = countEventsByStatus(harness.db, "failed");
-  const baselinePending = countEventsByStatus(harness.db, "pending");
-  const completion = createDeferredPromise<void>({ timeout: 30_000 });
-  const expectedAppliedCount = baselineApplied + events.length;
-
-  const checkCompletion = () => {
-    const appliedCount = countEventsByStatus(harness.db, "applied");
-    const failedCount = countEventsByStatus(harness.db, "failed");
-    const pendingCount = countEventsByStatus(harness.db, "pending");
-
-    if (failedCount > baselineFailed) {
-      completion.reject(new Error("At least one remote CRDT event failed to apply."));
-      return;
-    }
-
-    if (pendingCount === baselinePending && appliedCount === expectedAppliedCount) {
-      completion.resolve();
-      return;
-    }
-
-    if (pendingCount === baselinePending && appliedCount !== expectedAppliedCount) {
-      completion.reject(
-        new Error(
-          `Remote CRDT event workload completed with ${appliedCount - baselineApplied} applied events; expected ${events.length}.`,
-        ),
-      );
-    }
-  };
-
-  harness.crdtStorage.addEventListener("events-applied", checkCompletion);
-
-  try {
-    harness.crdtStorage.enqueueRemoteEvents(events);
-    checkCompletion();
-    await completion.promise;
-  } finally {
-    harness.crdtStorage.removeEventListener("events-applied", checkCompletion);
-  }
-}
-
-function summarizeThroughputRow(row: MeasurementRow, eventsPerWorkload: number): ThroughputMeasurementRow {
-  return {
-    ...row,
-    eventsPerWorkload,
-    throughputEventsPerSecond: eventsPerWorkload / (row.meanMs / 1_000),
-  };
-}
-
-function getBenchmarkValue(db: SQLiteDbWrapper<SyncBenchmarkDbSchema>, itemId: string) {
-  return db.execute<{ value: number }>({
-    sql: "SELECT value FROM benchmark WHERE id = ?",
-    parameters: [itemId],
-  }).rows[0]?.value;
 }
