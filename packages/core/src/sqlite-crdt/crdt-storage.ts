@@ -241,6 +241,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
   });
 
+  void processEnqueuedEvents();
+
   return {
     getEventsBatch,
     enqueueLocalEvents,

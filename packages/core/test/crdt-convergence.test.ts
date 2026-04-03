@@ -152,6 +152,93 @@ async function syncOneWay(
 }
 
 describe("CRDT convergence for parallel entity edits", () => {
+  it("replays pending persisted events on startup", async () => {
+    const rows = new Map<string, Record<string, unknown>>();
+    const updateLogs = new Map<string, CrdtUpdateLogPayload>();
+    const persistedEvents: PersistedCrdtEvent[] = [
+      {
+        sync_id: 1,
+        schema_version: 0,
+        status: "pending",
+        type: "item-created",
+        timestamp: "000000000001000:00000:remote-node",
+        origin: "remote",
+        source_node_id: "",
+        dataset: DATASET,
+        item_id: "todo-1",
+        payload: JSON.stringify({
+          id: "todo-1",
+          title: "Recovered after restart",
+          completed: false,
+          tombstone: false,
+        }),
+      },
+    ];
+    const syncId = { current: 1 };
+
+    const applyCrdtEvent = createCrdtApplyFunction({
+      getCrdtUpdateLog: ({ dataset, itemId }) => {
+        const meta = updateLogs.get(`${dataset}:${itemId}`);
+        return meta ? { ...meta } : null;
+      },
+      insertItem: ({ payload }) => {
+        rows.set(String(payload.id), { ...payload });
+      },
+      insertCrdtUpdateLog: ({ dataset, itemId, payload }) => {
+        updateLogs.set(`${dataset}:${itemId}`, JSON.parse(payload) as CrdtUpdateLogPayload);
+      },
+      updateItem: ({ itemId, payload }) => {
+        const currentRow = rows.get(itemId);
+        if (!currentRow) {
+          throw new Error(`Item ${itemId} not found`);
+        }
+        rows.set(itemId, { ...currentRow, ...payload });
+      },
+      updateCrdtUpdateLog: ({ dataset, itemId, payload }) => {
+        updateLogs.set(`${dataset}:${itemId}`, JSON.parse(payload) as CrdtUpdateLogPayload);
+      },
+    });
+
+    createCrdtStorage({
+      nodeId: "node-a",
+      syncId,
+      migrator: createMigrator({
+        migrations: createMigrations(() => ({ 0: [] })),
+        schemaVersion: { current: 0 },
+      }),
+      hlc: new HLCCounter("node-a", () => 1_000),
+      persistEvent: (event) => {
+        persistedEvents.push(event);
+      },
+      getEventsBatch: ({ afterSyncId, status, excludeOrigin, excludeNodeId, limit }) =>
+        persistedEvents
+          .filter((event) => (afterSyncId === undefined ? true : event.sync_id > afterSyncId))
+          .filter((event) => (status === undefined ? true : event.status === status))
+          .filter((event) => (excludeOrigin === undefined ? true : event.origin !== excludeOrigin))
+          .filter((event) => (excludeNodeId === undefined ? true : event.source_node_id !== excludeNodeId))
+          .sort((left, right) => left.sync_id - right.sync_id)
+          .slice(0, limit ?? Number.POSITIVE_INFINITY),
+      updateEvent: (eventSyncId, update) => {
+        const event = persistedEvents.find((item) => item.sync_id === eventSyncId);
+        if (!event) {
+          throw new Error(`Event ${eventSyncId} not found`);
+        }
+        Object.assign(event, update);
+      },
+      handleCrdtEventApply: applyCrdtEvent,
+    });
+
+    await Promise.resolve();
+
+    expect(rows.get("todo-1")).toEqual({
+      id: "todo-1",
+      title: "Recovered after restart",
+      completed: false,
+      tombstone: false,
+    });
+    expect(persistedEvents[0]?.status).toBe("applied");
+  });
+
   it("merges concurrent updates to different fields", async () => {
     const replicaA = createReplica("node-a", 1_000);
     const replicaB = createReplica("node-b", 1_000);
