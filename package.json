@@ -16,7 +16,8 @@
     "version:minor": "npm version minor",
     "version:major": "npm version major",
     "format": "biome check --write",
-    "format:check": "biome check"
+    "format:check": "biome check",
+    "test": "pnpm --filter './packages/**' test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.12",

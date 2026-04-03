@@ -12,7 +12,7 @@ import {
 } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
-import type { PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
+import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
@@ -97,7 +97,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   db.invalidateDbSchema();
 
   const localSyncId = createStoredValue({
-    initialValue: getLatestSyncId(db),
+    initialValue: getMaxSyncId(db, "none"),
   });
 
   const crdtStorage = createCrdtStorage({
@@ -132,15 +132,6 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
   });
 
-  const postState = () => {
-    broadcastChannels.responses.postMessage({
-      notificationType: "state-changed",
-      state: {
-        remoteState: remoteSource.getState(),
-      },
-    });
-  };
-
   const remoteSource = createRemoteSource({
     kvStore,
     crdtStorage,
@@ -150,6 +141,14 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   remoteSource.goOnline();
 
+  const postState = () => {
+    broadcastChannels.responses.postMessage({
+      notificationType: "state-changed",
+      state: {
+        remoteState: remoteSource.getState(),
+      },
+    });
+  };
   remoteSource.addEventListener("state-changed", () => {
     postState();
   });
@@ -157,12 +156,13 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const rpcTarget: WorkerRpc = {
     execute: (query) => db.execute(query),
     getSnapshot: () => {
+      const appliedSyncId = getMaxSyncId(db, "pending");
       db.execute("PRAGMA journal_mode=off", { loggerLevel: "system" });
       const file = db.createSnapshot();
       db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
       return {
         file,
-        syncId: localSyncId.current,
+        syncId: appliedSyncId,
         schemaVersion: migrator.currentSchemaVersion,
       };
     },
@@ -316,14 +316,19 @@ export async function startDbWorker(opts: WorkerOptions) {
   self.close();
 }
 
-function getLatestSyncId(db: SQLiteDbWrapper<WorkerDbSchema>) {
-  const result = db.executePrepared(
-    "get-latest-sync-id",
-    {},
-    (db) => db.selectFrom("worker.crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
+function getMaxSyncId(db: SQLiteDbWrapper<WorkerDbSchema>, excludingStatus: "none" | "pending") {
+  const [result] = db.executePrepared(
+    "get-max-sync-id",
+    { excludingStatus: excludingStatus as CrdtEventStatus },
+    (db, params) =>
+      db
+        .selectFrom("worker.crdt_events")
+        .where("status", "!=", params("excludingStatus"))
+        .select((eb) => eb.fn.max("sync_id").as("sync_id")),
     { loggerLevel: "system" },
   );
-  return result[0]?.sync_id ?? 0;
+
+  return result?.sync_id ?? 0;
 }
 
 function persistEvent(db: SQLiteDbWrapper<WorkerDbSchema>, event: PersistedCrdtEvent) {
