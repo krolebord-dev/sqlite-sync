@@ -1,6 +1,6 @@
 import { deserializeHLC, type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
-import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
+import { createTypedEventTarget, ensureSingletonExecution, noop } from "../utils";
 import type { CrdtEventOrigin, CrdtEventStatus, CrdtEventType, PersistedCrdtEvent } from "./crdt-table-schema";
 import type { StoredValue } from "./stored-value";
 
@@ -83,7 +83,7 @@ type EventsAppliedPayload = {
 };
 
 export function createCrdtStorage(storage: DbSyncerStorage) {
-  const transaction = storage.transaction ?? ((callback) => callback());
+  const transaction = storage.transaction ?? noop;
   const eventTarget = createTypedEventTarget<{
     "events-applied": EventsAppliedPayload;
   }>();

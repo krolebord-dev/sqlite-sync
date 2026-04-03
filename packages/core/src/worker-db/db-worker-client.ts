@@ -2,6 +2,7 @@ import {
   createDeferredPromise,
   createTypedEventTarget,
   type DeferredPromise,
+  noop,
   type TypedEvent,
   type TypedEventTarget,
 } from "../utils";
@@ -111,7 +112,7 @@ export const createWorkerDbClient = async ({
   // so this request can be silently dropped and timeout. The worker will independently
   // post state at the end of init. For subsequent tabs, this triggers the already-running
   // worker to send its current state.
-  rpc.postState().catch(() => {});
+  rpc.postState().catch(noop);
 
   let workerState = await statePromise;
 

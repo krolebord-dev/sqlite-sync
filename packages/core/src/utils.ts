@@ -215,3 +215,5 @@ export function quoteId(name: string): string {
     .map((s) => `"${s.replace(/"/g, '""')}"`)
     .join(".");
 }
+
+export function noop(..._args: unknown[]): void {}
