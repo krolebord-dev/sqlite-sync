@@ -1,12 +1,8 @@
+import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
 import { StrictMode, Suspense, use } from "react";
 import { createRoot } from "react-dom/client";
-import { scan } from "react-scan";
 import { App } from "./App";
 import { DbProvider, initDb } from "./db";
-
-scan({
-  enabled: true,
-});
 
 const db = initDb();
 
@@ -20,6 +16,7 @@ createRoot(rootElement).render(
       <Root>
         <App />
       </Root>
+      <SQLiteSyncDevtools />
     </Suspense>
   </StrictMode>,
 );

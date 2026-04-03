@@ -1,6 +1,6 @@
 import { generateId } from "@sqlite-sync/core";
 import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDb, useDbQuery, useDbState } from "./db";
 import { QueryShell } from "./QueryShell";
 
@@ -9,6 +9,7 @@ export function App() {
 
   const [newTodoTitle, setNewTodoTitle] = useState("");
   const [randomCount, setRandomCount] = useState(10);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   const { data: todos } = useDbQuery((db) => {
     let query = db.selectFrom("todo").selectAll().orderBy("id");
@@ -80,78 +81,318 @@ export function App() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl p-8">
-      <a href="/">
-        <h1 className="mb-4 font-bold text-3xl">SQLite Sync Todo Demo</h1>
-      </a>
-      <p className="mb-6 text-gray-600">A todo list powered by SQLite Sync with live queries and optimistic updates.</p>
-      <OnlineStatusButton />
-      <BlockingIndicator />
-
-      <QueryShell />
-      <SQLiteSyncDevtools />
-
-      <div className="mt-6 rounded bg-gray-100 p-4">
-        <p className="text-sm">
-          ✅ Optimistic DB (in-memory) ready
-          <br />✅ Sync DB (persistent) ready
-          <br />✅ {todoStats.totalCount} active todos ({todoStats.completedCount} completed)
-        </p>
-      </div>
-
-      {/* Add new todo */}
-      <div className="mt-6 flex gap-2">
-        <input
-          className="flex-1 rounded border border-gray-300 px-3 py-2"
-          type="text"
-          placeholder="Add a new todo..."
-          value={newTodoTitle}
-          onChange={(e) => setNewTodoTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              addTodo();
-            }
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
+      {/* ── Header ── */}
+      <header
+        style={{
+          borderBottom: "1px solid var(--border)",
+          padding: "14px 24px",
+          position: "sticky",
+          top: 0,
+          background: "var(--bg)",
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "640px",
+            margin: "0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
-        />
-        <button type="button" className="rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600" onClick={addTodo}>
-          Add
-        </button>
-      </div>
-
-      {/* Add random todos */}
-      <div className="mt-4 flex gap-2">
-        <input
-          className="w-auto rounded border border-gray-300 px-3 py-2"
-          type="number"
-          min="1"
-          value={randomCount}
-          onChange={(e) => setRandomCount(parseInt(e.target.value, 10) || 0)}
-        />
-        <button
-          type="button"
-          className="rounded bg-green-500 px-4 py-2 text-white hover:bg-green-600"
-          onClick={addRandomTodos}
         >
-          Add {randomCount} random todos
-        </button>
-      </div>
+          {/* Logo + wordmark */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <div
+              style={{
+                width: "30px",
+                height: "30px",
+                borderRadius: "7px",
+                background: "var(--accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--bg)",
+                fontFamily: "var(--font-display)",
+                fontWeight: "400",
+                fontSize: "16px",
+                flexShrink: 0,
+              }}
+            >
+              S
+            </div>
+            <div>
+              <h1
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "18px",
+                  fontWeight: "400",
+                  lineHeight: "1.1",
+                  letterSpacing: "-0.01em",
+                  color: "var(--text)",
+                }}
+              >
+                SQLite Sync
+              </h1>
+              <p style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", marginTop: "1px" }}>
+                local-first demo
+              </p>
+            </div>
+          </div>
 
-      {/* Todo list */}
-      <div className="mt-6 space-y-2">
-        {todos.length === 0 ? (
-          <p className="py-8 text-center text-gray-500">No todos yet. Add one above!</p>
-        ) : (
-          todos.map((todo) => (
-            <TodoItem
-              key={todo.id}
-              todo={todo}
-              onToggle={() => toggleTodo(todo.id, todo.completed)}
-              onDelete={() => deleteTodo(todo.id)}
-              onUpdateTitle={(newTitle) => updateTodoTitle(todo.id, newTitle)}
+          {/* Right: sync status + debug toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <SyncStatusDot />
+            <button
+              type="button"
+              className="debug-toggle"
+              onClick={() => setDebugOpen((o) => !o)}
+              title="Toggle developer tools"
+              style={{
+                background: debugOpen ? "var(--accent-dim)" : "transparent",
+                border: `1px solid ${debugOpen ? "var(--accent-fg)" : "var(--border)"}`,
+                borderRadius: "6px",
+                padding: "5px 10px",
+                color: debugOpen ? "var(--accent-fg)" : "var(--muted-fg)",
+                fontSize: "11px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                transition: "all 0.15s ease",
+                letterSpacing: "0.02em",
+              }}
+            >
+              {debugOpen ? "close dev" : "dev tools"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main content ── */}
+      <main
+        style={{
+          maxWidth: "640px",
+          margin: "0 auto",
+          padding: "36px 24px",
+          paddingBottom: debugOpen ? "62vh" : "80px",
+        }}
+      >
+        {/* Add todo input */}
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+            marginBottom: "28px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "10px",
+            padding: "6px 6px 6px 16px",
+            alignItems: "center",
+            transition: "border-color 0.2s ease",
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Add a new task…"
+            value={newTodoTitle}
+            onChange={(e) => setNewTodoTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") addTodo();
+            }}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "var(--text)",
+              fontSize: "15px",
+              fontFamily: "var(--font-sans)",
+            }}
+          />
+          <button
+            type="button"
+            className="btn-add"
+            onClick={addTodo}
+            style={{
+              background: "var(--accent)",
+              color: "var(--bg)",
+              border: "none",
+              borderRadius: "6px",
+              width: "36px",
+              height: "36px",
+              fontSize: "22px",
+              lineHeight: "1",
+              cursor: "pointer",
+              fontWeight: "400",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              transition: "opacity 0.15s ease",
+            }}
+          >
+            +
+          </button>
+        </div>
+
+        {/* Stats row */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "20px",
+          }}
+        >
+          <p style={{ fontSize: "12px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>
+            {todoStats.totalCount === 0 ? (
+              "no tasks"
+            ) : (
+              <>
+                <span style={{ color: "var(--text)" }}>{todoStats.totalCount}</span>
+                {" tasks"}
+                {todoStats.completedCount > 0 && (
+                  <>
+                    {" · "}
+                    <span style={{ color: "var(--success)" }}>{todoStats.completedCount}</span>
+                    {" done"}
+                  </>
+                )}
+              </>
+            )}
+          </p>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <button
+              type="button"
+              className="btn-random"
+              onClick={addRandomTodos}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: "6px",
+                padding: "4px 10px",
+                color: "var(--muted-fg)",
+                fontSize: "11px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                transition: "all 0.15s ease",
+                whiteSpace: "nowrap",
+              }}
+            >
+              + {randomCount} random
+            </button>
+            <input
+              type="number"
+              min="1"
+              value={randomCount}
+              onChange={(e) => setRandomCount(parseInt(e.target.value, 10) || 0)}
+              style={{
+                width: "46px",
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "6px",
+                padding: "4px 8px",
+                color: "var(--muted-fg)",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono)",
+                outline: "none",
+                textAlign: "center",
+              }}
             />
-          ))
-        )}
-      </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ height: "1px", background: "var(--border)", marginBottom: "4px" }} />
+
+        {/* Todo list */}
+        <div>
+          {todos.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "72px 24px" }}>
+              <p
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "22px",
+                  color: "var(--muted-fg)",
+                  fontStyle: "italic",
+                  marginBottom: "8px",
+                }}
+              >
+                Nothing here yet
+              </p>
+              <p style={{ fontSize: "12px", color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+                add a task above to get started
+              </p>
+            </div>
+          ) : (
+            todos.map((todo) => (
+              <TodoItem
+                key={todo.id}
+                todo={todo}
+                onToggle={() => toggleTodo(todo.id, todo.completed)}
+                onDelete={() => deleteTodo(todo.id)}
+                onUpdateTitle={(newTitle) => updateTodoTitle(todo.id, newTitle)}
+              />
+            ))
+          )}
+        </div>
+      </main>
+
+      {/* ── Debug Panel ── */}
+      {debugOpen && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            background: "var(--surface)",
+            borderTop: "1px solid var(--border)",
+            maxHeight: "60vh",
+            overflow: "auto",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              padding: "10px 16px",
+              borderBottom: "1px solid var(--border)",
+              display: "flex",
+              alignItems: "center",
+              gap: "14px",
+              position: "sticky",
+              top: 0,
+              background: "var(--surface)",
+            }}
+          >
+            <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", letterSpacing: "0.1em" }}>
+              DEV TOOLS
+            </span>
+            <BlockingIndicatorCompact />
+            <button
+              type="button"
+              onClick={() => setDebugOpen(false)}
+              style={{
+                marginLeft: "auto",
+                background: "transparent",
+                border: "none",
+                color: "var(--muted-fg)",
+                cursor: "pointer",
+                fontSize: "14px",
+                padding: "4px 6px",
+                lineHeight: "1",
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ padding: "16px" }}>
+            <QueryShell />
+            <SQLiteSyncDevtools />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -169,6 +410,15 @@ function TodoItem({
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(todo.title);
+  const [hovered, setHovered] = useState(false);
+  const editRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing && editRef.current) {
+      editRef.current.focus();
+      editRef.current.select();
+    }
+  }, [isEditing]);
 
   const handleSave = () => {
     if (editTitle.trim() && editTitle !== todo.title) {
@@ -184,35 +434,74 @@ function TodoItem({
 
   return (
     <div
-      className={`flex items-center gap-3 rounded border p-3 ${todo.completed ? "bg-gray-50 opacity-75" : "bg-white"}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "12px",
+        padding: "10px 12px",
+        borderRadius: "7px",
+        background: hovered && !isEditing ? "var(--surface)" : "transparent",
+        borderLeft: `2px solid ${hovered && !todo.completed && !isEditing ? "var(--accent)" : "transparent"}`,
+        transition: "background 0.1s ease, border-color 0.1s ease",
+      }}
     >
-      <input type="checkbox" checked={todo.completed} onChange={onToggle} className="h-5 w-5 cursor-pointer" />
+      <input type="checkbox" checked={todo.completed} onChange={onToggle} className="todo-checkbox" />
+
       {isEditing ? (
-        <div className="flex flex-1 gap-2">
+        <div style={{ flex: 1, display: "flex", gap: "6px" }}>
           <input
-            className="flex-1 rounded border border-gray-300 px-2 py-1"
+            ref={editRef}
             type="text"
             value={editTitle}
             onChange={(e) => setEditTitle(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleSave();
-              } else if (e.key === "Escape") {
-                handleCancel();
-              }
+              if (e.key === "Enter") handleSave();
+              else if (e.key === "Escape") handleCancel();
+            }}
+            style={{
+              flex: 1,
+              background: "var(--surface-2)",
+              border: "1px solid var(--accent)",
+              borderRadius: "5px",
+              padding: "5px 10px",
+              color: "var(--text)",
+              fontSize: "14px",
+              fontFamily: "var(--font-sans)",
+              outline: "none",
             }}
           />
           <button
             type="button"
-            className="rounded bg-green-500 px-2 py-1 text-sm text-white hover:bg-green-600"
             onClick={handleSave}
+            style={{
+              background: "var(--accent)",
+              color: "var(--bg)",
+              border: "none",
+              borderRadius: "5px",
+              padding: "5px 12px",
+              fontSize: "12px",
+              cursor: "pointer",
+              fontWeight: "600",
+              fontFamily: "var(--font-sans)",
+            }}
           >
             Save
           </button>
           <button
             type="button"
-            className="rounded bg-gray-300 px-2 py-1 text-sm hover:bg-gray-400"
             onClick={handleCancel}
+            style={{
+              background: "transparent",
+              color: "var(--muted-fg)",
+              border: "1px solid var(--border)",
+              borderRadius: "5px",
+              padding: "5px 12px",
+              fontSize: "12px",
+              cursor: "pointer",
+              fontFamily: "var(--font-sans)",
+            }}
           >
             Cancel
           </button>
@@ -220,32 +509,77 @@ function TodoItem({
       ) : (
         <>
           <span
-            className={`flex-1 cursor-pointer ${todo.completed ? "text-gray-500 line-through" : ""}`}
             onDoubleClick={() => setIsEditing(true)}
+            style={{
+              flex: 1,
+              fontSize: "14px",
+              lineHeight: "1.5",
+              color: todo.completed ? "var(--muted-fg)" : "var(--text)",
+              textDecoration: todo.completed ? "line-through" : "none",
+              opacity: todo.completed ? 0.55 : 1,
+              cursor: "default",
+              transition: "color 0.15s ease, opacity 0.15s ease",
+            }}
           >
             {todo.title}
           </span>
-          <button
-            type="button"
-            className="px-2 py-1 text-gray-600 text-sm hover:text-gray-800"
-            onClick={() => setIsEditing(true)}
+
+          <div
+            style={{
+              display: "flex",
+              gap: "4px",
+              opacity: hovered ? 1 : 0,
+              transition: "opacity 0.15s ease",
+              flexShrink: 0,
+            }}
           >
-            Edit
-          </button>
-          <button
-            type="button"
-            className="rounded bg-red-500 px-2 py-1 text-sm text-white hover:bg-red-600"
-            onClick={onDelete}
-          >
-            Delete
-          </button>
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={() => setIsEditing(true)}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: "4px",
+                padding: "3px 8px",
+                color: "var(--muted-fg)",
+                fontSize: "10px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                transition: "all 0.1s ease",
+                letterSpacing: "0.02em",
+              }}
+            >
+              edit
+            </button>
+            <button
+              type="button"
+              className="btn-del"
+              onClick={onDelete}
+              style={{
+                background: "transparent",
+                border: "1px solid transparent",
+                borderRadius: "4px",
+                padding: "3px 8px",
+                color: "var(--danger)",
+                fontSize: "10px",
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+                opacity: 0.65,
+                transition: "all 0.1s ease",
+                letterSpacing: "0.02em",
+              }}
+            >
+              del
+            </button>
+          </div>
         </>
       )}
     </div>
   );
 }
 
-function OnlineStatusButton() {
+function SyncStatusDot() {
   const { state } = useDb();
   const dbState = useDbState();
 
@@ -257,27 +591,52 @@ function OnlineStatusButton() {
     }
   };
 
+  const statusMap = {
+    online: { color: "var(--success)", label: "synced", dotClass: "sync-dot-online" },
+    pending: { color: "var(--warning)", label: "syncing…", dotClass: "sync-dot-pending" },
+    offline: { color: "var(--danger)", label: "offline", dotClass: "" },
+  } as const;
+
+  const cfg = statusMap[dbState.remoteState as keyof typeof statusMap] ?? statusMap.offline;
+
   return (
     <button
       type="button"
-      className={`rounded px-4 py-2 text-white ${
-        dbState.remoteState === "online"
-          ? "bg-blue-500 hover:bg-blue-600"
-          : dbState.remoteState === "pending"
-            ? "bg-yellow-500 hover:bg-yellow-600"
-            : "bg-red-500 hover:bg-red-600"
-      }`}
-      disabled={dbState.remoteState === "pending"}
       onClick={toggleOnlineStatus}
+      disabled={dbState.remoteState === "pending"}
+      title={`${dbState.remoteState} — click to toggle`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        background: "transparent",
+        border: "1px solid var(--border)",
+        borderRadius: "20px",
+        padding: "4px 10px 4px 8px",
+        cursor: dbState.remoteState === "pending" ? "default" : "pointer",
+        transition: "border-color 0.15s ease",
+      }}
     >
-      {dbState.remoteState}
+      <span
+        className={cfg.dotClass}
+        style={{
+          width: "7px",
+          height: "7px",
+          borderRadius: "50%",
+          background: cfg.color,
+          display: "block",
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", letterSpacing: "0.02em" }}>
+        {cfg.label}
+      </span>
     </button>
   );
 }
 
-function BlockingIndicator() {
+function BlockingIndicatorCompact() {
   const [rotation, setRotation] = useState(0);
-  const [frameCount, setFrameCount] = useState(0);
 
   useEffect(() => {
     let animationFrameId: number;
@@ -286,43 +645,30 @@ function BlockingIndicator() {
     const animate = (currentTime: number) => {
       const deltaTime = currentTime - lastTime;
       lastTime = currentTime;
-
       setRotation((prev) => (prev + deltaTime * 0.36) % 360);
-
-      setFrameCount((prev) => prev + 1);
-
       animationFrameId = requestAnimationFrame(animate);
     };
 
     animationFrameId = requestAnimationFrame(animate);
-
     return () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, []);
 
   return (
-    <div className="mb-6 rounded border border-yellow-200 bg-yellow-50 p-4">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <div
-            className="h-8 w-8 rounded-full border-4 border-blue-500 border-t-transparent"
-            style={{
-              transform: `rotate(${rotation}deg)`,
-              transition: "none",
-            }}
-          />
-          <span className="font-medium text-gray-700 text-sm">UI Thread Monitor</span>
-        </div>
-        <div className="text-gray-600 text-xs">
-          Frame: {frameCount} | Rotation: {Math.round(rotation)}°
-        </div>
-        <div className="ml-auto text-gray-500 text-xs italic">
-          If this stutters, operations are blocking the UI thread
-        </div>
-      </div>
+    <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+      <div
+        style={{
+          width: "13px",
+          height: "13px",
+          borderRadius: "50%",
+          border: "2px solid var(--accent)",
+          borderTopColor: "transparent",
+          transform: `rotate(${rotation}deg)`,
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>ui thread monitor</span>
     </div>
   );
 }

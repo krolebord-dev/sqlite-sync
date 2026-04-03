@@ -23,7 +23,6 @@
     "partysocket": "^1.1.10",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-scan": "^0.4.3",
     "tailwindcss": "^4.1.18"
   },
   "devDependencies": {

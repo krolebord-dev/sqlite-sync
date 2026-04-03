@@ -1,1 +1,155 @@
 @import "tailwindcss";
+
+:root {
+  --bg: #f8f6f1;
+  --surface: #ffffff;
+  --surface-2: #f0ede5;
+  --border: #e4ddd4;
+  --text: #1a1714;
+  --muted: #c8bfb4;
+  --muted-fg: #8a7f72;
+  --accent: #c2410c;
+  --accent-fg: #c2410c;
+  --accent-dim: rgba(194, 65, 12, 0.08);
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-display: 'DM Serif Display', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove number input spinners */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Custom checkbox */
+.todo-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--muted);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  position: relative;
+  background: transparent;
+}
+
+.todo-checkbox:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.todo-checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.todo-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid #ffffff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+/* Sync dot pulse animations */
+@keyframes pulse-green {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(74, 222, 128, 0);
+  }
+}
+
+@keyframes pulse-yellow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(251, 191, 36, 0);
+  }
+}
+
+.sync-dot-online {
+  animation: pulse-green 2.5s ease-in-out infinite;
+}
+
+.sync-dot-pending {
+  animation: pulse-yellow 0.8s ease-in-out infinite;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Button hover states via class */
+.btn-icon:hover {
+  color: var(--text) !important;
+  border-color: var(--muted) !important;
+}
+
+.btn-del:hover {
+  opacity: 1 !important;
+  background: rgba(248, 113, 113, 0.08) !important;
+  border-color: var(--danger) !important;
+}
+
+.btn-add:hover {
+  opacity: 0.85;
+}
+
+.btn-random:hover {
+  border-color: var(--accent-fg) !important;
+  color: var(--accent-fg) !important;
+}
+
+.debug-toggle:hover {
+  background: var(--surface-2) !important;
+  border-color: var(--muted) !important;
+  color: var(--muted-fg) !important;
+}
