@@ -218,8 +218,8 @@ export class SQLiteReactiveDb<Database> {
     this.eventTarget.removeEventListener(type, listener);
   }
 
-  notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] = []) {
-    if (tables.length === 0) {
+  private notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] | Set<string> | null = null) {
+    if (!tables) {
       this.eventTarget.dispatchEvent("any-table-changed", undefined);
       return;
     }
@@ -230,7 +230,7 @@ export class SQLiteReactiveDb<Database> {
   }
 
   private registerDbHooks() {
-    const updateQueue = new Set<string>();
+    let updateQueue = new Set<string>();
 
     this.sqlite3.capi.sqlite3_update_hook(
       this.db.ensureDb,
@@ -262,8 +262,8 @@ export class SQLiteReactiveDb<Database> {
           return 0;
         }
 
-        const tables = Array.from(updateQueue);
-        updateQueue.clear();
+        const tables = updateQueue;
+        updateQueue = new Set<string>();
         this.eventTarget.dispatchEvent("transaction-committed", undefined);
 
         queueMicrotask(() => {
