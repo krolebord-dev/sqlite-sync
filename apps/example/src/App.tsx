@@ -135,7 +135,9 @@ export function App() {
               >
                 SQLite Sync
               </h1>
-              <p style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", marginTop: "1px" }}>
+              <p
+                style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", marginTop: "1px" }}
+              >
                 local-first demo
               </p>
             </div>
@@ -366,7 +368,14 @@ export function App() {
               background: "var(--surface)",
             }}
           >
-            <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", letterSpacing: "0.1em" }}>
+            <span
+              style={{
+                fontSize: "10px",
+                color: "var(--muted-fg)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.1em",
+              }}
+            >
               DEV TOOLS
             </span>
             <BlockingIndicatorCompact />
@@ -628,7 +637,9 @@ function SyncStatusDot() {
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", letterSpacing: "0.02em" }}>
+      <span
+        style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)", letterSpacing: "0.02em" }}
+      >
         {cfg.label}
       </span>
     </button>
@@ -668,7 +679,9 @@ function BlockingIndicatorCompact() {
           flexShrink: 0,
         }}
       />
-      <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>ui thread monitor</span>
+      <span style={{ fontSize: "10px", color: "var(--muted-fg)", fontFamily: "var(--font-mono)" }}>
+        ui thread monitor
+      </span>
     </div>
   );
 }
