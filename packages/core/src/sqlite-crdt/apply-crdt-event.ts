@@ -1,3 +1,4 @@
+import type { SqlValue } from "@sqlite.org/sqlite-wasm";
 import type { Kysely } from "kysely";
 import type { SQLiteTransactionWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
@@ -88,13 +89,13 @@ export const createSQLiteCrdtApplyFunction = ({
     },
     updateItem(opts) {
       const keys = Array.from(Object.keys(opts.payload));
-      db.execute(
-        {
-          sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
-          parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
-        },
-        { loggerLevel: "system" },
-      );
+      keys.sort();
+      db.executePreparedRaw({
+        key: `update-item-${opts.dataset}-${keys.join("-")}`,
+        sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
+        params: [...keys.map((key) => opts.payload[key]), opts.itemId] as SqlValue[],
+        meta: { loggerLevel: "system" },
+      });
     },
   });
 

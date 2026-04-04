@@ -39,7 +39,7 @@ type SqliteWrapperOptions = {
 
 export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
   SQLiteDbWrapper<TDatabase>,
-  "execute" | "sql" | "executeKysely" | "prepare" | "executePrepared" | "prepareKysely"
+  "execute" | "sql" | "executeKysely" | "prepare" | "executePrepared" | "prepareKysely" | "executePreparedRaw"
 >;
 
 type QueryMetaOpts = {
