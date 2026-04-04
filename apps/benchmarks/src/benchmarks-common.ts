@@ -25,7 +25,6 @@ export async function createBenchmarkDb<TSchema>(): Promise<SQLiteDbWrapper<TSch
   const db = new SQLiteDbWrapper<TSchema>({
     db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
     sqlite3,
-    logger: noopLogger,
     loggerPrefix: "benchmarks",
   });
   applyMemoryDbSchema(db);

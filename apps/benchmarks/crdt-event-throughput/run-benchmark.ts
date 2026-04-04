@@ -180,15 +180,9 @@ async function applyRemoteEvents(
     }
   };
 
-  harness.crdtStorage.addEventListener("events-applied", checkCompletion);
-
-  try {
-    harness.crdtStorage.enqueueRemoteEvents(events);
-    checkCompletion();
-    await completion.promise;
-  } finally {
-    harness.crdtStorage.removeEventListener("events-applied", checkCompletion);
-  }
+  await harness.crdtStorage.enqueueRemoteEvents(events);
+  checkCompletion();
+  await completion.promise;
 }
 
 function summarizeThroughputRow(row: MeasurementRow, eventsPerWorkload: number): ThroughputMeasurementRow {

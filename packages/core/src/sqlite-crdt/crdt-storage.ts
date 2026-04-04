@@ -110,19 +110,22 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
     });
 
-    processEnqueuedEvents();
+    return processEnqueuedEvents();
   };
 
-  const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string) => {
-    enqueueEvents("local", sourceNodeId, events);
+  const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string): void => {
+    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
+    return enqueueEvents("local", sourceNodeId, events) as undefined;
   };
 
-  const enqueueOwnEvents = (events: OwnCrdtEvent[]) => {
-    enqueueEvents("own", storage.nodeId, events);
+  const enqueueOwnEvents = (events: OwnCrdtEvent[]): void => {
+    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
+    return enqueueEvents("own", storage.nodeId, events) as undefined;
   };
 
-  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]) => {
-    enqueueEvents("remote", "", events);
+  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): void => {
+    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
+    return enqueueEvents("remote", "", events) as undefined;
   };
 
   const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {

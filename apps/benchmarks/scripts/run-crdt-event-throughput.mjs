@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { mkdir, writeFile as writeFsFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,7 @@ try {
 
   browser = await chromium.launch({ headless: !options.headed });
   const page = await browser.newPage();
+  const cdpSession = options.profile ? await page.context().newCDPSession(page) : null;
 
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -37,18 +39,33 @@ try {
     { timeout: options.timeoutMs },
   );
 
-  const benchmarkResult = await page.evaluate(
-    async ({ eventCount, rounds }) => {
-      return await window.__sqliteSyncBenchmarks.runCrdtEventThroughputBenchmark({
-        eventCount,
-        rounds,
-      });
-    },
-    {
-      eventCount: options.eventCount,
-      rounds: options.rounds,
-    },
-  );
+  let benchmarkResult;
+  let cpuProfile;
+
+  try {
+    if (cdpSession) {
+      await cdpSession.send("Profiler.enable");
+      await cdpSession.send("Profiler.start");
+    }
+
+    benchmarkResult = await page.evaluate(
+      async ({ eventCount, rounds }) => {
+        return await window.__sqliteSyncBenchmarks.runCrdtEventThroughputBenchmark({
+          eventCount,
+          rounds,
+        });
+      },
+      {
+        eventCount: options.eventCount,
+        rounds: options.rounds,
+      },
+    );
+  } finally {
+    if (cdpSession) {
+      cpuProfile = (await cdpSession.send("Profiler.stop")).profile;
+      await cdpSession.send("Profiler.disable");
+    }
+  }
 
   const result = {
     benchmark: "crdt-event-throughput",
@@ -68,8 +85,13 @@ try {
   const output = JSON.stringify(result, null, 2);
   printBenchmarkTable(result);
 
+  if (cpuProfile && options.profileOutputFile) {
+    await writeTextFile(options.profileOutputFile, `${JSON.stringify(cpuProfile, null, 2)}\n`);
+    console.error(`Wrote CPU profile to ${options.profileOutputFile}`);
+  }
+
   if (options.outputFile) {
-    await writeFile(options.outputFile, `${output}\n`);
+    await writeTextFile(options.outputFile, `${output}\n`);
     console.error(`Wrote benchmark results to ${options.outputFile}`);
   }
 } finally {
@@ -88,6 +110,8 @@ function parseArgs(argv) {
     headed: false,
     timeoutMs: 120_000,
     outputFile: "",
+    profile: false,
+    profileOutputFile: path.resolve(benchmarksDir, "artifacts", "crdt-event-throughput.cpuprofile"),
   };
 
   for (let index = 0; index < argv.length; index++) {
@@ -113,6 +137,16 @@ function parseArgs(argv) {
         options.outputFile = argv[++index] ?? "";
         if (!options.outputFile) {
           throw new Error("Missing value for --output.");
+        }
+        break;
+      case "--profile":
+        options.profile = true;
+        break;
+      case "--profile-output":
+        options.profile = true;
+        options.profileOutputFile = argv[++index] ?? "";
+        if (!options.profileOutputFile) {
+          throw new Error("Missing value for --profile-output.");
         }
         break;
       case "--help":
@@ -148,6 +182,8 @@ Options:
   --timeout-ms <n>   Timeout for server startup and benchmark run. Default: 120000
   --headed           Run Chromium in headed mode
   --output <file>    Write JSON results to a file
+  --profile          Capture a Chromium CPU profile
+  --profile-output   CPU profile output path. Default: apps/benchmarks/artifacts/crdt-event-throughput.cpuprofile
   --help             Show this message
 `);
 }
@@ -246,7 +282,7 @@ function delay(ms) {
   });
 }
 
-async function writeFile(filePath, contents) {
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(filePath, contents, "utf8");
+async function writeTextFile(filePath, contents) {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFsFile(filePath, contents, "utf8");
 }

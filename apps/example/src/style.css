@@ -129,14 +129,14 @@ input[type="number"] {
 
 /* Button hover states via class */
 .btn-icon:hover {
-  color: var(--text) !important;
-  border-color: var(--muted) !important;
+  color: var(--text);
+  border-color: var(--muted);
 }
 
 .btn-del:hover {
-  opacity: 1 !important;
-  background: rgba(248, 113, 113, 0.08) !important;
-  border-color: var(--danger) !important;
+  opacity: 1;
+  background: rgba(248, 113, 113, 0.08);
+  border-color: var(--danger);
 }
 
 .btn-add:hover {
@@ -144,12 +144,12 @@ input[type="number"] {
 }
 
 .btn-random:hover {
-  border-color: var(--accent-fg) !important;
-  color: var(--accent-fg) !important;
+  border-color: var(--accent-fg);
+  color: var(--accent-fg);
 }
 
 .debug-toggle:hover {
-  background: var(--surface-2) !important;
-  border-color: var(--muted) !important;
-  color: var(--muted-fg) !important;
+  background: var(--surface-2);
+  border-color: var(--muted);
+  color: var(--muted-fg);
 }
