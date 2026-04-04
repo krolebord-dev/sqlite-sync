@@ -279,7 +279,7 @@ function AccountDialogContent() {
                     <field.FormInput
                       type="number"
                       step="0.01"
-                      className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                      className="font-mono tabular-nums [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                   </field.FieldContainer>
                 )}

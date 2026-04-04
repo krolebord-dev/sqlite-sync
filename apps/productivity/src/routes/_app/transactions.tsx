@@ -354,7 +354,7 @@ function TransactionsPage() {
                       <span className="truncate font-medium">{title}</span>
                       <span
                         className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide",
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium text-[11px] uppercase tracking-wide",
                           typeStyle.badge,
                         )}
                       >
@@ -384,7 +384,7 @@ function TransactionsPage() {
                   <div className="shrink-0 text-right">
                     {isTransfer && !search.accountId ? (
                       <div className="space-y-1">
-                        <p className="font-mono font-medium tabular-nums">
+                        <p className="font-medium font-mono tabular-nums">
                           {formatBalance(transaction.amount, transaction.accountCurrency)}
                         </p>
                         {transaction.counterpartyAmount !== null ? (
@@ -394,7 +394,7 @@ function TransactionsPage() {
                         ) : null}
                       </div>
                     ) : (
-                      <p className={cn("font-mono font-medium tabular-nums", summaryAmountClass(display.amount))}>
+                      <p className={cn("font-medium font-mono tabular-nums", summaryAmountClass(display.amount))}>
                         {formatBalance(display.amount, display.currency)}
                       </p>
                     )}

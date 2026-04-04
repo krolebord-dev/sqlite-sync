@@ -141,10 +141,10 @@ export function TimeInput({
         onFocus={(e) => e.target.select()}
         onBlur={onBlur}
         aria-label="Hours"
-        className="w-6 bg-transparent text-center font-mono tabular-nums text-sm outline-none selection:bg-primary/20"
+        className="w-6 bg-transparent text-center font-mono text-sm tabular-nums outline-none selection:bg-primary/20"
         maxLength={2}
       />
-      <span className="font-mono text-muted-foreground text-sm select-none">:</span>
+      <span className="select-none font-mono text-muted-foreground text-sm">:</span>
       <input
         ref={minutesRef}
         type="text"
@@ -156,7 +156,7 @@ export function TimeInput({
         onFocus={(e) => e.target.select()}
         onBlur={onBlur}
         aria-label="Minutes"
-        className="w-6 bg-transparent text-center font-mono tabular-nums text-sm outline-none selection:bg-primary/20"
+        className="w-6 bg-transparent text-center font-mono text-sm tabular-nums outline-none selection:bg-primary/20"
         maxLength={2}
       />
     </div>

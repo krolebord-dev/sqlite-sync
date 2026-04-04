@@ -99,7 +99,7 @@ export function ComboboxInput({
       {showDropdown && (
         <div className="absolute top-full right-0 left-0 z-50 mt-1 overflow-hidden rounded-md border bg-popover shadow-md">
           <CommandPrimitive loop shouldFilter={false}>
-            <CommandPrimitive.List className="max-h-48 overflow-y-auto scroll-py-1 p-1">
+            <CommandPrimitive.List className="max-h-48 scroll-py-1 overflow-y-auto p-1">
               {filtered.map((option) => (
                 <CommandPrimitive.Item
                   key={option}

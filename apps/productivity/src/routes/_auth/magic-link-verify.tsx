@@ -89,7 +89,7 @@ function RouteComponent() {
                 }
               }}
               value={code}
-              className="font-mono text-center text-lg tracking-widest tabular-nums"
+              className="text-center font-mono text-lg tabular-nums tracking-widest"
             />
           </div>
           {error && <p className="text-destructive text-sm">{error}</p>}

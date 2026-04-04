@@ -131,7 +131,6 @@ function getDialogTitle(mode: "create" | "edit" | null, type: TransactionType | 
       return "New transfer";
     case "adjustment":
       return "New adjustment";
-    case "expense":
     default:
       return "New expense";
   }
@@ -268,7 +267,7 @@ function TransactionDialogContent() {
     <Dialog open={isOpen} onOpenChange={(open) => !open && closeDialog()}>
       <DialogContent className="sm:max-w-xl">
         <div className="flex items-center gap-2">
-          <span className={cn("size-2 rounded-full shrink-0 transition-colors", typeConfig.dotColor)} />
+          <span className={cn("size-2 shrink-0 rounded-full transition-colors", typeConfig.dotColor)} />
           <DialogTitle>{getDialogTitle(mode, currentType)}</DialogTitle>
         </div>
         <DialogDescription className="sr-only">Create or edit a balance-affecting transaction.</DialogDescription>
@@ -308,10 +307,10 @@ function TransactionDialogContent() {
                         type="button"
                         onClick={() => field.handleChange(type)}
                         className={cn(
-                          "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium transition-all",
+                          "flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 font-medium text-sm transition-all",
                           isActive
                             ? config.activeClass
-                            : "text-muted-foreground hover:text-foreground hover:bg-background/50",
+                            : "text-muted-foreground hover:bg-background/50 hover:text-foreground",
                         )}
                       >
                         <Icon className="size-3.5 shrink-0" />
@@ -369,7 +368,7 @@ function TransactionDialogContent() {
                       type="number"
                       step="0.01"
                       placeholder={currentType === "adjustment" ? "-12.50 or 12.50" : "0.00"}
-                      className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                      className="font-mono tabular-nums [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                     />
                   </field.FieldContainer>
                 )}
@@ -385,7 +384,7 @@ function TransactionDialogContent() {
                         type="number"
                         step="0.01"
                         placeholder="0.00"
-                        className="font-mono tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [-moz-appearance:textfield]"
+                        className="font-mono tabular-nums [-moz-appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
                     </field.FieldContainer>
                   )}
@@ -469,7 +468,7 @@ function TransactionDialogContent() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => {
                       deleteTransaction(db.db, transactionId);
                       closeDialog();

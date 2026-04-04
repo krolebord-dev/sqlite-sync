@@ -9,7 +9,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Link, useMatches, useNavigate, useRouter } from "@tanstack/react-router";
 import {
-  ArrowRightLeft,
   ChevronDown,
   ChevronsUpDown,
   Home,
@@ -319,7 +318,7 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
       <CollapsibleContent>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={accounts.map((a) => a.id)} strategy={verticalListSortingStrategy}>
-            <div className="mt-0.5 ml-4 flex flex-col gap-0.5 border-l border-sidebar-border/50 pl-3">
+            <div className="mt-0.5 ml-4 flex flex-col gap-0.5 border-sidebar-border/50 border-l pl-3">
               {accounts.map((account) => (
                 <SortableAccountRow
                   key={account.id}

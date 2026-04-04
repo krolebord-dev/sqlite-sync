@@ -77,7 +77,7 @@ export function DateTimeInput({
         >
           <CalendarIcon className="size-4 text-muted-foreground" />
           <span className="truncate">{displayDate}</span>
-          <span className="ml-auto font-mono tabular-nums text-muted-foreground text-xs">{time}</span>
+          <span className="ml-auto font-mono text-muted-foreground text-xs tabular-nums">{time}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align="start">
