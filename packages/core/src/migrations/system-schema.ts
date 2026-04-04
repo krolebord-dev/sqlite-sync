@@ -2,6 +2,7 @@ import type { CrdtUpdateLogItem, PersistedCrdtEvent } from "../sqlite-crdt/crdt-
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "../sqlite-kv-store";
+import { quoteId } from "../utils";
 
 export type WorkerDbSchema = {
   crdt_update_log: CrdtUpdateLogItem;
@@ -16,6 +17,7 @@ export type MemoryDbSchema = {
 
 export type SystemMigrationContext = {
   eventsTableName: string;
+  eventsStatusSyncIdIndexName?: string;
   updateLogTableName: string;
   execute: (sql: string) => void;
 };
@@ -29,7 +31,7 @@ export const baseSystemMigrations: SystemMigration[] = [
   {
     version: 0,
     up: (ctx: SystemMigrationContext) => {
-      ctx.execute(`CREATE TABLE IF NOT EXISTS ${ctx.eventsTableName} (
+      ctx.execute(`CREATE TABLE IF NOT EXISTS ${quoteId(ctx.eventsTableName)} (
         "sync_id" integer NOT NULL PRIMARY KEY,
         "schema_version" integer NOT NULL,
         "status" text NOT NULL,
@@ -40,7 +42,7 @@ export const baseSystemMigrations: SystemMigration[] = [
         "item_id" text NOT NULL,
         "payload" text NOT NULL
       )`);
-      ctx.execute(`CREATE TABLE IF NOT EXISTS ${ctx.updateLogTableName} (
+      ctx.execute(`CREATE TABLE IF NOT EXISTS ${quoteId(ctx.updateLogTableName)} (
         "dataset" text NOT NULL,
         "item_id" text NOT NULL,
         "payload" text NOT NULL,
@@ -51,7 +53,16 @@ export const baseSystemMigrations: SystemMigration[] = [
   {
     version: 1,
     up: (ctx: SystemMigrationContext) => {
-      ctx.execute(`ALTER TABLE ${ctx.eventsTableName} ADD COLUMN "source_node_id" TEXT NOT NULL DEFAULT ''`);
+      ctx.execute(`ALTER TABLE ${quoteId(ctx.eventsTableName)} ADD COLUMN "source_node_id" TEXT NOT NULL DEFAULT ''`);
+    },
+  },
+  {
+    version: 2,
+    up: (ctx: SystemMigrationContext) => {
+      const indexName = quoteId(
+        ctx.eventsStatusSyncIdIndexName ?? deriveIndexName(ctx.eventsTableName, "status_sync_id_idx"),
+      );
+      ctx.execute(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${quoteId(ctx.eventsTableName)} ("status", "sync_id")`);
     },
   },
 ];
@@ -60,12 +71,14 @@ export function runSystemMigrations(opts: {
   version: StoredValue<number>;
   migrations: SystemMigration[];
   eventsTableName: string;
+  eventsStatusSyncIdIndexName?: string;
   updateLogTableName: string;
   execute: (sql: string) => void;
   transaction: (callback: () => void) => void;
 }): void {
   const ctx: SystemMigrationContext = {
     eventsTableName: opts.eventsTableName,
+    eventsStatusSyncIdIndexName: opts.eventsStatusSyncIdIndexName,
     updateLogTableName: opts.updateLogTableName,
     execute: opts.execute,
   };
@@ -88,8 +101,8 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
   runSystemMigrations({
     migrations: baseSystemMigrations,
     version: kvStore.createNumberStoredValue("internal-schema-version", -1),
-    eventsTableName: '"worker"."crdt_events"',
-    updateLogTableName: '"crdt_update_log"',
+    eventsTableName: "worker.crdt_events",
+    updateLogTableName: "crdt_update_log",
     execute: (sql) => db.execute(sql, { loggerLevel: "system" }),
     transaction: (callback) => db.executeTransaction(callback),
   });
@@ -97,7 +110,7 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
 
 export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   db.execute(
-    `CREATE TABLE IF NOT EXISTS "persisted_crdt_events" (
+    `CREATE TABLE IF NOT EXISTS ${quoteId("persisted_crdt_events")} (
   "sync_id" integer NOT NULL PRIMARY KEY,
   "schema_version" integer NOT NULL,
   "status" text NOT NULL,
@@ -108,11 +121,17 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   "dataset" text NOT NULL,
   "item_id" text NOT NULL,
   "payload" text NOT NULL
-)`,
+  )`,
     { loggerLevel: "system" },
   );
   db.execute(
-    `CREATE TABLE IF NOT EXISTS "crdt_update_log" (
+    `CREATE INDEX IF NOT EXISTS ${quoteId(deriveIndexName("persisted_crdt_events", "status_sync_id_idx"))} ON ${quoteId("persisted_crdt_events")} ("status", "sync_id")`,
+    {
+      loggerLevel: "system",
+    },
+  );
+  db.execute(
+    `CREATE TABLE IF NOT EXISTS ${quoteId("crdt_update_log")} (
   "dataset" text NOT NULL,
   "item_id" text NOT NULL,
   "payload" text NOT NULL,
@@ -120,4 +139,8 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
 )`,
     { loggerLevel: "system" },
   );
+}
+
+function deriveIndexName(tableName: string, suffix: string) {
+  return `${tableName.replaceAll(".", "_")}_${suffix}`;
 }
