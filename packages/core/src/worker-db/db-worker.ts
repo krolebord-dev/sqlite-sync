@@ -77,12 +77,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   db.execute("PRAGMA worker.journal_mode=WAL", { loggerLevel: "system" });
   db.execute("PRAGMA worker.synchronous=NORMAL", { loggerLevel: "system" });
 
-  applyWorkerDbSchema(db);
-
-  const kvStore = createSQLiteKvStore({
-    db,
-    metaTableName: "worker.kv",
-  });
+  const { kvStore } = applyWorkerDbSchema(db);
 
   const migrator = createMigrator({
     migrations: opts.syncDbSchema.migrations,

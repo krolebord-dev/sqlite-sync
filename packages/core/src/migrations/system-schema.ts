@@ -106,6 +106,8 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
     execute: (sql) => db.execute(sql, { loggerLevel: "system" }),
     transaction: (callback) => db.executeTransaction(callback),
   });
+
+  return { kvStore };
 }
 
 export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
