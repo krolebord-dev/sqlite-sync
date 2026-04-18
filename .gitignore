@@ -25,3 +25,6 @@ dist-ssr
 
 .wrangler/
 *.tsbuildinfo
+
+.claude/settings.local.json
+docs/thesis
