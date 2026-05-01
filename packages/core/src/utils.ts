@@ -224,3 +224,31 @@ export function quoteId(name: string): string {
 }
 
 export function noop(..._args: unknown[]): void {}
+
+export type ParsedTableName = {
+  schema: "main" | (string & {});
+  table: string;
+  fullIdentifier: string;
+};
+
+export function parseTableName(tableName: string): ParsedTableName {
+  if (!tableName?.trim()) {
+    throw new Error("Parse table: missing table name");
+  }
+  const parts = tableName.split(".");
+  if (parts.length > 2) {
+    throw new Error("Parse table: too many dot-delimited segments in table name");
+  }
+
+  return parts.length === 1
+    ? {
+        schema: "main",
+        table: parts[0],
+        fullIdentifier: quoteId(parts[0]),
+      }
+    : {
+        schema: parts[0],
+        table: parts[1],
+        fullIdentifier: `${quoteId(parts[0])}.${quoteId(parts[1])}`,
+      };
+}

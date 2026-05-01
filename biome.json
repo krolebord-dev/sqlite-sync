@@ -15,7 +15,8 @@
       "apps/watchlist",
       "!**/worker-configuration.d.ts",
       "!**/.wrangler",
-      "!**/*.gen.ts"
+      "!**/*.gen.ts",
+      "!docs"
     ]
   },
   "formatter": {

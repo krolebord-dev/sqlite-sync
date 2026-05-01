@@ -16,7 +16,7 @@ import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-ta
 import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { createSQLiteKvStore, type KvStore } from "../sqlite-kv-store";
+import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
 import {
   createBroadcastChannels,
