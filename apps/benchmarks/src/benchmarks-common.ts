@@ -88,6 +88,7 @@ export function renderBenchmarksShell(container: HTMLElement, renderPage: (main:
       <div class="chip">SQLite Sync Benchmarks</div>
     </div>
     <nav class="app-nav">
+      <a class="chip" href="/sqlite-kv-store-rowid/">KV Store Rowid</a>
       <a class="chip" href="/sqlite-batch-inserts/">Batch Inserts</a>
       <a class="chip" href="/sqlite-transaction-overhead/">Transaction Overhead</a>
       <a class="chip" href="/local-write-overhead/">Local Writes</a>

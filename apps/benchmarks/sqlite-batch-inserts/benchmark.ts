@@ -173,7 +173,11 @@ function runChunkedInsert(db: SQLiteDbWrapper<BenchmarkDbSchema>, events: Persis
   db.executeTransaction((tx) => {
     for (let i = 0; i < events.length; i += chunkSize) {
       const chunk = events.slice(i, i + chunkSize);
-      tx.executeKysely((kysely) => kysely.insertInto("persisted_crdt_events").values(chunk));
+      for (const event of chunk) {
+        tx.executePrepared("insert-chunk-event", event, (db, params) =>
+          db.insertInto("persisted_crdt_events").values(params.all),
+        );
+      }
     }
   });
 }

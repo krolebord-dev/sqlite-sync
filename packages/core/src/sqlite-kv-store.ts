@@ -1,4 +1,4 @@
-import type { SchemaModule } from "kysely";
+import { type SchemaModule, sql } from "kysely";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
 import type { SQLiteTransactionWrapper } from "./sqlite-db-wrapper";
 
@@ -12,7 +12,8 @@ export function createKvStoreTableQuery(schema: SchemaModule, tableName: string)
     .createTable(tableName)
     .ifNotExists()
     .addColumn("key", "text", (col) => col.notNull().primaryKey())
-    .addColumn("value", "text", (col) => col.notNull());
+    .addColumn("value", "text", (col) => col.notNull())
+    .modifyEnd(sql`without rowid`);
 }
 
 export function createSQLiteKvStore({
