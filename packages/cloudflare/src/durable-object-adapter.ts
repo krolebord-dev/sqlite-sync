@@ -40,12 +40,12 @@ const durableObjectMigrations: SystemMigration[] = [
     version: 2,
     up: (ctx) => {
       ctx.execute(
-        `DELETE FROM ${ctx.eventsTableName} WHERE "sync_id" NOT IN ` +
-          `(SELECT MIN("sync_id") FROM ${ctx.eventsTableName} GROUP BY "timestamp", "source_node_id")`,
+        `DELETE FROM ${ctx.eventsTable.fullIdentifier} WHERE "sync_id" NOT IN ` +
+          `(SELECT MIN("sync_id") FROM ${ctx.eventsTable.fullIdentifier} GROUP BY "timestamp", "source_node_id")`,
       );
       ctx.execute(
         `CREATE UNIQUE INDEX IF NOT EXISTS "idx_crdt_events_dedup" ` +
-          `ON ${ctx.eventsTableName} ("timestamp", "source_node_id")`,
+          `ON ${ctx.eventsTable.table} ("timestamp", "source_node_id")`,
       );
     },
   },
