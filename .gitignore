@@ -28,3 +28,8 @@ dist-ssr
 
 .claude/settings.local.json
 docs/thesis
+
+.agent-ui
+.codex-artifacts
+.claude
+.cursor
