@@ -29,7 +29,9 @@ export {
   applyMemoryDbSchema,
   applyWorkerDbSchema,
   baseSystemMigrations,
+  createSystemDbConfig,
   runSystemMigrations,
+  type SystemDbConfig,
   type SystemMigration,
   type SystemMigrationContext,
 } from "./migrations/system-schema";
@@ -63,14 +65,15 @@ export type {
   CrdtUpdateLogPayload,
   PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
-export { applyKyselyEventsBatchFilters } from "./sqlite-crdt/events-batch-filters";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
 export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // SQLite Wrapper
 export {
   type ExecuteParams,
   type ExecuteResult,
+  type InternalSQLiteWrapper,
   type KyselyQueryFactory,
+  type KyselyStatementFactory,
   type PreparedStatement,
   type QueryBuilderOutput,
   SQLiteDbWrapper,

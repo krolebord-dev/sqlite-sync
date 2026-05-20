@@ -19,7 +19,7 @@ export type ExecuteResult<T> = {
   rows: T[];
 };
 
-export type PreparedStatement<TParams extends SqlValue[], TResult> = {
+export type PreparedStatement<TParams extends unknown[], TResult> = {
   execute: (parameters: TParams) => TResult[];
   finalize: () => void;
   isFinalized: boolean;
@@ -39,8 +39,17 @@ type SqliteWrapperOptions = {
 
 export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
   SQLiteDbWrapper<TDatabase>,
-  "execute" | "sql" | "executeKysely" | "prepare" | "executePrepared" | "prepareKysely" | "executePreparedRaw"
+  "sql" | "execute" | "executePrepared" | "executePreparedRaw" | "executeKysely"
 >;
+
+export type InternalSQLiteTransactionWrapper<TDatabase = unknown> = Pick<
+  SQLiteDbWrapper<TDatabase>,
+  "executePrepared" | "executePreparedRaw"
+>;
+
+export type InternalSQLiteWrapper<TDatabase = unknown> = InternalSQLiteTransactionWrapper<TDatabase> & {
+  executeTransaction: (callback: (db: InternalSQLiteTransactionWrapper<TDatabase>) => void) => void;
+};
 
 type QueryMetaOpts = {
   loggerLevel?: "info" | "system";
@@ -145,7 +154,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     };
   }
 
-  prepare<TParams extends SqlValue[], TResult>(sql: string, opts?: QueryMetaOpts) {
+  prepare<TParams extends unknown[], TResult>(sql: string, opts?: QueryMetaOpts) {
     const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
     const stmt = this.ensureDb.prepare(sql);
     perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
@@ -160,7 +169,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
       try {
         if (params.length > 0) {
-          stmt.bind(params);
+          stmt.bind(params as SqlValue[]);
         }
 
         const results = [] as TResult[];
@@ -237,7 +246,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return statement.execute(params);
   }
 
-  executePreparedRaw<TParams extends SqlValue[], TResult>({
+  executePreparedRaw<TParams extends unknown[], TResult>({
     key,
     sql,
     params,
@@ -342,7 +351,7 @@ type ParamsGetter<TParams> = <TKey extends keyof TParams>(key: TKey) => TParams[
 type TypedStatement<TParams extends Record<string, unknown>, TResult> = {
   execute: (parameters: TParams) => TResult[];
 };
-type KyselyStatementFactory<
+export type KyselyStatementFactory<
   TParams extends Record<string, unknown>,
   TDatabase,
   TQuery extends Compilable<TResult>,

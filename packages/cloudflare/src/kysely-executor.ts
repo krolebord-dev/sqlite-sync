@@ -1,4 +1,4 @@
-import { dummyKysely } from "@sqlite-sync/core";
+import { dummyKysely, type InternalSQLiteWrapper, type KyselyStatementFactory } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
 
 type ExecuteParams = {
@@ -48,4 +48,45 @@ export function createKyselyExecutor<TDatabase>(db: DurableObjectStorage): Kysel
   };
 
   return executor;
+}
+
+export function createCrdtStorageDb(executor: KyselyExecutor<any>): InternalSQLiteWrapper<any> {
+  const wrapper: Omit<InternalSQLiteWrapper<any>, "executeTransaction"> = {
+    executePreparedRaw: <TParams extends unknown[], TResult>({
+      sql,
+      params,
+    }: {
+      sql: string;
+      params?: TParams | undefined;
+    }) =>
+      executor.execute<TResult>({
+        sql,
+        parameters: params ?? [],
+      }).rows,
+
+    executePrepared: <
+      TParams extends Record<string, unknown>,
+      TQuery extends Compilable<TResult>,
+      TResult = QueryBuilderOutput<TQuery>,
+    >(
+      _: string,
+      params: TParams,
+      factory: KyselyStatementFactory<TParams, any, TQuery, TResult>,
+    ) => {
+      const query = factory(dummyKysely as any, (key) => params[key] as any).compile();
+      const result = executor.execute<TResult>({
+        sql: query.sql,
+        parameters: query.parameters,
+      });
+      return result.rows;
+    },
+  };
+
+  return {
+    ...wrapper,
+    executeTransaction: (callback) =>
+      executor.transaction(() => {
+        callback(wrapper);
+      }),
+  };
 }

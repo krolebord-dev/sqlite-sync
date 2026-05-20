@@ -1,6 +1,7 @@
 import type { SqlValue } from "@sqlite.org/sqlite-wasm";
 import type { Kysely } from "kysely";
-import type { SQLiteTransactionWrapper } from "../sqlite-db-wrapper";
+import type { SystemDbConfig } from "../migrations/system-schema";
+import type { InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
 import type { CrdtEventType, CrdtUpdateLogItem, CrdtUpdateLogPayload } from "./crdt-table-schema";
 
@@ -14,10 +15,10 @@ export type PendingCrdtEvent = {
 
 export const createSQLiteCrdtApplyFunction = ({
   db,
-  updateLogTableName,
+  dbConfig,
 }: {
-  db: SQLiteTransactionWrapper<any>;
-  updateLogTableName: string;
+  db: InternalSQLiteWrapper<any>;
+  dbConfig: SystemDbConfig;
 }) => {
   const applyCrdtEvent = createCrdtApplyFunction({
     getCrdtUpdateLog(opts) {
@@ -29,7 +30,7 @@ export const createSQLiteCrdtApplyFunction = ({
         },
         (db, params) => {
           return (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
-            .selectFrom(updateLogTableName as "table")
+            .selectFrom(dbConfig.updateLogTable.fullIdentifier as "table")
             .select("payload")
             .where("item_id", "=", params("item_id"))
             .where("dataset", "=", params("dataset"));
@@ -48,11 +49,13 @@ export const createSQLiteCrdtApplyFunction = ({
           payload: opts.payload,
         },
         (db, params) =>
-          (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>).insertInto(updateLogTableName as "table").values({
-            item_id: params("item_id"),
-            dataset: params("dataset"),
-            payload: params("payload"),
-          }),
+          (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
+            .insertInto(dbConfig.updateLogTable.fullIdentifier as "table")
+            .values({
+              item_id: params("item_id"),
+              dataset: params("dataset"),
+              payload: params("payload"),
+            }),
         { loggerLevel: "system" },
       );
     },
@@ -66,7 +69,7 @@ export const createSQLiteCrdtApplyFunction = ({
         },
         (db, params) =>
           (db as unknown as Kysely<{ table: CrdtUpdateLogItem }>)
-            .updateTable(updateLogTableName as "table")
+            .updateTable(dbConfig.updateLogTable.fullIdentifier as "table")
             .set({
               payload: params("payload"),
             })
@@ -119,15 +122,8 @@ export function createCrdtApplyFunction({
 }: CreateCrdtApplyOpts) {
   type ItemCreatedOpts = {
     event: PendingCrdtEvent;
-    meta: CrdtUpdateLogPayload | null;
   };
-  const applyItemCreated = ({ event, meta }: ItemCreatedOpts) => {
-    if (meta) {
-      // Item already exists
-      applyItemUpdated({ event, meta });
-      return;
-    }
-
+  const applyItemCreated = ({ event }: ItemCreatedOpts) => {
     const eventPayload = JSON.parse(event.payload);
 
     eventPayload.tombstone = false;
@@ -197,27 +193,21 @@ export function createCrdtApplyFunction({
 
     // TODO Check primary key / unique constraints
 
-    switch (event.type) {
-      case "item-created": {
-        applyItemCreated({
-          event,
-          meta,
-        });
-        break;
-      }
-      case "item-updated": {
-        if (!meta) {
-          throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
-        }
-
-        applyItemUpdated({
-          event,
-          meta,
-        });
-        break;
-      }
-      default:
-        event.type satisfies never;
+    if (event.type !== "item-created" && event.type !== "item-updated") {
+      throw new Error(`Unknown event type: ${event.type}`);
     }
+
+    if (meta) {
+      // Item already exists
+      applyItemUpdated({ event, meta });
+      return;
+    }
+
+    if (event.type === "item-created") {
+      applyItemCreated({ event });
+      return;
+    }
+
+    throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
   };
 }

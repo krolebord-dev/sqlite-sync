@@ -244,11 +244,11 @@ export function parseTableName(tableName: string): ParsedTableName {
     ? {
         schema: "main",
         table: parts[0],
-        fullIdentifier: quoteId(parts[0]),
+        fullIdentifier: parts[0],
       }
     : {
         schema: parts[0],
         table: parts[1],
-        fullIdentifier: `${quoteId(parts[0])}.${quoteId(parts[1])}`,
+        fullIdentifier: `${parts[0]}.${parts[1]}`,
       };
 }

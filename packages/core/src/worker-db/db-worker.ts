@@ -1,20 +1,12 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import type { Logger } from "../logger";
 import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
-import { applyWorkerDbSchema, type WorkerDbSchema } from "../migrations/system-schema";
-import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
+import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../migrations/system-schema";
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
-import {
-  type CrdtStorage,
-  createCrdtStorage,
-  type EventUpdate,
-  type GetEventsOptions,
-} from "../sqlite-crdt/crdt-storage";
+import { type CrdtStorage, createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
-import type { CrdtEventStatus, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
-import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
-import { createStoredValue } from "../sqlite-crdt/stored-value";
+import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
@@ -82,7 +74,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const migrator = createMigrator({
     migrations: opts.syncDbSchema.migrations,
     schemaVersion: kvStore.createNumberStoredValue("schema-version", -1),
-    updateLogTableName: '"crdt_update_log"',
+    updateLogTableName: workerDbConfig.updateLogTable.fullIdentifier,
   });
   migrator.migrateDbToLatest({
     startTransaction: (callback) => {
@@ -91,13 +83,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   db.invalidateDbSchema();
 
-  const localSyncId = createStoredValue({
-    initialValue: getMaxSyncId(db, "none"),
-  });
-
   const crdtStorage = createCrdtStorage({
     nodeId: config.clientId,
-    syncId: localSyncId,
+    initialLocalSyncId: getMaxSyncId(db, "none"),
     migrator,
     hlc: {
       getNextHLC() {
@@ -107,14 +95,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         return;
       },
     },
-    transaction: (callback) => db.executeTransaction(callback),
-    handleCrdtEventApply: createSQLiteCrdtApplyFunction({
-      db,
-      updateLogTableName: "crdt_update_log",
-    }),
-    persistEvent: (event) => persistEvent(db, event),
-    getEventsBatch: (opts) => getEventsBatch(db, opts),
-    updateEvent: (syncId, update) => updateEvent(db, syncId, update),
+    db,
+    dbConfig: workerDbConfig,
   });
 
   createCrdtSyncProducer({
@@ -172,7 +154,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       return crdtStorage.getEventsBatch({
         afterSyncId: request.afterSyncId,
         status: "applied",
-        excludeNodeId: request.excludeNodeId,
+        excludeNodeId: request.excludeNodeId ?? "",
         limit: 100,
       });
     },
@@ -324,52 +306,4 @@ function getMaxSyncId(db: SQLiteDbWrapper<WorkerDbSchema>, excludingStatus: "non
   );
 
   return result?.sync_id ?? 0;
-}
-
-function persistEvent(db: SQLiteDbWrapper<WorkerDbSchema>, event: PersistedCrdtEvent) {
-  db.executePrepared(
-    "persist-crdt-event",
-    event,
-    (db, params) =>
-      db.insertInto("worker.crdt_events").values({
-        type: params("type"),
-        dataset: params("dataset"),
-        item_id: params("item_id"),
-        payload: params("payload"),
-        schema_version: params("schema_version"),
-        sync_id: params("sync_id"),
-        status: params("status"),
-        timestamp: params("timestamp"),
-        origin: params("origin"),
-        source_node_id: params("source_node_id"),
-      }),
-    { loggerLevel: "system" },
-  );
-}
-
-function getEventsBatch(db: SQLiteDbWrapper<WorkerDbSchema>, opts: GetEventsOptions) {
-  return db.executeKysely(
-    (db) => applyKyselyEventsBatchFilters(db.selectFrom("worker.crdt_events").selectAll(), opts),
-    { loggerLevel: "system" },
-  ).rows;
-}
-
-function updateEvent(db: SQLiteDbWrapper<WorkerDbSchema>, syncId: number, update: EventUpdate) {
-  db.executePrepared(
-    "update-crdt-event",
-    { syncId, ...update },
-    (db, params) =>
-      db
-        .updateTable("worker.crdt_events")
-        .set({
-          status: params("status"),
-          schema_version: params("schema_version"),
-          type: params("type"),
-          dataset: params("dataset"),
-          item_id: params("item_id"),
-          payload: params("payload"),
-        })
-        .where("sync_id", "=", params("syncId")),
-    { loggerLevel: "system" },
-  );
 }

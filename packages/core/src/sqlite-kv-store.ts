@@ -1,6 +1,6 @@
 import { type SchemaModule, sql } from "kysely";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
-import type { SQLiteTransactionWrapper } from "./sqlite-db-wrapper";
+import type { InternalSQLiteWrapper } from "./sqlite-db-wrapper";
 
 export type KvStoreItem = {
   key: string;
@@ -16,14 +16,8 @@ export function createKvStoreTableQuery(schema: SchemaModule, tableName: string)
     .modifyEnd(sql`without rowid`);
 }
 
-export function createSQLiteKvStore({
-  db,
-  metaTableName,
-}: {
-  db: SQLiteTransactionWrapper<any>;
-  metaTableName: string;
-}) {
-  const metaDb = db as SQLiteTransactionWrapper<{
+export function createSQLiteKvStore({ db, metaTableName }: { db: InternalSQLiteWrapper<any>; metaTableName: string }) {
+  const metaDb = db as InternalSQLiteWrapper<{
     meta: KvStoreItem;
   }>;
 

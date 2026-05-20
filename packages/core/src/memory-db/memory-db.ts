@@ -1,13 +1,9 @@
 import type { HLCCounter } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
-import { applyMemoryDbSchema, type MemoryDbSchema } from "../migrations/system-schema";
-import { createSQLiteCrdtApplyFunction } from "../sqlite-crdt/apply-crdt-event";
+import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../migrations/system-schema";
 import type { CrdtTableConfig } from "../sqlite-crdt/crdt-schema";
-import { createCrdtStorage, type EventUpdate, type GetEventsOptions } from "../sqlite-crdt/crdt-storage";
-import type { PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
-import { applyKyselyEventsBatchFilters } from "../sqlite-crdt/events-batch-filters";
+import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { makeCrdtTable, registerCrdtFunctions } from "../sqlite-crdt/make-crdt-table";
-import { createStoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
@@ -44,23 +40,13 @@ export async function createMemoryDb<Database>({
     }
   }
 
-  const localSyncId = createStoredValue({
-    initialValue: initialSyncId ?? getCurrentSyncId(db),
-  });
-
   const crdtStorage = createCrdtStorage({
     nodeId,
-    syncId: localSyncId,
+    initialLocalSyncId: initialSyncId ?? getCurrentSyncId(db),
     hlc: hlcCounter,
-    persistEvent: (event) => persistEvent(db, event),
-    getEventsBatch: (opts) => getEventsBatch(db, opts),
     migrator,
-    handleCrdtEventApply: createSQLiteCrdtApplyFunction({
-      db,
-      updateLogTableName: "crdt_update_log",
-    }),
-    updateEvent: (syncId, update) => updateEvent(db, syncId, update),
-    transaction: (callback) => db.executeTransaction(callback),
+    db,
+    dbConfig: memoryDbConfig,
   });
 
   registerCrdtFunctions({
@@ -78,57 +64,5 @@ function getCurrentSyncId(db: SQLiteDbWrapper<MemoryDbSchema>) {
     db.execute<{ syncId: number }>("SELECT coalesce(max(sync_id), 0) AS syncId FROM persisted_crdt_events", {
       loggerLevel: "system",
     }).rows[0]?.syncId ?? 0
-  );
-}
-
-function persistEvent(db: SQLiteDbWrapper<MemoryDbSchema>, event: PersistedCrdtEvent) {
-  db.executePrepared(
-    "persist-crdt-event",
-    event,
-    (db, params) =>
-      db.insertInto("persisted_crdt_events").values({
-        type: params("type"),
-        dataset: params("dataset"),
-        item_id: params("item_id"),
-        payload: params("payload"),
-        schema_version: params("schema_version"),
-        sync_id: params("sync_id"),
-        status: params("status"),
-        timestamp: params("timestamp"),
-        origin: params("origin"),
-        source_node_id: params("source_node_id"),
-      }),
-    { loggerLevel: "system" },
-  );
-}
-
-function getEventsBatch(db: SQLiteDbWrapper<MemoryDbSchema>, opts: GetEventsOptions) {
-  return db.executeKysely(
-    (db) =>
-      applyKyselyEventsBatchFilters(db.selectFrom("persisted_crdt_events").selectAll(), {
-        limit: 50,
-        ...opts,
-      }),
-    { loggerLevel: "system" },
-  ).rows;
-}
-
-function updateEvent(db: SQLiteDbWrapper<MemoryDbSchema>, syncId: number, update: EventUpdate) {
-  db.executePrepared(
-    "update-crdt-event",
-    { syncId, ...update },
-    (db, params) =>
-      db
-        .updateTable("persisted_crdt_events")
-        .set({
-          status: params("status"),
-          schema_version: params("schema_version"),
-          type: params("type"),
-          dataset: params("dataset"),
-          item_id: params("item_id"),
-          payload: params("payload"),
-        })
-        .where("sync_id", "=", params("syncId")),
-    { loggerLevel: "system" },
   );
 }

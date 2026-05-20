@@ -1,5 +1,4 @@
 import {
-  applyKyselyEventsBatchFilters,
   baseSystemMigrations,
   type CrdtEventOrigin,
   type CrdtEventStatus,
@@ -7,17 +6,15 @@ import {
   type CrdtStorage,
   type CrdtStorageMutator,
   type CrdtUpdateLogItem,
-  type CrdtUpdateLogPayload,
-  createCrdtApplyFunction,
   createCrdtStorage,
   createCrdtStorageMutator,
   createCrdtSyncProducer,
   createStoredValue,
+  createSystemDbConfig,
   createTypedEventTarget,
   HLCCounter,
   jsonSafeParse,
   type PersistedCrdtEvent,
-  quoteId,
   runSystemMigrations,
   type SyncDbSchema,
   type SystemMigration,
@@ -29,7 +26,7 @@ import {
   type SyncServerRequest,
   syncServerZodSchema,
 } from "@sqlite-sync/core/server";
-import { createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
+import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
 import { createMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
@@ -98,8 +95,14 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   syncDb: ServerSyncDb<Schema>;
   remoteHandler: RemoteHandler;
 } {
+  const dbConfig = createSystemDbConfig({
+    eventsTableName: crdtEventsTable,
+    updateLogTableName: updateLogTableName,
+  });
+
   const eventTarget = createTypedEventTarget<ServerSyncDbEvents<Schema>>();
   const sqlExecutor = createKyselyExecutor<AdapterDb>(storage);
+  const crdtStorageDb = createCrdtStorageDb(sqlExecutor);
 
   runSystemMigrations({
     migrations: durableObjectMigrations,
@@ -107,112 +110,34 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       initialValue: storage.kv.get("internal-schema-version") ?? -1,
       saveToStorage: (val) => storage.kv.put("internal-schema-version", val),
     }),
-    eventsTableName: quoteId(crdtEventsTable),
-    updateLogTableName: quoteId(updateLogTableName),
+    dbConfig,
     execute: (sql) => sqlExecutor.execute({ sql, parameters: [] }),
     transaction: (callback) => sqlExecutor.transaction(callback),
   });
 
-  const syncId = createStoredValue({
-    initialValue: getLatestSyncId(sqlExecutor),
-  });
-
-  const migrator = createMigrator(storage.kv, sqlExecutor, syncDbSchema.migrations, quoteId(updateLogTableName));
+  const migrator = createMigrator(
+    storage.kv,
+    sqlExecutor,
+    syncDbSchema.migrations,
+    dbConfig.updateLogTable.fullIdentifier,
+  );
   migrator.migrateDbToLatest();
-
-  const baseApply = createCrdtApplyFunction({
-    getCrdtUpdateLog(opts) {
-      const [metaRow] = sqlExecutor.executeKysely((db) =>
-        db
-          .selectFrom(updateLogTableName)
-          .select("payload")
-          .where("item_id", "=", opts.itemId)
-          .where("dataset", "=", opts.dataset),
-      ).rows;
-      return metaRow ? (JSON.parse(metaRow.payload) as CrdtUpdateLogPayload) : null;
-    },
-    insertCrdtUpdateLog(opts) {
-      sqlExecutor.executeKysely((db) =>
-        db.insertInto(updateLogTableName).values({
-          item_id: opts.itemId,
-          dataset: opts.dataset,
-          payload: opts.payload,
-        }),
-      );
-    },
-    updateCrdtUpdateLog(opts) {
-      sqlExecutor.executeKysely((db) =>
-        db
-          .updateTable(updateLogTableName)
-          .set({
-            payload: opts.payload,
-          })
-          .where("item_id", "=", opts.itemId)
-          .where("dataset", "=", opts.dataset),
-      );
-    },
-    insertItem(opts) {
-      sqlExecutor.executeKysely((db) => db.insertInto(opts.dataset as any).values(opts.payload));
-    },
-    updateItem(opts) {
-      const keys = Array.from(Object.keys(opts.payload));
-      sqlExecutor.execute({
-        sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
-        parameters: [...keys.map((key) => opts.payload[key]), opts.itemId],
-      });
-    },
-  });
-
-  const handleCrdtEventApply = (event: PersistedCrdtEvent) => {
-    sqlExecutor.transaction(() => {
-      baseApply(event);
-    });
-
-    queueMicrotask(() => {
-      eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
-    });
-  };
 
   const truncatedNodeId = nodeId.slice(0, 12);
   const hlc = new HLCCounter(truncatedNodeId, () => Date.now());
 
   const crdtStorage = createCrdtStorage({
     nodeId: truncatedNodeId,
-    syncId,
+    initialLocalSyncId: getLatestSyncId(sqlExecutor),
     hlc,
     migrator: migrator,
-    handleCrdtEventApply,
-    transaction: (callback) => sqlExecutor.transaction(callback),
-    getEventsBatch: (opts) => {
-      return sqlExecutor.executeKysely((db) =>
-        applyKyselyEventsBatchFilters(db.selectFrom(crdtEventsTable as "crdtEvents").selectAll(), {
-          ...opts,
-          limit: opts.limit ?? batchSize,
-        }),
-      ).rows;
+    db: crdtStorageDb,
+    dbConfig,
+    onEventApplied: (event) => {
+      queueMicrotask(() => {
+        eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
+      });
     },
-    persistEvent: (event) => {
-      sqlExecutor.executeKysely((db) =>
-        db
-          .insertInto(crdtEventsTable as "crdtEvents")
-          .values(event)
-          .onConflict((oc) => oc.columns(["timestamp", "source_node_id"]).doNothing()),
-      );
-    },
-    updateEvent: (syncId, event) =>
-      sqlExecutor.executeKysely((db) =>
-        db
-          .updateTable(crdtEventsTable as "crdtEvents")
-          .set({
-            status: event.status,
-            dataset: event.dataset,
-            item_id: event.item_id,
-            schema_version: event.schema_version,
-            type: event.type,
-            payload: event.payload,
-          })
-          .where("sync_id", "=", syncId),
-      ),
   });
 
   const remoteHandler = createDurableObjectRemoteHandler({
@@ -297,7 +222,7 @@ function createDurableObjectRemoteHandler({
       limit: bufferSize,
       status: "applied",
       afterSyncId: request.afterSyncId,
-      excludeNodeId: request.excludeNodeId,
+      excludeNodeId: request.excludeNodeId ?? "",
     });
 
     const eventsPullMessage: SyncServerMessage = {

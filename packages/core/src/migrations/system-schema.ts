@@ -2,7 +2,25 @@ import type { CrdtUpdateLogItem, PersistedCrdtEvent } from "../sqlite-crdt/crdt-
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "../sqlite-kv-store";
-import { type ParsedTableName, parseTableName, quoteId } from "../utils";
+import { type ParsedTableName, parseTableName } from "../utils";
+
+export type SystemDbConfig = {
+  eventsTable: ParsedTableName;
+  updateLogTable: ParsedTableName;
+};
+
+export function createSystemDbConfig({
+  eventsTableName,
+  updateLogTableName,
+}: {
+  eventsTableName: string;
+  updateLogTableName: string;
+}): SystemDbConfig {
+  return {
+    eventsTable: parseTableName(eventsTableName),
+    updateLogTable: parseTableName(updateLogTableName),
+  };
+}
 
 export type WorkerDbSchema = {
   crdt_update_log: CrdtUpdateLogItem;
@@ -10,15 +28,22 @@ export type WorkerDbSchema = {
   "worker.crdt_events": PersistedCrdtEvent;
 };
 
+export const workerDbConfig = createSystemDbConfig({
+  eventsTableName: "worker.crdt_events",
+  updateLogTableName: "crdt_update_log",
+});
+
 export type MemoryDbSchema = {
   crdt_update_log: CrdtUpdateLogItem;
   persisted_crdt_events: PersistedCrdtEvent;
 };
 
-export type SystemMigrationContext = {
-  eventsTable: ParsedTableName;
-  eventsStatusSyncIdIndexName?: string;
-  updateLogTable: ParsedTableName;
+export const memoryDbConfig = createSystemDbConfig({
+  eventsTableName: "persisted_crdt_events",
+  updateLogTableName: "crdt_update_log",
+});
+
+export type SystemMigrationContext = SystemDbConfig & {
   execute: (sql: string) => void;
 };
 
@@ -59,9 +84,9 @@ export const baseSystemMigrations: SystemMigration[] = [
   {
     version: 2,
     up: (ctx: SystemMigrationContext) => {
-      const indexName = quoteId(ctx.eventsStatusSyncIdIndexName ?? `${ctx.eventsTable.table}_status_sync_id_idx`);
+      const indexName = `${ctx.eventsTable.table}_status_sync_id_idx`;
       ctx.execute(
-        `CREATE INDEX IF NOT EXISTS ${quoteId(ctx.eventsTable.schema)}.${quoteId(indexName)} ON ${quoteId(ctx.eventsTable.table)} ("status", "sync_id")`,
+        `CREATE INDEX IF NOT EXISTS ${ctx.eventsTable.schema}.${indexName} ON ${ctx.eventsTable.table} ("status", "sync_id")`,
       );
     },
   },
@@ -70,16 +95,12 @@ export const baseSystemMigrations: SystemMigration[] = [
 export function runSystemMigrations(opts: {
   version: StoredValue<number>;
   migrations: SystemMigration[];
-  eventsTableName: string;
-  eventsStatusSyncIdIndexName?: string;
-  updateLogTableName: string;
+  dbConfig: SystemDbConfig;
   execute: (sql: string) => void;
   transaction: (callback: () => void) => void;
 }): void {
   const ctx: SystemMigrationContext = {
-    eventsTable: parseTableName(opts.eventsTableName),
-    eventsStatusSyncIdIndexName: opts.eventsStatusSyncIdIndexName,
-    updateLogTable: parseTableName(opts.updateLogTableName),
+    ...opts.dbConfig,
     execute: opts.execute,
   };
   for (const migration of opts.migrations) {
@@ -101,8 +122,7 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
   runSystemMigrations({
     migrations: baseSystemMigrations,
     version: kvStore.createNumberStoredValue("internal-schema-version", -1),
-    eventsTableName: "worker.crdt_events",
-    updateLogTableName: "crdt_update_log",
+    dbConfig: workerDbConfig,
     execute: (sql) => db.execute(sql, { loggerLevel: "system" }),
     transaction: (callback) => db.executeTransaction(callback),
   });
@@ -112,7 +132,7 @@ export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
 
 export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   db.execute(
-    `CREATE TABLE IF NOT EXISTS ${quoteId("persisted_crdt_events")} (
+    `CREATE TABLE IF NOT EXISTS ${memoryDbConfig.eventsTable.fullIdentifier} (
   "sync_id" integer NOT NULL PRIMARY KEY,
   "schema_version" integer NOT NULL,
   "status" text NOT NULL,
@@ -127,13 +147,13 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
     { loggerLevel: "system" },
   );
   db.execute(
-    `CREATE INDEX IF NOT EXISTS "persisted_crdt_events_status_sync_id_idx" ON "persisted_crdt_events" ("status", "sync_id")`,
+    `CREATE INDEX IF NOT EXISTS ${memoryDbConfig.eventsTable.table}_status_sync_id_idx ON ${memoryDbConfig.eventsTable.table} ("status", "sync_id")`,
     {
       loggerLevel: "system",
     },
   );
   db.execute(
-    `CREATE TABLE IF NOT EXISTS ${quoteId("crdt_update_log")} (
+    `CREATE TABLE IF NOT EXISTS ${memoryDbConfig.updateLogTable.fullIdentifier} (
   "dataset" text NOT NULL,
   "item_id" text NOT NULL,
   "payload" text NOT NULL,
