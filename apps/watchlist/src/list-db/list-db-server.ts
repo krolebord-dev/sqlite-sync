@@ -17,8 +17,8 @@ export class ListDbServer extends Server<Env> {
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private orpc: RouterClient<typeof listDbOrpcRouter> = null!;
 
-  onStart(): void | Promise<void> {
-    const { syncDb, remoteHandler } = durableObjectAdapter.createCrdtStorage({
+  async onStart() {
+    const { syncDb, remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
       crdtEventsTable: "crdt_events",
       nodeId: this.ctx.id.toString(),

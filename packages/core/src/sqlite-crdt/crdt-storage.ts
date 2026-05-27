@@ -1,16 +1,21 @@
+import { sql } from "kysely";
 import { deserializeHLC, type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import type { SystemDbConfig } from "../migrations/system-schema";
 import type { InternalSQLiteTransactionWrapper, InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
 import { createSQLiteCrdtApplyFunction } from "./apply-crdt-event";
-import type {
-  CrdtEventOrigin,
-  CrdtEventStatus,
-  CrdtEventType,
-  CrdtUpdateLogItem,
-  PersistedCrdtEvent,
+import {
+  CRDT_EVENT_NO_OP_PAYLOAD,
+  type CrdtEventOrigin,
+  type CrdtEventStatus,
+  type CrdtEventType,
+  type CrdtUpdateLogItem,
+  isNoOpCrdtEventPayload,
+  type PersistedCrdtEvent,
 } from "./crdt-table-schema";
+import { createEventHlcAccumulator } from "./event-consistency";
+import type { StoredValue } from "./stored-value";
 
 type LocalCrdtEvent = {
   type: CrdtEventType;
@@ -82,6 +87,7 @@ type DbSyncerStorage = {
   db: InternalSQLiteWrapper<any>;
   dbConfig: SystemDbConfig;
   hlc: StorageHLC;
+  eventHlcAccumulator?: StoredValue<string>;
   onEventApplied?: (event: PersistedCrdtEvent) => void;
 };
 
@@ -174,6 +180,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     return enqueueEvents("remote", "", events) as undefined;
   };
 
+  const notifyEventApplied = (event: PersistedCrdtEvent) => {
+    if (event.status === "applied") {
+      storage.onEventApplied?.(event);
+    }
+  };
+
   const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {
     const persistedEvent: PersistedCrdtEvent = {
       schema_version: storage.migrator.currentSchemaVersion,
@@ -192,10 +204,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       db.executeTransaction((tx) => {
         persistEvent(tx, persistedEvent);
         processPersistedEvent(tx, persistedEvent);
+        persistEventHlcAccumulator();
       });
     } else {
       persistEvent(db, persistedEvent);
       processPersistedEvent(db, persistedEvent);
+      persistEventHlcAccumulator();
     }
   };
 
@@ -248,6 +262,39 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     db,
     dbConfig: storage.dbConfig,
   });
+  const eventHlcAccumulator = storage.eventHlcAccumulator
+    ? createEventHlcAccumulator(storage.eventHlcAccumulator.current)
+    : null;
+
+  const persistEventHlcAccumulator = () => {
+    if (eventHlcAccumulator && storage.eventHlcAccumulator) {
+      storage.eventHlcAccumulator.current = eventHlcAccumulator.current;
+    }
+  };
+
+  const hasAcceptedEventWithTimestamp = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    event: PersistedCrdtEvent,
+  ) => {
+    const [existingEvent] = tx.executePrepared(
+      "get-accepted-crdt-event-by-timestamp",
+      {
+        timestamp: event.timestamp,
+        sync_id: event.sync_id,
+      },
+      (db, params) =>
+        db
+          .selectFrom(crdtEventsTable)
+          .select("sync_id")
+          .where("timestamp", "=", params("timestamp"))
+          .where("sync_id", "<", params("sync_id"))
+          .where("status", "=", sql.lit("applied"))
+          .limit(sql.lit(1)),
+      { loggerLevel: "system" },
+    );
+
+    return existingEvent !== undefined;
+  };
 
   const processPersistedEvent = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, event: PersistedCrdtEvent) => {
     if (event.status !== "pending") {
@@ -255,9 +302,21 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     try {
-      // Always advance HLC, even for skipped events, to maintain monotonic ordering
+      if (hasAcceptedEventWithTimestamp(tx, event)) {
+        event.status = "deduped";
+        return event;
+      }
+
+      // Always advance HLC, even for no-op events, to maintain monotonic ordering
       if (event.origin === "local" || event.origin === "remote") {
         storage.hlc.mergeHLC(deserializeHLC(event.timestamp));
+      }
+
+      if (isNoOpCrdtEventPayload(event.payload)) {
+        applyCrdtEvent(event);
+        event.status = "applied";
+        eventHlcAccumulator?.add(event.timestamp);
+        return event;
       }
 
       // Migrate event to latest schema version
@@ -265,8 +324,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       if (migratedEvent === null) {
         // Event was dropped during migration (e.g., table was deleted)
-        event.status = "skipped";
         event.schema_version = storage.migrator.latestSchemaVersion;
+        event.payload = CRDT_EVENT_NO_OP_PAYLOAD;
+        applyCrdtEvent(event);
+        event.status = "applied";
+        eventHlcAccumulator?.add(event.timestamp);
         return event;
       }
 
@@ -279,6 +341,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       applyCrdtEvent(event);
       event.status = "applied";
+      eventHlcAccumulator?.add(event.timestamp);
     } catch (error) {
       console.error("Error applying enqueued CRDT event", error);
       event.status = "failed";
@@ -336,8 +399,9 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       db.executeTransaction((tx) => {
         for (const event of events) {
           processPersistedEvent(tx, event);
-          storage.onEventApplied?.(event);
+          notifyEventApplied(event);
         }
+        persistEventHlcAccumulator();
       });
 
       dispatchEventsApplied();
@@ -353,6 +417,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueRemoteEvents,
     applyOwnEvent,
     dispatchEventsApplied,
+    getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,

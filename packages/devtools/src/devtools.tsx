@@ -299,6 +299,9 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
   );
 }
 
+const EVENT_HLC_ACCUMULATOR_KV_KEY = "crdt.consistency.event_hlc_sum.v2";
+const EVENT_HLC_ACCUMULATOR_QUERY = `SELECT value FROM "worker"."kv" WHERE key = '${EVENT_HLC_ACCUMULATOR_KV_KEY}'`;
+
 function OverviewTab({
   selectedInstance,
   dbIdCounts,
@@ -312,6 +315,35 @@ function OverviewTab({
     : never;
   dbIdCounts: Map<string, number>;
 }) {
+  const [eventHlcAccumulator, setEventHlcAccumulator] = useState<string | null>(null);
+  const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
+  const [isAccumulatorLoading, setIsAccumulatorLoading] = useState(false);
+
+  const refreshEventHlcAccumulator = useCallback(async () => {
+    if (!selectedInstance) return;
+    setIsAccumulatorLoading(true);
+    setAccumulatorError(null);
+    try {
+      const result = await selectedInstance.instance._internal.executeAsync({
+        sql: EVENT_HLC_ACCUMULATOR_QUERY,
+        parameters: [],
+      });
+      const row = result.rows[0] as { value?: string } | undefined;
+      setEventHlcAccumulator(row?.value ?? "");
+    } catch (error) {
+      setAccumulatorError(error instanceof Error ? error.message : String(error));
+      setEventHlcAccumulator(null);
+    } finally {
+      setIsAccumulatorLoading(false);
+    }
+  }, [selectedInstance]);
+
+  useEffect(() => {
+    setEventHlcAccumulator(null);
+    setAccumulatorError(null);
+    void refreshEventHlcAccumulator();
+  }, [refreshEventHlcAccumulator]);
+
   if (!selectedInstance) return null;
 
   const label = formatInstanceLabel(
@@ -355,6 +387,31 @@ function OverviewTab({
             ))}
           </div>
         )}
+      </div>
+
+      <div style={overviewSectionStyles}>
+        <div style={overviewSectionHeaderStyles}>
+          <div style={overviewSectionTitleStyles}>Event HLC accumulator</div>
+          <button
+            type="button"
+            style={overviewRefreshButtonStyles}
+            disabled={isAccumulatorLoading}
+            onClick={() => void refreshEventHlcAccumulator()}
+          >
+            {isAccumulatorLoading ? "…" : "↻"} Refresh
+          </button>
+        </div>
+        <div style={overviewAccumulatorValueStyles}>
+          {accumulatorError ? (
+            <span style={overviewAccumulatorErrorStyles}>{accumulatorError}</span>
+          ) : isAccumulatorLoading && eventHlcAccumulator === null ? (
+            "Loading…"
+          ) : eventHlcAccumulator === "" ? (
+            <span style={overviewAccumulatorEmptyStyles}>(empty)</span>
+          ) : (
+            eventHlcAccumulator
+          )}
+        </div>
       </div>
 
       <div style={overviewSectionStyles}>
@@ -494,7 +551,7 @@ function SchemaTab({
 type PersistedCrdtEvent = {
   sync_id: number;
   schema_version: number;
-  status: "pending" | "applied" | "failed" | "skipped";
+  status: "pending" | "applied" | "failed" | "deduped";
   type: "item-created" | "item-updated";
   timestamp: string;
   origin: "remote" | "own" | "local";
@@ -546,6 +603,7 @@ function EventLogTab({
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const afterSyncIdRef = useRef<number | null>(null);
+  const isLoadingRef = useRef(false);
 
   const executeQuery = useCallback(
     async (sql: string): Promise<PersistedCrdtEvent[]> => {
@@ -558,7 +616,8 @@ function EventLogTab({
 
   const load = useCallback(
     async (reset: boolean, currentFilters: EventLogFilters) => {
-      if (!selectedInstance || isLoading) return;
+      if (!selectedInstance || isLoadingRef.current) return;
+      isLoadingRef.current = true;
       setIsLoading(true);
       try {
         const afterSyncId = reset ? null : afterSyncIdRef.current;
@@ -573,24 +632,22 @@ function EventLogTab({
         }
         afterSyncIdRef.current = page.at(-1)?.sync_id ?? null;
       } finally {
+        isLoadingRef.current = false;
         setIsLoading(false);
       }
     },
-    [selectedInstance, isLoading, executeQuery],
+    [selectedInstance, executeQuery],
   );
 
-  // Initial load and reload on instance change
+  // Initial load and reload on instance or filter change
   useEffect(() => {
     afterSyncIdRef.current = null;
     setEvents([]);
     void load(true, filters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters, load]);
 
   const applyFilters = (next: EventLogFilters) => {
     setFilters(next);
-    afterSyncIdRef.current = null;
-    void load(true, next);
   };
 
   if (!selectedInstance) return null;
@@ -630,7 +687,7 @@ function EventLogTab({
           <option value="applied">applied</option>
           <option value="pending">pending</option>
           <option value="failed">failed</option>
-          <option value="skipped">skipped</option>
+          <option value="deduped">deduped</option>
         </select>
         <button
           type="button"
@@ -1294,6 +1351,46 @@ const overviewSectionTitleStyles: CSSProperties = {
   letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: C.textMuted,
+};
+
+const overviewSectionHeaderStyles: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.75rem",
+};
+
+const overviewRefreshButtonStyles: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: "7px",
+  padding: "0.35rem 0.7rem",
+  backgroundColor: "transparent",
+  color: C.textDim,
+  fontSize: "0.78rem",
+  fontFamily: "ui-monospace, monospace",
+  cursor: "pointer",
+  flexShrink: 0,
+};
+
+const overviewAccumulatorValueStyles: CSSProperties = {
+  padding: "0.75rem",
+  borderRadius: "8px",
+  border: `1px solid ${C.border}`,
+  background: C.bgCard,
+  fontFamily: "ui-monospace, monospace",
+  fontSize: "0.78rem",
+  color: C.text,
+  lineHeight: 1.5,
+  wordBreak: "break-all",
+};
+
+const overviewAccumulatorEmptyStyles: CSSProperties = {
+  color: C.textMuted,
+  fontStyle: "italic",
+};
+
+const overviewAccumulatorErrorStyles: CSSProperties = {
+  color: C.error,
 };
 
 const overviewEmptyStyles: CSSProperties = {

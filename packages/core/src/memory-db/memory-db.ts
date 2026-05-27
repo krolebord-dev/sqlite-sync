@@ -1,9 +1,11 @@
+import { xxhash } from "../hash";
 import type { HLCCounter } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../migrations/system-schema";
 import type { CrdtTableConfig } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { makeCrdtTable, registerCrdtFunctions } from "../sqlite-crdt/make-crdt-table";
+import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
@@ -15,6 +17,7 @@ type MemoryDbOptions<Database> = {
   crdtTables: CrdtTableConfig[];
   initializeSchema?: boolean;
   initialSyncId?: number;
+  eventHlcAccumulator?: StoredValue<string>;
 };
 
 export async function createMemoryDb<Database>({
@@ -25,7 +28,10 @@ export async function createMemoryDb<Database>({
   crdtTables,
   initializeSchema = true,
   initialSyncId,
+  eventHlcAccumulator,
 }: MemoryDbOptions<Database>) {
+  await xxhash.ensureLoaded();
+
   const reactiveDb = _reactiveDb as unknown as SQLiteReactiveDb<MemoryDbSchema>;
   const db = reactiveDb.db;
 
@@ -47,6 +53,7 @@ export async function createMemoryDb<Database>({
     migrator,
     db,
     dbConfig: memoryDbConfig,
+    eventHlcAccumulator,
   });
 
   registerCrdtFunctions({

@@ -2,6 +2,7 @@
 
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
+export { xxhash } from "./hash";
 // HLC (Hybrid Logical Clock)
 export {
   compareHLC,
@@ -57,13 +58,15 @@ export {
   type EventsPushRequest,
   type EventsPushResponse,
 } from "./sqlite-crdt/crdt-sync-remote-source";
-export type {
-  CrdtEventOrigin,
-  CrdtEventStatus,
-  CrdtEventType,
-  CrdtUpdateLogItem,
-  CrdtUpdateLogPayload,
-  PersistedCrdtEvent,
+export {
+  CRDT_EVENT_NO_OP_PAYLOAD,
+  type CrdtEventOrigin,
+  type CrdtEventStatus,
+  type CrdtEventType,
+  type CrdtUpdateLogItem,
+  type CrdtUpdateLogPayload,
+  isNoOpCrdtEventPayload,
+  type PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
 export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
 export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";

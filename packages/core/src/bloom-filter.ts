@@ -1,4 +1,4 @@
-import MurmurHash3 from "imurmurhash";
+import { xxhash } from "./hash";
 
 export class BloomFilter {
   private readonly size: number;
@@ -11,13 +11,10 @@ export class BloomFilter {
     this.bitSet = new Uint32Array(Math.ceil(size / 32));
   }
 
-  private hash(value: string, seed: number) {
-    return MurmurHash3(value, seed).result() >>> 0;
-  }
-
   add(value: string): void {
-    const hash1 = this.hash(value, 0);
-    const hash2 = this.hash(value, 1);
+    const hash64 = xxhash.h64(value, 0n);
+    const hash1 = Number(hash64 & 0xffffffffn);
+    const hash2 = Number((hash64 >> 32n) & 0xffffffffn) | 1;
 
     for (let i = 0; i < this.hashFunctions; i++) {
       const bitIndex = (hash1 + i * hash2) % this.size;
@@ -26,8 +23,9 @@ export class BloomFilter {
   }
 
   has(value: string): boolean {
-    const hash1 = this.hash(value, 0);
-    const hash2 = this.hash(value, 1);
+    const hash64 = xxhash.h64(value, 0n);
+    const hash1 = Number(hash64 & 0xffffffffn);
+    const hash2 = Number((hash64 >> 32n) & 0xffffffffn) | 1;
 
     for (let i = 0; i < this.hashFunctions; i++) {
       const bitIndex = (hash1 + i * hash2) % this.size;

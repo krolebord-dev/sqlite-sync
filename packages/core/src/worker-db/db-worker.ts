@@ -1,4 +1,5 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import { xxhash } from "../hash";
 import type { Logger } from "../logger";
 import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../migrations/system-schema";
@@ -44,7 +45,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const broadcastChannels = createBroadcastChannels(config.dbId);
   const logger = opts.logger ?? defaultLogger;
 
-  const sqlite3 = await sqlite3InitModule();
+  const [sqlite3] = await Promise.all([sqlite3InitModule(), xxhash.ensureLoaded()]);
 
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     name: config.dbId,
@@ -97,6 +98,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     db,
     dbConfig: workerDbConfig,
+    eventHlcAccumulator: kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", ""),
   });
 
   createCrdtSyncProducer({

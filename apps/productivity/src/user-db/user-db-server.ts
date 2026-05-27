@@ -18,7 +18,7 @@ export class UserDbServer extends Server<Env> {
   private jobRuntime: JobRuntime = null!;
 
   async onStart() {
-    const { syncDb, remoteHandler } = durableObjectAdapter.createCrdtStorage({
+    const { syncDb, remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
       crdtEventsTable: "crdt_events",
       nodeId: this.ctx.id.toString(),

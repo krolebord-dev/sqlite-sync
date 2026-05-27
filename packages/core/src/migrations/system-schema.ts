@@ -90,6 +90,15 @@ export const baseSystemMigrations: SystemMigration[] = [
       );
     },
   },
+  {
+    version: 3,
+    up: (ctx: SystemMigrationContext) => {
+      const indexName = `${ctx.eventsTable.table}_timestamp_status_sync_id_idx`;
+      ctx.execute(
+        `CREATE INDEX IF NOT EXISTS ${ctx.eventsTable.schema}.${indexName} ON ${ctx.eventsTable.table} ("timestamp", "status", "sync_id")`,
+      );
+    },
+  },
 ];
 
 export function runSystemMigrations(opts: {
@@ -148,6 +157,12 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   );
   db.execute(
     `CREATE INDEX IF NOT EXISTS ${memoryDbConfig.eventsTable.table}_status_sync_id_idx ON ${memoryDbConfig.eventsTable.table} ("status", "sync_id")`,
+    {
+      loggerLevel: "system",
+    },
+  );
+  db.execute(
+    `CREATE INDEX IF NOT EXISTS ${memoryDbConfig.eventsTable.table}_timestamp_status_sync_id_idx ON ${memoryDbConfig.eventsTable.table} ("timestamp", "status", "sync_id")`,
     {
       loggerLevel: "system",
     },

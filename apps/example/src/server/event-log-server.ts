@@ -10,8 +10,8 @@ export class EventLogServer extends Server<Env> {
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private remoteHandler: RemoteHandler = null!;
 
-  onStart(): void | Promise<void> {
-    const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
+  async onStart() {
+    const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       batchSize: 100,
       crdtEventsTable: "crdt_events",
       syncDbSchema,

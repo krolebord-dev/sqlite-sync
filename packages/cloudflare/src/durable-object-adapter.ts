@@ -17,8 +17,8 @@ import {
   type PersistedCrdtEvent,
   runSystemMigrations,
   type SyncDbSchema,
-  type SystemMigration,
   type TypedEventTarget,
+  xxhash,
 } from "@sqlite-sync/core";
 import {
   type ExtractSyncServerRequest,
@@ -30,23 +30,6 @@ import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "
 import { createMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
-
-const durableObjectMigrations: SystemMigration[] = [
-  ...baseSystemMigrations,
-  {
-    version: 2,
-    up: (ctx) => {
-      ctx.execute(
-        `DELETE FROM ${ctx.eventsTable.fullIdentifier} WHERE "sync_id" NOT IN ` +
-          `(SELECT MIN("sync_id") FROM ${ctx.eventsTable.fullIdentifier} GROUP BY "timestamp", "source_node_id")`,
-      );
-      ctx.execute(
-        `CREATE UNIQUE INDEX IF NOT EXISTS "idx_crdt_events_dedup" ` +
-          `ON ${ctx.eventsTable.table} ("timestamp", "source_node_id")`,
-      );
-    },
-  },
-];
 
 type AdapterDb = {
   crdtEvents: PersistedCrdtEvent;
@@ -77,7 +60,7 @@ export type ServerSyncDb<Schema extends SyncDbSchema> = Pick<
   CrdtStorageMutator<Schema[`~mutationsSchema`]> &
   Pick<TypedEventTarget<ServerSyncDbEvents<Schema>>, "addEventListener" | "removeEventListener">;
 
-function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
+async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   storage,
   syncDbSchema,
   nodeId,
@@ -91,10 +74,12 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   crdtEventsTable: string;
   batchSize?: number;
   broadcastPayload: (payload: string) => void;
-}): {
+}): Promise<{
   syncDb: ServerSyncDb<Schema>;
   remoteHandler: RemoteHandler;
-} {
+}> {
+  await xxhash.ensureLoaded();
+
   const dbConfig = createSystemDbConfig({
     eventsTableName: crdtEventsTable,
     updateLogTableName: updateLogTableName,
@@ -105,7 +90,7 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   const crdtStorageDb = createCrdtStorageDb(sqlExecutor);
 
   runSystemMigrations({
-    migrations: durableObjectMigrations,
+    migrations: baseSystemMigrations,
     version: createStoredValue<number>({
       initialValue: storage.kv.get("internal-schema-version") ?? -1,
       saveToStorage: (val) => storage.kv.put("internal-schema-version", val),
@@ -133,6 +118,10 @@ function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     migrator: migrator,
     db: crdtStorageDb,
     dbConfig,
+    eventHlcAccumulator: createStoredValue<string>({
+      initialValue: storage.kv.get("crdt.consistency.event_hlc_sum.v2") ?? "",
+      saveToStorage: (val) => storage.kv.put("crdt.consistency.event_hlc_sum.v2", val),
+    }),
     onEventApplied: (event) => {
       queueMicrotask(() => {
         eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);

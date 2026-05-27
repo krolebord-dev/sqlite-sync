@@ -8,7 +8,7 @@ import type {
   Kysely,
 } from "kysely";
 import { dummyKysely } from "../dummy-kysely";
-import type { CrdtEventType } from "../sqlite-crdt/crdt-table-schema";
+import { type CrdtEventType, isNoOpCrdtEventPayload } from "../sqlite-crdt/crdt-table-schema";
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 
 type CrdtEvent = {
@@ -324,6 +324,13 @@ export function createMigrator({
       throw new Error(
         `Target schema version ${targetVersion} is greater than current schema version ${schemaVersion.current}`,
       );
+    }
+
+    if (isNoOpCrdtEventPayload(event.payload)) {
+      if (event.schema_version < targetVersion) {
+        event.schema_version = targetVersion;
+      }
+      return event;
     }
 
     if (event.schema_version >= targetVersion) {

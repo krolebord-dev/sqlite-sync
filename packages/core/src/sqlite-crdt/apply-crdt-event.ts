@@ -3,7 +3,12 @@ import type { Kysely } from "kysely";
 import type { SystemDbConfig } from "../migrations/system-schema";
 import type { InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
-import type { CrdtEventType, CrdtUpdateLogItem, CrdtUpdateLogPayload } from "./crdt-table-schema";
+import {
+  type CrdtEventType,
+  type CrdtUpdateLogItem,
+  type CrdtUpdateLogPayload,
+  isNoOpCrdtEventPayload,
+} from "./crdt-table-schema";
 
 export type PendingCrdtEvent = {
   type: CrdtEventType;
@@ -186,6 +191,10 @@ export function createCrdtApplyFunction({
   };
 
   return (event: PendingCrdtEvent) => {
+    if (isNoOpCrdtEventPayload(event.payload)) {
+      return;
+    }
+
     const meta = getCrdtUpdateLog({
       itemId: event.item_id,
       dataset: event.dataset,

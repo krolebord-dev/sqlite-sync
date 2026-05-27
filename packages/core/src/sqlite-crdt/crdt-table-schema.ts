@@ -2,7 +2,14 @@ import type { SchemaModule } from "kysely";
 
 export type CrdtEventType = "item-created" | "item-updated";
 
-export type CrdtEventStatus = "pending" | "applied" | "failed" | "skipped";
+export type CrdtEventStatus = "pending" | "applied" | "failed" | "deduped";
+
+/** Persisted on applied events that were accepted but did not mutate materialized state. */
+export const CRDT_EVENT_NO_OP_PAYLOAD = "no-op";
+
+export function isNoOpCrdtEventPayload(payload: string) {
+  return payload === CRDT_EVENT_NO_OP_PAYLOAD;
+}
 
 export type CrdtEventOrigin = "remote" | "own" | "local";
 

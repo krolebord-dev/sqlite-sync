@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { HLCCounter } from "../src/hlc";
+import { HLCCounter, serializeHLC } from "../src/hlc";
 import { createMemoryDb } from "../src/memory-db/memory-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { applyMemoryDbSchema } from "../src/migrations/system-schema";
-import type { CrdtUpdateLogItem, PersistedCrdtEvent } from "../src/sqlite-crdt/crdt-table-schema";
+import {
+  CRDT_EVENT_NO_OP_PAYLOAD,
+  type CrdtUpdateLogItem,
+  type PersistedCrdtEvent,
+} from "../src/sqlite-crdt/crdt-table-schema";
 import { makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
+import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 
 const BASE_TABLE = "todo";
 const CRDT_TABLE = "_todo";
@@ -34,7 +39,12 @@ const noopLogger = () => {};
 async function createReplica(
   nodeId: string,
   initialTime: number,
-  opts: { preloadedEvents?: PersistedCrdtEvent[] } = {},
+  opts: {
+    preloadedEvents?: PersistedCrdtEvent[];
+    trackEventHlcAccumulator?: boolean;
+    migrator?: ReturnType<typeof createMigrator>;
+    schemaVersion?: { current: number };
+  } = {},
 ) {
   const reactiveDb = await createSQLiteReactiveDb<{
     [BASE_TABLE]: RawTodoRow;
@@ -94,11 +104,13 @@ async function createReplica(
   }
 
   let currentTime = initialTime;
-  const schemaVersion = { current: 0 };
-  const migrator = createMigrator({
-    migrations: createMigrations(() => ({ 0: [] })),
-    schemaVersion,
-  });
+  const schemaVersion = opts.schemaVersion ?? { current: 0 };
+  const migrator =
+    opts.migrator ??
+    createMigrator({
+      migrations: createMigrations(() => ({ 0: [] })),
+      schemaVersion,
+    });
 
   const { crdtStorage: storage } = await createMemoryDb({
     nodeId,
@@ -107,6 +119,11 @@ async function createReplica(
     hlcCounter: new HLCCounter(nodeId, () => currentTime),
     crdtTables: [{ baseTableName: BASE_TABLE, crdtTableName: CRDT_TABLE }],
     initializeSchema: false,
+    eventHlcAccumulator: opts.trackEventHlcAccumulator
+      ? createStoredValue({
+          initialValue: "",
+        })
+      : undefined,
   });
 
   const waitForProcessing = async () => {
@@ -210,6 +227,12 @@ async function createReplica(
         parameters: [syncId],
       }).rows[0];
     },
+    getPersistedEvents() {
+      return db.execute<PersistedCrdtEvent>(`SELECT * FROM "persisted_crdt_events" ORDER BY "sync_id" ASC`).rows;
+    },
+    getEventHlcAccumulator() {
+      return storage.getEventHlcAccumulator();
+    },
   };
 }
 
@@ -256,6 +279,93 @@ describe("CRDT convergence for parallel entity edits", () => {
       tombstone: false,
     });
     expect(replica.getPersistedEvent(1)?.status).toBe("applied");
+  });
+
+  it("marks migration-dropped events as applied with no-op payload", async () => {
+    const schemaVersion = { current: 1 };
+    const migrator = createMigrator({
+      migrations: createMigrations((steps) => ({
+        0: [],
+        1: [steps.dropTable(BASE_TABLE)],
+      })),
+      schemaVersion,
+    });
+    const eventTimestamp = serializeHLC(new HLCCounter("origin-node", () => 1_000).getCurrentHLC());
+
+    const replicaA = await createReplica("node-a", 1_000, {
+      migrator,
+      schemaVersion,
+      trackEventHlcAccumulator: true,
+      preloadedEvents: [
+        {
+          sync_id: 1,
+          schema_version: 0,
+          status: "pending",
+          type: "item-created",
+          timestamp: eventTimestamp,
+          origin: "own",
+          source_node_id: "node-a",
+          dataset: BASE_TABLE,
+          item_id: "todo-1",
+          payload: JSON.stringify({
+            id: "todo-1",
+            title: "Dropped by migration",
+            completed: false,
+          }),
+        },
+      ],
+    });
+    const replicaB = await createReplica("node-b", 1_000, {
+      migrator,
+      schemaVersion,
+      trackEventHlcAccumulator: true,
+    });
+
+    const droppedEvent = replicaA.getPersistedEvent(1);
+    expect(droppedEvent?.status).toBe("applied");
+    expect(droppedEvent?.payload).toBe(CRDT_EVENT_NO_OP_PAYLOAD);
+    expect(replicaA.getTodo("todo-1")).toBeNull();
+
+    const { events } = replicaA.exportEvents(0);
+    await replicaB.importEvents(events);
+
+    const importedEvent = replicaB.getPersistedEvent(1);
+    expect(importedEvent?.status).toBe("applied");
+    expect(importedEvent?.payload).toBe(CRDT_EVENT_NO_OP_PAYLOAD);
+    expect(replicaB.getTodo("todo-1")).toBeNull();
+    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+  });
+
+  it("marks duplicate event deliveries as deduped", async () => {
+    const replicaA = await createReplica("node-a", 1_000);
+    const replicaB = await createReplica("node-b", 1_000, { trackEventHlcAccumulator: true });
+
+    await replicaA.createTodo({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: false,
+    });
+
+    const { events } = replicaA.exportEvents(0);
+    await replicaB.importEvents(events);
+    const accumulatorAfterFirstImport = replicaB.getEventHlcAccumulator();
+
+    await replicaB.importEvents(events);
+    const persistedEvents = replicaB.getPersistedEvents();
+    const acceptedEvents = persistedEvents.slice(0, events.length);
+    const duplicateEvents = persistedEvents.slice(events.length);
+
+    expect(acceptedEvents.map((event) => event.status)).toEqual(events.map(() => "applied"));
+    expect(duplicateEvents.map((event) => event.status)).toEqual(events.map(() => "deduped"));
+    expect(duplicateEvents.map((event) => event.timestamp)).toEqual(acceptedEvents.map((event) => event.timestamp));
+    expect(replicaB.getEventHlcAccumulator()).toBe(accumulatorAfterFirstImport);
+    expect(replicaB.getTodo("todo-1")).toEqual({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: false,
+    });
   });
 
   it("merges concurrent updates to different fields", async () => {

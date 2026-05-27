@@ -266,29 +266,32 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
-      const migratedEvents = migrator.migrateEvents(eventsBatch.events);
-
-      if (migratedEvents.length > 0) {
-        try {
-          await retryAsPromised(
-            () =>
-              source.pushEvents({
-                nodeId,
-                events: migratedEvents,
-              }),
-            {
-              max: 3,
-              backoffBase: 100,
-              backoffExponent: 1.5,
-              backoffJitter: 150,
-              timeout: 10000,
-            },
-          );
-        } catch (error) {
-          console.error("Error pushing events. Going offline.", error);
-          goOffline("REMOTE_PUSH_ERROR");
-          return;
-        }
+      try {
+        await retryAsPromised(
+          () =>
+            source.pushEvents({
+              nodeId,
+              events: eventsBatch.events.map((event) => ({
+                schema_version: event.schema_version,
+                timestamp: event.timestamp,
+                type: event.type,
+                dataset: event.dataset,
+                item_id: event.item_id,
+                payload: event.payload,
+              })),
+            }),
+          {
+            max: 3,
+            backoffBase: 100,
+            backoffExponent: 1.5,
+            backoffJitter: 150,
+            timeout: 10000,
+          },
+        );
+      } catch (error) {
+        console.error("Error pushing events. Going offline.", error);
+        goOffline("REMOTE_PUSH_ERROR");
+        return;
       }
 
       pushSyncId.current = eventsBatch.nextSyncId;
