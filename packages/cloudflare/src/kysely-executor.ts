@@ -73,10 +73,11 @@ export function createCrdtStorageDb(executor: KyselyExecutor<any>): InternalSQLi
       params: TParams,
       factory: KyselyStatementFactory<TParams, any, TQuery, TResult>,
     ) => {
-      const query = factory(dummyKysely as any, (key) => params[key] as any).compile();
+      const query = factory(dummyKysely as any, (key) => key as any).compile();
+      const parameters = query.parameters.map((param) => params[param as keyof TParams]);
       const result = executor.execute<TResult>({
         sql: query.sql,
-        parameters: query.parameters,
+        parameters,
       });
       return result.rows;
     },
