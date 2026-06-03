@@ -12,6 +12,7 @@ import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
 import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
+import { createStorageVersionStore } from "./storage-version";
 import {
   createBroadcastChannels,
   isWorkerInitMessage,
@@ -48,18 +49,29 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const [sqlite3] = await Promise.all([sqlite3InitModule(), xxhash.ensureLoaded()]);
 
-  // The reset decision is owned by the elected worker (we hold the exclusive
-  // worker lock here), not by tabs during createSyncedDb.
+  const resetStore = opts.resetStore ?? createIdbResetStore();
   const resetState = createResetStateStore({
-    store: opts.resetStore ?? createIdbResetStore(),
+    store: resetStore,
     dbId: config.dbId,
   });
-  const pendingReset = await resetState.resolvePendingReset();
+  const storageVersion = createStorageVersionStore({
+    store: resetStore,
+    dbId: config.dbId,
+    appStorageVersion: opts.storageVersion,
+  });
+  const [pendingReset, isVersionMismatch] = await Promise.all([
+    resetState.resolvePendingReset(),
+    storageVersion.isVersionMismatch(),
+  ]);
+
+  if (isVersionMismatch) {
+    logger("worker", `Storage version mismatch — resetting local DB to ${storageVersion.currentVersion}`, "warning");
+  }
 
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     name: config.dbId,
     directory: `.${config.dbId}`,
-    clearOnInit: !!pendingReset,
+    clearOnInit: !!pendingReset || isVersionMismatch,
     initialCapacity: 8,
   });
 
@@ -93,11 +105,14 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   db.invalidateDbSchema();
 
+  // Record the applied reset epoch / storage version only after the wiped DB
+  // initialized successfully, so a failed init can be retried by a later
+  // elected worker, while a later election does not wipe again.
   if (pendingReset) {
-    // Record the epoch as applied only after the wiped DB initialized
-    // successfully, so a failed init can be retried by a later elected worker,
-    // while a later election with the same epoch does not wipe again.
     await resetState.markResetApplied(pendingReset.epoch);
+  }
+  if (isVersionMismatch) {
+    await storageVersion.markCurrentVersionApplied();
   }
 
   const crdtStorage = createCrdtStorage({
@@ -287,6 +302,12 @@ type WorkerOptions = {
   workerConfig?: WorkerConfig;
   /** Durable storage for reset state. Defaults to an IndexedDB-backed store. */
   resetStore?: ResetStore;
+  /**
+   * App-provided storage version, combined with the library's internal storage
+   * version. Bump it when deploying a code change that old persisted local DBs
+   * cannot survive — on mismatch the elected worker wipes the local DB on startup.
+   */
+  storageVersion?: string;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {

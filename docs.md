@@ -618,6 +618,20 @@ Notes:
 - The returned promise may never settle in the caller: the page typically unloads first.
 - For `clean: true`, the worker durably records a reset request epoch (in IndexedDB) before broadcasting. Whichever worker wins the post-reload election applies the wipe exactly once; the request expires after 10 minutes if the reload never happens.
 
+### Breaking Storage Changes
+
+To deploy a code change that old persisted local DBs cannot survive, bump `storageVersion` in `startDbWorker`:
+
+```ts
+await startDbWorker({
+  syncDbSchema,
+  storageVersion: "2",
+  // ...
+});
+```
+
+The worker durably stores the combined version (app version + internal library storage version). When the elected worker starts with a version that does not match the stored one, it wipes the local DB during initialization and records the new version after a successful init. Clients on the old version are unaffected until they load the new code.
+
 ---
 
 ## Migrations
@@ -910,8 +924,11 @@ function startDbWorker(options: {
   createRemoteSource?: CreateRemoteSourceFactory;
   logger?: Logger;
   workerConfig?: WorkerConfig;
+  storageVersion?: string;
 }): Promise<void>
 ```
+
+`storageVersion` is an app-provided storage version, combined with the library's internal storage version. Bump it when deploying a code change that old persisted local DBs cannot survive — on mismatch, the elected worker wipes the local DB on startup (a full re-sync follows, like `requestReload({ clean: true })`).
 
 #### `getWorkerConfig<Props>()`
 
