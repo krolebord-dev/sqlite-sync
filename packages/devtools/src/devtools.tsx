@@ -1,6 +1,10 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { getOrCreateSQLiteSyncDevtoolsRegistry, type SQLiteSyncDevtoolsSnapshot } from "./devtools-registry";
+import {
+  getOrCreateSQLiteSyncDevtoolsRegistry,
+  type SQLiteSyncDevtoolsInstance,
+  type SQLiteSyncDevtoolsSnapshot,
+} from "./devtools-registry";
 
 type SQLiteSyncDevtoolsProps = {
   className?: string;
@@ -426,17 +430,21 @@ function OverviewTab({
         </div>
       </div>
 
-      <ResetSection dbId={selectedInstance.dbId} clearKey={selectedInstance.instance._internal.devtoolsClearKey} />
+      <ResetSection dbId={selectedInstance.dbId} instance={selectedInstance.instance} />
     </div>
   );
 }
 
-function ResetSection({ dbId, clearKey }: { dbId: string; clearKey: string }) {
+function ResetSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDevtoolsInstance["instance"] }) {
   const [confirming, setConfirming] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const handleReset = () => {
-    localStorage.setItem(clearKey, "1");
-    location.reload();
+    setIsResetting(true);
+    // Worker-owned clean reset: durably records a reset epoch, broadcasts a
+    // reload to all tabs, and the next elected worker wipes the persisted DB.
+    // The promise may never settle — the page unloads first.
+    void instance.requestReload({ clean: true });
   };
 
   return (
@@ -444,16 +452,21 @@ function ResetSection({ dbId, clearKey }: { dbId: string; clearKey: string }) {
       <div style={dangerZoneTitleStyles}>Danger Zone</div>
       <div style={dangerZoneRowStyles}>
         <div style={dangerZoneDescStyles}>
-          Sets a flag so <code style={inlineCodeStyles}>{dbId}</code> is wiped on next load via{" "}
-          <code style={inlineCodeStyles}>clearOnInit</code>, then reloads the page.
+          Requests a clean reload, so <code style={inlineCodeStyles}>{dbId}</code> is wiped on next load via{" "}
+          <code style={inlineCodeStyles}>clearOnInit</code>, then reloads all tabs.
         </div>
         {confirming ? (
           <div style={dangerZoneActionsStyles}>
-            <button type="button" style={resetCancelButtonStyles} onClick={() => setConfirming(false)}>
+            <button
+              type="button"
+              style={resetCancelButtonStyles}
+              disabled={isResetting}
+              onClick={() => setConfirming(false)}
+            >
               Cancel
             </button>
-            <button type="button" style={resetConfirmButtonStyles} onClick={handleReset}>
-              Confirm reset
+            <button type="button" style={resetConfirmButtonStyles} disabled={isResetting} onClick={handleReset}>
+              {isResetting ? "Resetting…" : "Confirm reset"}
             </button>
           </div>
         ) : (

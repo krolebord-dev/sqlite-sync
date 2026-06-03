@@ -100,6 +100,7 @@ export {
   tryCatchAsync,
 } from "./utils";
 // Worker DB
+export { RESET_REQUEST_TTL_MS, type ResetRequest, type ResetStore } from "./worker-db/reset-state";
 export type {
   WorkerConfig,
   WorkerState,

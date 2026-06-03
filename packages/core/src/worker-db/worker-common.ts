@@ -14,6 +14,11 @@ export type WorkerNotificationMessage =
   | {
       notificationType: "state-changed";
       state: WorkerState;
+    }
+  | {
+      notificationType: "reload-requested";
+      reloadEpoch: string;
+      clean: boolean;
     };
 
 export type WorkerState = {
@@ -47,6 +52,7 @@ export interface WorkerRpc {
   postState: () => void;
   goOnline: () => Promise<void>;
   goOffline: () => void;
+  requestReload: (options: { clean: boolean }) => Promise<void>;
 }
 
 export type WorkerRequestMethod = keyof WorkerRpc;
@@ -94,7 +100,6 @@ export const createBroadcastChannels = (prefix: string): WorkerBroadcastChannels
 export type WorkerConfig<Props = any> = {
   dbId: string;
   clientId: string;
-  clearOnInit?: boolean;
   props: Props;
 };
 

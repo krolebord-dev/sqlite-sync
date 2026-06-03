@@ -237,7 +237,8 @@ export async function initDb() {
 | `worker` | `Worker` | The Web Worker instance running `startDbWorker`. |
 | `syncDbSchema` | `SyncDbSchema` | The schema built with `createSyncDbSchema`. |
 | `workerProps` | `Props` | Extra data passed to the worker (accessible via `getWorkerConfig().props`). |
-| `clearOnInit` | `boolean` | If `true`, wipes the OPFS database on startup. Useful for development. |
+
+To wipe the local database (e.g. during development or as a recovery path), use `syncedDb.requestReload({ clean: true })` — see [Reload and Recovery](#reload-and-recovery).
 
 `createSyncedDb` is async — it acquires a Web Lock, initializes the worker, takes a snapshot of the persisted database, and loads it into the in-memory reactive SQLite instance.
 
@@ -598,6 +599,25 @@ function SyncToggle() {
 }
 ```
 
+### Reload and Recovery
+
+Use `requestReload` to ask the elected worker to broadcast a page reload to all tabs for the same `dbId`:
+
+```ts
+// Process-level reconnect: reloads all tabs, keeps the persisted worker DB.
+await syncedDb.requestReload({ clean: false });
+
+// Destructive recovery: reloads all tabs and wipes the persisted worker DB
+// on the next startup. Use when the local worker DB may be de-synced.
+await syncedDb.requestReload({ clean: true });
+```
+
+Notes:
+
+- This is a recovery/reload flow, not a hot runtime reset — pending in-memory tab events are not preserved.
+- The returned promise may never settle in the caller: the page typically unloads first.
+- For `clean: true`, the worker durably records a reset request epoch (in IndexedDB) before broadcasting. Whichever worker wins the post-reload election applies the wipe exactly once; the request expires after 10 minutes if the reload never happens.
+
 ---
 
 ## Migrations
@@ -853,6 +873,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server |
 | `state.goOffline()` | `() => void` | Disconnect from remote server |
+| `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `dispose()` | `() => Promise<void>` | Clean up all resources |
 
 #### `createSyncDbSchema(options)`
@@ -902,7 +923,6 @@ function getWorkerConfig<Props>(): Promise<WorkerConfig<Props>>
 type WorkerConfig<Props> = {
   dbId: string;
   clientId: string;
-  clearOnInit?: boolean;
   props: Props;
 }
 ```

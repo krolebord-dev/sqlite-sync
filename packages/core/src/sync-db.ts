@@ -18,7 +18,6 @@ import {
 
 type SyncedDbOptions<Database, Props = undefined> = {
   dbId: string;
-  clearOnInit?: boolean;
   worker: Worker;
   workerProps: Props;
   syncDbSchema: SyncDbSchema<Database>;
@@ -42,24 +41,6 @@ const defaultLogger: Logger = (type, message, level = "info") => {
   }
 };
 
-const devtoolsClearKey = (dbId: string) => `__sqlite_sync_devtools_clear_${dbId}`;
-
-function readDevtoolsClearFlag(clearKey: string): boolean {
-  try {
-    return globalThis.localStorage?.getItem(clearKey) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function consumeDevtoolsClearFlag(clearKey: string): void {
-  try {
-    globalThis.localStorage?.removeItem(clearKey);
-  } catch {
-    // Ignore environments where storage is unavailable or blocked.
-  }
-}
-
 export async function createSyncedDb<Database, Props = undefined>(options: SyncedDbOptions<Database, Props>) {
   validateDbId(options.dbId);
 
@@ -67,12 +48,6 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
   const instanceId = generateId();
   const tabId = generateId();
-
-  const clearKey = devtoolsClearKey(options.dbId);
-  const devtoolsClear = readDevtoolsClearFlag(clearKey);
-  if (devtoolsClear) {
-    consumeDevtoolsClearFlag(clearKey);
-  }
 
   const broadcastChannels = createBroadcastChannels(options.dbId);
 
@@ -89,7 +64,6 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     config: {
       clientId: generateId(),
       dbId: options.dbId,
-      clearOnInit: options.clearOnInit || devtoolsClear,
       props: options.workerProps as never,
     },
     broadcastChannels,
@@ -157,6 +131,11 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
   });
   tabRemoteSource.goOnline();
 
+  const onReloadRequested = () => {
+    globalThis.location?.reload();
+  };
+  workerClient.addEventListener("reload-requested", onReloadRequested);
+
   perf.logEnd("createSyncedDb", "initialized", "info");
 
   let isDisposed = false;
@@ -166,6 +145,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     isDisposed = true;
 
     unregisterDevtools?.();
+    workerClient.removeEventListener("reload-requested", onReloadRequested);
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();
     broadcastChannels.requests.close();
@@ -192,6 +172,24 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       goOnline: workerClient.goOnline.bind(workerClient),
       goOffline: workerClient.goOffline.bind(workerClient),
     },
+    /**
+     * Ask the elected worker to broadcast a page reload to all tabs for this dbId.
+     *
+     * With `clean: true` the worker durably records a reset request epoch before
+     * broadcasting, so the worker elected on the next startup initializes with
+     * `clearOnInit: true` and wipes the persisted DB. Destructive — use as a
+     * recovery path when the durable worker DB may be de-synced.
+     *
+     * Pending in-memory tab events are not preserved, and the returned promise
+     * may never settle in the caller — the page typically unloads first.
+     */
+    requestReload: async (options: { clean: boolean }) => {
+      await workerClient.requestReload(options);
+      // Primary path: this tab receives the worker's "reload-requested" broadcast
+      // like every other tab. Fallback in case the broadcast is missed — in the
+      // normal case the page is already unloading and this timeout never fires.
+      setTimeout(() => globalThis.location?.reload(), 250);
+    },
     dispose,
     _internal: {
       executeAsync: workerClient.execute.bind(workerClient),
@@ -202,7 +200,6 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       migrationVersions: Object.keys(options.syncDbSchema.migrations)
         .map(Number)
         .sort((a, b) => a - b),
-      devtoolsClearKey: clearKey,
     },
   };
 

@@ -12,7 +12,6 @@ export async function initDb() {
     dbId: "example-db",
     worker,
     syncDbSchema,
-    clearOnInit: window.location.search.includes("clear"),
     workerProps: undefined,
   });
 

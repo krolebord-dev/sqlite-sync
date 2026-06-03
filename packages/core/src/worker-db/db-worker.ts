@@ -11,6 +11,7 @@ import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
+import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
 import {
   createBroadcastChannels,
   isWorkerInitMessage,
@@ -47,10 +48,18 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const [sqlite3] = await Promise.all([sqlite3InitModule(), xxhash.ensureLoaded()]);
 
+  // The reset decision is owned by the elected worker (we hold the exclusive
+  // worker lock here), not by tabs during createSyncedDb.
+  const resetState = createResetStateStore({
+    store: opts.resetStore ?? createIdbResetStore(),
+    dbId: config.dbId,
+  });
+  const pendingReset = await resetState.resolvePendingReset();
+
   const pool = await sqlite3.installOpfsSAHPoolVfs({
     name: config.dbId,
     directory: `.${config.dbId}`,
-    clearOnInit: config.clearOnInit,
+    clearOnInit: !!pendingReset,
     initialCapacity: 8,
   });
 
@@ -83,6 +92,13 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
   });
   db.invalidateDbSchema();
+
+  if (pendingReset) {
+    // Record the epoch as applied only after the wiped DB initialized
+    // successfully, so a failed init can be retried by a later elected worker,
+    // while a later election with the same epoch does not wipe again.
+    await resetState.markResetApplied(pendingReset.epoch);
+  }
 
   const crdtStorage = createCrdtStorage({
     nodeId: config.clientId,
@@ -162,6 +178,10 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     goOnline: () => remoteSource.goOnline(),
     goOffline: () => remoteSource.goOffline("DISCONNECTED"),
+    requestReload: createReloadRequestHandler({
+      resetState,
+      broadcast: (message) => broadcastChannels.responses.postMessage(message),
+    }),
   };
 
   broadcastChannels.requests.onmessage = (event) => {
@@ -265,6 +285,8 @@ type WorkerOptions = {
   logger?: Logger;
   createRemoteSource?: CreateRemoteSourceFactory;
   workerConfig?: WorkerConfig;
+  /** Durable storage for reset state. Defaults to an IndexedDB-backed store. */
+  resetStore?: ResetStore;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {
