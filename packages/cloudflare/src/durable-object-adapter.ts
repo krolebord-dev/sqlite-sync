@@ -238,12 +238,14 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
+    const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,
       data: {
         ok: true,
+        beforeSyncId,
+        afterSyncId,
       },
     };
 

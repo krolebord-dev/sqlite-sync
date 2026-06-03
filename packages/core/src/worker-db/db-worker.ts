@@ -178,9 +178,11 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     postState,
     pushTabEvents: (request) => {
-      crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
+      const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
       return {
         ok: true,
+        beforeSyncId,
+        afterSyncId,
       };
     },
     pullEvents: (request) => {

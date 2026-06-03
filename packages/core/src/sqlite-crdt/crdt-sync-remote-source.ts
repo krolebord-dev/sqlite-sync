@@ -27,6 +27,10 @@ export type EventsPushRequest = {
 };
 export type EventsPushResponse = {
   ok: boolean;
+  /** Remote sync_id right before the pushed events were enqueued. */
+  beforeSyncId?: number;
+  /** Remote sync_id right after the pushed events were enqueued. */
+  afterSyncId?: number;
 };
 
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
@@ -266,8 +270,9 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
+      let response: EventsPushResponse;
       try {
-        await retryAsPromised(
+        response = await retryAsPromised(
           () =>
             source.pushEvents({
               nodeId,
@@ -295,6 +300,22 @@ export const createCrdtSyncRemoteSource = ({
       }
 
       pushSyncId.current = eventsBatch.nextSyncId;
+
+      // Fast-forward the pull cursor: the remote assigns sync ids for the pushed
+      // events synchronously, so (beforeSyncId, afterSyncId] contains only this
+      // node's own events. If we are caught up to at least beforeSyncId, the skipped
+      // range (pullSyncId, afterSyncId] contains only our own events, so there is
+      // nothing to pull up to afterSyncId — advancing skips the redundant empty pull
+      // triggered by the remote's post-apply broadcast.
+      if (
+        response.ok &&
+        response.beforeSyncId !== undefined &&
+        response.afterSyncId !== undefined &&
+        response.beforeSyncId <= pullSyncId.current &&
+        response.afterSyncId > pullSyncId.current
+      ) {
+        pullSyncId.current = response.afterSyncId;
+      }
       if (!eventsBatch.hasMore) {
         break;
       }

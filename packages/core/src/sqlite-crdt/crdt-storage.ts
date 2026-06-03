@@ -69,6 +69,13 @@ export type GetEventsBatch = {
   nextSyncId: number;
 };
 
+export type EnqueueEventsResult = {
+  beforeSyncId: number;
+  afterSyncId: number;
+  /** Resolves when the enqueued events have been processed (applied/deduped/failed). */
+  processed: Promise<void>;
+};
+
 export type EventUpdate = {
   status: CrdtEventStatus;
   schema_version: number;
@@ -140,9 +147,14 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     );
   };
 
-  const enqueueEvents = (origin: CrdtEventOrigin, sourceNodeId: string, events: EnqueuedCrdtEvent[]) => {
+  const enqueueEvents = (
+    origin: CrdtEventOrigin,
+    sourceNodeId: string,
+    events: EnqueuedCrdtEvent[],
+  ): EnqueueEventsResult => {
+    const beforeSyncId = localSyncId;
     if (events.length === 0) {
-      return;
+      return { beforeSyncId, afterSyncId: beforeSyncId, processed: Promise.resolve() };
     }
 
     db.executeTransaction((tx) => {
@@ -162,22 +174,19 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
     });
 
-    return processEnqueuedEvents();
+    return { beforeSyncId, afterSyncId: localSyncId, processed: processEnqueuedEvents() };
   };
 
-  const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string): void => {
-    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
-    return enqueueEvents("local", sourceNodeId, events) as undefined;
+  const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string): EnqueueEventsResult => {
+    return enqueueEvents("local", sourceNodeId, events);
   };
 
   const enqueueOwnEvents = (events: OwnCrdtEvent[]): void => {
-    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
-    return enqueueEvents("own", storage.nodeId, events) as undefined;
+    enqueueEvents("own", storage.nodeId, events);
   };
 
-  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): void => {
-    // biome-ignore lint/correctness/noVoidTypeReturn: We need to return void to match the type signature of the function
-    return enqueueEvents("remote", "", events) as undefined;
+  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): Promise<void> => {
+    return enqueueEvents("remote", "", events).processed;
   };
 
   const notifyEventApplied = (event: PersistedCrdtEvent) => {
