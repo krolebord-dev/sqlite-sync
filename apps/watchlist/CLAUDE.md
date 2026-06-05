@@ -21,7 +21,7 @@ pnpm --filter watchlist generate:types:env  # wrangler env types → worker-conf
 
 ## Stack
 
-Routing: TanStack Router (file-based), API: oRPC, UI: Shadcn/UI + Tailwind CSS 4, State: Jotai + React Query, Auth: magic link + Google/Twitch OAuth (`arctic`), AI: Vercel AI SDK + OpenRouter + Workers AI, Server: Cloudflare Workers + D1 + Durable Objects, Testing: Vitest
+Routing: TanStack Router (file-based), API: oRPC, UI: Shadcn/UI + Tailwind CSS 4, State: Jotai + React Query, Auth: magic link + Google/Twitch OAuth (`arctic`), AI: Vercel AI SDK + OpenRouter, Server: Cloudflare Workers + D1 + Durable Objects, Testing: Vitest
 
 ## Key Files
 
@@ -97,7 +97,6 @@ migrations/                            # Server D1 migrations (Wrangler-managed)
 
 - D1: binding `MAIN_DB`, database name `watchlist-admin`
 - Durable Object: `ListDbServer` (per-list, prefix `list-db`)
-- AI: remote inference binding `AI`
 - Worker name: `watchlist-new`
 
 ## Env Vars

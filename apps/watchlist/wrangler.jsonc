@@ -18,10 +18,6 @@
     "MODE": "production",
     "VITE_APP_URL": "https://watchlist.krolebord.com"
   },
-  "ai": {
-    "binding": "AI",
-    "remote": true
-  },
   "d1_databases": [
     {
       "binding": "MAIN_DB",
