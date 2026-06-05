@@ -181,22 +181,17 @@ export function QueryShell() {
 
   return (
     <div className="query-shell">
-      <div className="mb-2 flex items-center gap-2">
-        <div className="font-medium text-sm">Database:</div>
-        <button
-          type="button"
-          onClick={toggleDb}
-          className="rounded border border-gray-300 px-3 py-1 text-sm hover:bg-gray-100"
-        >
-          {dbType === "memoryDb" ? "Memory DB" : "Worker DB"}
+      <div className="query-shell-toolbar">
+        <span>Database</span>
+        <button type="button" className="btn btn-sm" onClick={toggleDb}>
+          {dbType === "memoryDb" ? "Memory" : "Worker"}
         </button>
-        <span className="text-gray-500 text-xs">({dbType === "memoryDb" ? "In-memory" : "Persistent"})</span>
+        <span>({dbType === "memoryDb" ? "in-memory" : "persistent"})</span>
       </div>
       <textarea
         ref={textareaRef}
-        className="w-full border border-gray-300 p-2 font-mono text-sm"
         rows={10}
-        placeholder="Enter SQL query (Enter to execute, Shift+Enter to add a new line, ↑/↓ for history, .toggle to switch DB)"
+        placeholder="SQL query — Enter to run, Shift+Enter for newline, ↑/↓ for history, .toggle to switch DB"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
