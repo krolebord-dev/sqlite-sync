@@ -223,9 +223,9 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
   };
 
-  const dispatchEventsApplied = () => {
+  const dispatchEventsApplied = (syncId = localSyncId) => {
     eventTarget.dispatchEvent("events-applied", {
-      syncId: localSyncId,
+      syncId,
       eventHlcSum: eventHlcAccumulator?.current ?? null,
     });
   };
@@ -438,15 +438,22 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         break;
       }
 
+      let appliedSyncId: number | null = null;
+
       db.executeTransaction((tx) => {
         for (const event of events) {
           processPersistedEvent(tx, event);
           notifyEventApplied(event);
+          if (event.status === "applied") {
+            appliedSyncId = event.sync_id;
+          }
         }
         persistEventHlcAccumulator();
       });
 
-      dispatchEventsApplied();
+      if (appliedSyncId !== null) {
+        dispatchEventsApplied(appliedSyncId);
+      }
     }
   });
 
