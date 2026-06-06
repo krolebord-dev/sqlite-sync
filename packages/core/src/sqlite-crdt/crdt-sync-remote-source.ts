@@ -35,8 +35,13 @@ export type EventsPushResponse = {
 
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
+export type EventsAvailable = {
+  newSyncId: number;
+  remoteEventHlcSum: string | null;
+};
+
 export type CreateRemoteSourceFactory = (opts: {
-  onEventsAvailable: (newSyncId: number) => void;
+  onEventsAvailable: (event: EventsAvailable) => void;
 }) => RemoteSource | Promise<RemoteSource>;
 
 type RemoteSource = {
@@ -101,8 +106,8 @@ export const createCrdtSyncRemoteSource = ({
 
       const factoryResult = await tryCatchAsync(async () => {
         return await remoteFactory?.({
-          onEventsAvailable: (newSyncId) => {
-            pullEvents({ remoteSyncId: newSyncId, includeSelf: false });
+          onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
+            pullEvents({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
           },
         });
       });
@@ -167,7 +172,11 @@ export const createCrdtSyncRemoteSource = ({
 
   let requestedPullSyncId: number | null = null;
   let pullPromise: Promise<void> | null = null;
-  const pullEvents = (request?: { remoteSyncId?: number; includeSelf?: boolean }) => {
+  const pullEvents = (request?: {
+    remoteSyncId?: number;
+    remoteEventHlcSum?: string | null;
+    includeSelf?: boolean;
+  }) => {
     if (remoteState.type !== "online") {
       return Promise.resolve();
     }
@@ -175,6 +184,11 @@ export const createCrdtSyncRemoteSource = ({
     const remoteSyncId = request?.remoteSyncId;
 
     if (remoteSyncId !== undefined && remoteSyncId <= pullSyncId.current) {
+      // We are already caught up to this broadcast, so there is nothing to pull.
+      // This is the quiescent moment to verify we have not diverged from the
+      // remote (the check is a no-op unless we are exactly aligned: remoteSyncId
+      // === pullSyncId.current).
+      checkRemoteConsistency(remoteSyncId, request?.remoteEventHlcSum ?? null);
       return Promise.resolve();
     }
 
@@ -250,6 +264,41 @@ export const createCrdtSyncRemoteSource = ({
       if (response.nextSyncId > pullSyncId.current) {
         pullSyncId.current = response.nextSyncId;
       }
+    }
+  };
+
+  // De-sync detection: when we are exactly caught up to the remote's broadcast
+  // sync id and fully quiescent, our applied-event set must equal the remote's,
+  // so our HLC checksums must match. A mismatch means the nodes have diverged.
+  const checkRemoteConsistency = (remoteSyncId: number, remoteEventHlcSum: string | null) => {
+    // A remote with no accumulator gives us nothing to compare against.
+    if (remoteEventHlcSum === null) {
+      return;
+    }
+
+    // Only meaningful when we are exactly caught up: if we are behind we still
+    // need to pull; if we are ahead our state covers events the remote checksum
+    // does not.
+    if (remoteSyncId !== pullSyncId.current) {
+      return;
+    }
+
+    // Quiescence: the accumulator only matches the remote's when nothing is left
+    // to apply locally and no local applied events are still waiting to be pushed
+    // (those are in our accumulator but the remote has not seen them yet).
+    if (!storage.checkIsQuiescent(pushSyncId.current)) {
+      return;
+    }
+
+    const localEventHlcSum = storage.getEventHlcAccumulator();
+    if (localEventHlcSum === null) {
+      return;
+    }
+
+    if (localEventHlcSum !== remoteEventHlcSum) {
+      console.warn(
+        `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
+      );
     }
   };
 

@@ -108,6 +108,7 @@ export const crdtEventOrigin = {
 
 type EventsAppliedPayload = {
   syncId: number;
+  eventHlcSum: string | null;
 };
 
 type InternalDbSchema = {
@@ -181,12 +182,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     return enqueueEvents("local", sourceNodeId, events);
   };
 
-  const enqueueOwnEvents = (events: OwnCrdtEvent[]): void => {
-    enqueueEvents("own", storage.nodeId, events);
+  const enqueueOwnEvents = (events: OwnCrdtEvent[]): EnqueueEventsResult => {
+    return enqueueEvents("own", storage.nodeId, events);
   };
 
-  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): Promise<void> => {
-    return enqueueEvents("remote", "", events).processed;
+  const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): EnqueueEventsResult => {
+    return enqueueEvents("remote", "", events);
   };
 
   const notifyEventApplied = (event: PersistedCrdtEvent) => {
@@ -225,7 +226,19 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   const dispatchEventsApplied = () => {
     eventTarget.dispatchEvent("events-applied", {
       syncId: localSyncId,
+      eventHlcSum: eventHlcAccumulator?.current ?? null,
     });
+  };
+
+  const hasPendingEvents = (): boolean => {
+    const events = db.executePrepared(
+      "has-pending-events",
+      { status: "pending" as const },
+      (db, params) =>
+        db.selectFrom(crdtEventsTable).select("sync_id").where("status", "=", params("status")).limit(sql.lit(1)),
+      { loggerLevel: "system" },
+    );
+    return events.length > 0;
   };
 
   const getEventsBatch = (options: GetEventsBatchQuery): GetEventsBatch => {
@@ -265,6 +278,25 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       hasMore,
       nextSyncId: events[events.length - 1]?.sync_id ?? options.afterSyncId ?? 0,
     };
+  };
+
+  // Storage is quiescent when there is nothing left to converge: no events waiting
+  // to be applied, and no local applied events past `pushedSyncId` still waiting to
+  // be pushed to the remote. When quiescent and caught up, the local and remote node
+  // share the exact same set of applied events, so their HLC checksums must match.
+  const checkIsQuiescent = (pushedSyncId: number): boolean => {
+    if (hasPendingEvents()) {
+      return false;
+    }
+
+    const unpushed = getEventsBatch({
+      status: "applied",
+      afterSyncId: pushedSyncId,
+      excludeOrigin: "remote",
+      limit: 1,
+    });
+
+    return unpushed.events.length === 0;
   };
 
   const applyCrdtEvent = createSQLiteCrdtApplyFunction({
@@ -335,6 +367,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         // Event was dropped during migration (e.g., table was deleted)
         event.schema_version = storage.migrator.latestSchemaVersion;
         event.payload = CRDT_EVENT_NO_OP_PAYLOAD;
+
         applyCrdtEvent(event);
         event.status = "applied";
         eventHlcAccumulator?.add(event.timestamp);
@@ -426,6 +459,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueRemoteEvents,
     applyOwnEvent,
     dispatchEventsApplied,
+    checkIsQuiescent,
     getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 
     addEventListener: eventTarget.addEventListener,

@@ -138,6 +138,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       broadcastChannels.responses.postMessage({
         notificationType: "new-event-chunk-applied",
         newSyncId: chunk.newSyncId,
+        eventHlcSum: chunk.eventHlcSum,
       });
     },
   });

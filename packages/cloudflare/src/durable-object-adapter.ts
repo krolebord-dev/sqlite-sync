@@ -174,6 +174,7 @@ function createDurableObjectRemoteHandler({
         JSON.stringify({
           type: "events-applied",
           newSyncId: chunk.newSyncId,
+          eventHlcSum: chunk.eventHlcSum,
         }),
       );
     },

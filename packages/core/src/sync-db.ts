@@ -116,7 +116,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       const onNewEventChunkApplied = (
         event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "new-event-chunk-applied" }>>,
       ) => {
-        onEventsAvailable(event.payload.newSyncId);
+        onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteEventHlcSum: event.payload.eventHlcSum });
       };
       workerClient.addEventListener("new-event-chunk-applied", onNewEventChunkApplied);
 

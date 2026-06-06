@@ -180,7 +180,7 @@ async function applyRemoteEvents(
     }
   };
 
-  await harness.crdtStorage.enqueueRemoteEvents(events);
+  await harness.crdtStorage.enqueueRemoteEvents(events).processed;
   checkCompletion();
   await completion.promise;
 }

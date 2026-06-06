@@ -44,6 +44,11 @@ export type SyncServerMessage =
   | {
       type: "events-applied";
       newSyncId: number;
+      /**
+       * Remote's HLC checksum after applying up to `newSyncId`. Used by clients
+       * to detect de-sync when they are caught up.
+       */
+      eventHlcSum: string | null;
     };
 
 export type SyncServerRequest = z.infer<typeof syncServerZodSchema.request>;
