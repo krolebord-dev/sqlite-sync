@@ -389,6 +389,9 @@ importers:
       '@sqlite-sync/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@sqlite-sync/devtools':
+        specifier: workspace:*
+        version: link:../../packages/devtools
       '@sqlite-sync/react':
         specifier: workspace:*
         version: link:../../packages/react

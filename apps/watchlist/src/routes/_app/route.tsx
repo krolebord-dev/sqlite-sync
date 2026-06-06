@@ -1,4 +1,6 @@
+import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
+import { isAdmin, type UserRole } from "@/lib/user-role";
 import { orpc } from "@/orpc/orpc-client";
 
 export const Route = createFileRoute("/_app")({
@@ -16,5 +18,12 @@ export const Route = createFileRoute("/_app")({
 });
 
 function RouteComponent() {
-  return <Outlet />;
+  const { auth } = Route.useLoaderData();
+
+  return (
+    <>
+      <Outlet />
+      {isAdmin(auth.userRole as UserRole) ? <SQLiteSyncDevtools /> : null}
+    </>
+  );
 }

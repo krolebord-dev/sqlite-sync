@@ -5,6 +5,7 @@ import * as z from "zod";
 import { getContext } from "@/lib/context";
 import { db } from "@/lib/db";
 import { emailSerice } from "@/lib/emails/emails";
+import type { UserRole } from "@/lib/user-role";
 import { authCookieSession, createCookieSession } from "../common/auth";
 import type { ORPCContext } from "../common/os";
 import { procedure, protectedProcedure } from "../common/procedure";
@@ -131,6 +132,7 @@ const findOrCreateUser = async (data: { email: string; name?: string }) => {
         id: userId,
         name: data.name || data.email.split("@")[0],
         email: data.email,
+        role: "user" satisfies UserRole,
         createdAt: now,
         updatedAt: now,
       })

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLoaderData, useNavigate } from "@tanstack/react-router";
+import { isAdmin, type UserRole } from "@/lib/user-role";
 import { orpc } from "@/orpc/orpc-client";
 
 export function useSignOut() {
@@ -27,4 +28,10 @@ export function useAuth() {
   const routeContext = useLoaderData({ from: "/_app" });
 
   return routeContext.auth;
+}
+
+export function useIsAdmin() {
+  const auth = useAuth();
+
+  return isAdmin(auth.userRole as UserRole);
 }

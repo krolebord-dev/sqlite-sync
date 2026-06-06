@@ -30,6 +30,7 @@ export const authMiddleware = osBase.middleware(async ({ context, next, errors }
       "s.id as sessionId",
       "u.name as userName",
       "u.email as userEmail",
+      "u.role as userRole",
       "s.expiresAt as sessionExpiresAt",
     ])
     .executeTakeFirst();
