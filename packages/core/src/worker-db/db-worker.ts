@@ -21,6 +21,7 @@ import {
   syncDbWorkerLockName,
   type WorkerConfig,
   type WorkerErrorResponseMessage,
+  type WorkerNotificationMessage,
   type WorkerResponseMessage,
   type WorkerRpc,
 } from "./worker-common";
@@ -152,17 +153,37 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   remoteSource.goOnline();
 
+  const broadcastNotification = (notification: WorkerNotificationMessage) => {
+    broadcastChannels.responses.postMessage(notification);
+  };
+
   const postState = () => {
-    broadcastChannels.responses.postMessage({
+    broadcastNotification({
       notificationType: "state-changed",
       state: {
         remoteState: remoteSource.getState(),
       },
     });
   };
-  remoteSource.addEventListener("state-changed", () => {
+  const stateChangedSubscription = remoteSource.addEventListener("state-changed", () => {
     postState();
   });
+  const deSyncDetectedSubscription = remoteSource.addEventListener("de-sync-detected", (event) => {
+    broadcastNotification({
+      notificationType: "de-sync-detected",
+      reason: event.payload.reason,
+    });
+  });
+  const remoteSchemaVersionMismatchSubscription = remoteSource.addEventListener(
+    "remote-schema-version-mismatch",
+    (event) => {
+      broadcastNotification({
+        notificationType: "remote-schema-version-mismatch",
+        remoteSchemaVersion: event.payload.remoteSchemaVersion,
+        localSchemaVersion: event.payload.localSchemaVersion,
+      });
+    },
+  );
 
   const rpcTarget: WorkerRpc = {
     execute: (query) => db.execute(query),
@@ -198,7 +219,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     goOffline: () => remoteSource.goOffline("DISCONNECTED"),
     requestReload: createReloadRequestHandler({
       resetState,
-      broadcast: (message) => broadcastChannels.responses.postMessage(message),
+      broadcast: broadcastNotification,
     }),
   };
 
@@ -249,6 +270,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   rpcTarget.postState();
 
   return async () => {
+    stateChangedSubscription.unsubscribe();
+    deSyncDetectedSubscription.unsubscribe();
+    remoteSchemaVersionMismatchSubscription.unsubscribe();
     await remoteSource.dispose();
     broadcastChannels.requests.close();
     broadcastChannels.responses.close();

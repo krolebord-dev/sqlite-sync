@@ -8,13 +8,9 @@ import type { SyncDbMigrator } from "./migrations/migrator";
 import type { SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
-import { createDeferredPromise, generateId, type TypedEvent } from "./utils";
+import { createDeferredPromise, generateId } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
-import {
-  createBroadcastChannels,
-  syncDbClientLockName,
-  type WorkerNotificationMessage,
-} from "./worker-db/worker-common";
+import { createBroadcastChannels, syncDbClientLockName } from "./worker-db/worker-common";
 
 type SyncedDbOptions<Database, Props = undefined> = {
   dbId: string;
@@ -113,28 +109,24 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     nodeId: tabId,
     migrator: memoryDbMigrator,
     remoteFactory: ({ onEventsAvailable }) => {
-      const onNewEventChunkApplied = (
-        event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "new-event-chunk-applied" }>>,
-      ) => {
+      const subscription = workerClient.subscribe("new-event-chunk-applied", (event) => {
         onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteEventHlcSum: event.payload.eventHlcSum });
-      };
-      workerClient.addEventListener("new-event-chunk-applied", onNewEventChunkApplied);
+      });
 
       return {
         pullEvents: (request) => workerClient.pullEvents(request),
         pushEvents: (request) => workerClient.pushTabEvents(request),
         disconnect: () => {
-          workerClient.removeEventListener("new-event-chunk-applied", onNewEventChunkApplied);
+          subscription.unsubscribe();
         },
       };
     },
   });
   tabRemoteSource.goOnline();
 
-  const onReloadRequested = () => {
+  const reloadRequestedSubscription = workerClient.subscribe("reload-requested", () => {
     globalThis.location?.reload();
-  };
-  workerClient.addEventListener("reload-requested", onReloadRequested);
+  });
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 
@@ -145,7 +137,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     isDisposed = true;
 
     unregisterDevtools?.();
-    workerClient.removeEventListener("reload-requested", onReloadRequested);
+    reloadRequestedSubscription.unsubscribe();
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();
     broadcastChannels.requests.close();
@@ -164,10 +156,8 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     state: {
       getState: workerClient.getState.bind(workerClient),
       subscribe: (onChange: () => void) => {
-        workerClient.addEventListener("state-changed", onChange);
-        return () => {
-          workerClient.removeEventListener("state-changed", onChange);
-        };
+        const { unsubscribe } = workerClient.subscribe("state-changed", onChange);
+        return unsubscribe;
       },
       goOnline: workerClient.goOnline.bind(workerClient),
       goOffline: workerClient.goOffline.bind(workerClient),
@@ -190,6 +180,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       // normal case the page is already unloading and this timeout never fires.
       setTimeout(() => globalThis.location?.reload(), 250);
     },
+    subscribe: workerClient.subscribe,
     dispose,
     _internal: {
       executeAsync: workerClient.execute.bind(workerClient),

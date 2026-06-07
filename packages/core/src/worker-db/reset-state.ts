@@ -94,7 +94,7 @@ export function createResetStateStore({ store, dbId, now = () => Date.now() }: R
 
 type ReloadRequestHandlerOptions = {
   resetState: ResetStateStore;
-  broadcast: (message: Extract<WorkerNotificationMessage, { notificationType: "reload-requested" }>) => void;
+  broadcast: (message: WorkerNotificationMessage) => void;
   generateEpoch?: () => string;
 };
 

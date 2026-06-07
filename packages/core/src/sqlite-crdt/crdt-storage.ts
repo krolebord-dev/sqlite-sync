@@ -100,12 +100,6 @@ type DbSyncerStorage = {
 
 export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
 
-export const crdtEventOrigin = {
-  local: "local",
-  own: "own",
-  remote: "remote",
-};
-
 type EventsAppliedPayload = {
   syncId: number;
   eventHlcSum: string | null;

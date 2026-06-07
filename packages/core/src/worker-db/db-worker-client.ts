@@ -3,7 +3,6 @@ import {
   createTypedEventTarget,
   type DeferredPromise,
   noop,
-  type TypedEvent,
   type TypedEventTarget,
 } from "../utils";
 import type {
@@ -132,8 +131,7 @@ export const createWorkerDbClient = async ({
 
   return {
     ...rpc,
-    addEventListener: eventTarget.addEventListener,
-    removeEventListener: eventTarget.removeEventListener,
+    subscribe: eventTarget.addEventListener,
     getState: () => workerState,
     dispose,
   };
@@ -142,14 +140,10 @@ export const createWorkerDbClient = async ({
 function awaitWorkerState(eventTarget: TypedEventTarget<NotificationEvents>) {
   const promise = createDeferredPromise<WorkerState>({ timeout: 15_000 });
 
-  const onStateChanged = (
-    event: TypedEvent<Extract<WorkerNotificationMessage, { notificationType: "state-changed" }>>,
-  ) => {
+  const subscription = eventTarget.addEventListener("state-changed", (event) => {
     promise.resolve(event.payload.state);
-    eventTarget.removeEventListener("state-changed", onStateChanged);
-  };
-
-  eventTarget.addEventListener("state-changed", onStateChanged);
+    subscription.unsubscribe();
+  });
 
   return promise.promise;
 }

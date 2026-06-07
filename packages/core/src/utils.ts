@@ -146,7 +146,10 @@ export class TypedEvent<T = unknown> extends Event {
 }
 
 export type TypedEventTarget<T extends Record<string, unknown>> = {
-  addEventListener: <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => void;
+  addEventListener: <K extends keyof T & string>(
+    type: K,
+    listener: (event: TypedEvent<T[K]>) => void,
+  ) => { unsubscribe: () => void };
   removeEventListener: <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => void;
   dispatchEvent: <K extends keyof T & string>(type: K, payload: T[K]) => void;
 };
@@ -156,6 +159,12 @@ export const createTypedEventTarget = <T extends Record<string, unknown>>(): Typ
 
   const addEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
     eventTarget.addEventListener(type, listener as (e: Event) => void);
+
+    return {
+      unsubscribe: () => {
+        eventTarget.removeEventListener(type, listener as (e: Event) => void);
+      },
+    };
   };
 
   const removeEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {

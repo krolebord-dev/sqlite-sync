@@ -1,4 +1,9 @@
-import type { EventsPullRequest, EventsPushRequest, EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
+import type {
+  DeSyncDetectedReason,
+  EventsPullRequest,
+  EventsPushRequest,
+  EventsPushResponse,
+} from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventType } from "../sqlite-crdt/crdt-table-schema";
 import type { ExecuteParams, ExecuteResult } from "../sqlite-db-wrapper";
 import { TypedBroadcastChannel } from "../utils";
@@ -21,6 +26,15 @@ export type WorkerNotificationMessage =
       notificationType: "reload-requested";
       reloadEpoch: string;
       clean: boolean;
+    }
+  | {
+      notificationType: "de-sync-detected";
+      reason: DeSyncDetectedReason;
+    }
+  | {
+      notificationType: "remote-schema-version-mismatch";
+      remoteSchemaVersion: number;
+      localSchemaVersion: number;
     };
 
 export type WorkerState = {

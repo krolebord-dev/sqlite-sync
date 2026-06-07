@@ -70,6 +70,9 @@ export type OfflineReason =
   | "REMOTE_PULL_ERROR"
   | "DISCONNECTED";
 
+// TODO: add ERROR_APPLYING_REMOTE_EVENT
+export type DeSyncDetectedReason = "CHECKSUM_MISMATCH" | "ERROR_APPLYING_REMOTE_EVENT";
+
 export const createCrdtSyncRemoteSource = ({
   bufferSize,
   storage,
@@ -81,6 +84,13 @@ export const createCrdtSyncRemoteSource = ({
 }: CrdtSyncRemoteSourceConfig) => {
   const eventTarget = createTypedEventTarget<{
     "state-changed": RemoteSourceState["type"];
+    "de-sync-detected": {
+      reason: DeSyncDetectedReason;
+    };
+    "remote-schema-version-mismatch": {
+      remoteSchemaVersion: number;
+      localSchemaVersion: number;
+    };
   }>();
 
   let remoteState: RemoteSourceState = { type: "offline", reason: "NOT_INITIALIZED" };
@@ -250,6 +260,10 @@ export const createCrdtSyncRemoteSource = ({
         storage.enqueueRemoteEvents(
           response.events.map((x) => {
             if (x.schema_version > migrator.currentSchemaVersion) {
+              eventTarget.dispatchEvent("remote-schema-version-mismatch", {
+                remoteSchemaVersion: x.schema_version,
+                localSchemaVersion: migrator.currentSchemaVersion,
+              });
               throw new Error(
                 `Event schema version ${x.schema_version} is greater than current schema version ${migrator.currentSchemaVersion}`,
               );
@@ -296,6 +310,7 @@ export const createCrdtSyncRemoteSource = ({
     }
 
     if (localEventHlcSum !== remoteEventHlcSum) {
+      eventTarget.dispatchEvent("de-sync-detected", { reason: "CHECKSUM_MISMATCH" });
       console.warn(
         `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
       );
@@ -354,8 +369,7 @@ export const createCrdtSyncRemoteSource = ({
       // events synchronously, so (beforeSyncId, afterSyncId] contains only this
       // node's own events. If we are caught up to at least beforeSyncId, the skipped
       // range (pullSyncId, afterSyncId] contains only our own events, so there is
-      // nothing to pull up to afterSyncId — advancing skips the redundant empty pull
-      // triggered by the remote's post-apply broadcast.
+      // nothing to pull up to afterSyncId.
       if (
         response.ok &&
         response.beforeSyncId !== undefined &&
@@ -371,16 +385,15 @@ export const createCrdtSyncRemoteSource = ({
     }
   });
 
-  const onEventsApplied = () => {
+  const eventsAppliedSubscription = storage.addEventListener("events-applied", () => {
     startPushingEvents();
-  };
-  storage.addEventListener("events-applied", onEventsApplied);
+  });
 
   const getState = (): "pending" | "offline" | "online" => remoteState.type;
 
   const dispose = async () => {
     await goOffline("DISCONNECTED");
-    storage.removeEventListener("events-applied", onEventsApplied);
+    eventsAppliedSubscription.unsubscribe();
   };
 
   return {
