@@ -336,6 +336,44 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
   });
 
+  it("recomputes the event HLC accumulator from applied history when it was never computed", async () => {
+    const timestamps = [1_000, 1_001, 1_002].map((time) =>
+      serializeHLC(new HLCCounter("origin-node", () => time).getCurrentHLC()),
+    );
+
+    const makeEvents = (status: PersistedCrdtEvent["status"]): PersistedCrdtEvent[] =>
+      timestamps.map((timestamp, index) => ({
+        sync_id: index + 1,
+        schema_version: 0,
+        status,
+        type: "item-created",
+        timestamp,
+        origin: "remote",
+        source_node_id: "origin-node",
+        dataset: BASE_TABLE,
+        item_id: `todo-${index + 1}`,
+        payload: JSON.stringify({ id: `todo-${index + 1}`, title: `Todo ${index + 1}`, completed: false }),
+      }));
+
+    // Applies the events through the normal path, so the accumulator is built
+    // up event-by-event as each one is applied.
+    const incremental = await createReplica("node-a", 1_000, {
+      trackEventHlcAccumulator: true,
+      preloadedEvents: makeEvents("pending"),
+    });
+
+    // Same events, but already marked applied with the accumulator never
+    // computed ("" sentinel) — mirrors a DB created before the accumulator
+    // existed. On construction it must be rebuilt from the applied history.
+    const recomputed = await createReplica("node-b", 1_000, {
+      trackEventHlcAccumulator: true,
+      preloadedEvents: makeEvents("applied"),
+    });
+
+    expect(recomputed.getEventHlcAccumulator()).not.toBe("");
+    expect(recomputed.getEventHlcAccumulator()).toBe(incremental.getEventHlcAccumulator());
+  });
+
   it("marks duplicate event deliveries as deduped", async () => {
     const replicaA = await createReplica("node-a", 1_000);
     const replicaB = await createReplica("node-b", 1_000, { trackEventHlcAccumulator: true });

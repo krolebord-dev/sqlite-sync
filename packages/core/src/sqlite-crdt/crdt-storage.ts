@@ -307,6 +307,55 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
   };
 
+  // Rebuild the accumulator from the full applied-event history when it has
+  // never been computed for this storage. An empty stored value is the "never
+  // computed" sentinel: once any event is applied the accumulator is persisted
+  // as padded hex, never "". This recovers storages created before the
+  // accumulator existed and lets us force a recompute by bumping the stored
+  // value's key version. The accumulator is a commutative sum, so scan order
+  // does not matter.
+  const recomputeEventHlcAccumulatorIfNeeded = () => {
+    if (!eventHlcAccumulator || !storage.eventHlcAccumulator) {
+      return;
+    }
+    if (storage.eventHlcAccumulator.current !== "") {
+      return;
+    }
+
+    const batchSize = 1000;
+    let afterSyncId = 0;
+    for (;;) {
+      const rows = db.executePrepared(
+        "get-applied-event-timestamps",
+        { status: "applied" as const, afterSyncId, limit: batchSize },
+        (db, params) =>
+          db
+            .selectFrom(crdtEventsTable)
+            .select(["sync_id", "timestamp"])
+            .where("status", "=", params("status"))
+            .where("sync_id", ">", params("afterSyncId"))
+            .orderBy("sync_id", "asc")
+            .limit(params("limit")),
+        { loggerLevel: "system" },
+      );
+
+      if (rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        eventHlcAccumulator.add(row.timestamp);
+        afterSyncId = row.sync_id;
+      }
+
+      if (rows.length < batchSize) {
+        break;
+      }
+    }
+
+    persistEventHlcAccumulator();
+  };
+
   const hasAcceptedEventWithTimestamp = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
     event: PersistedCrdtEvent,
@@ -450,6 +499,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
     }
   });
+
+  recomputeEventHlcAccumulatorIfNeeded();
 
   void processEnqueuedEvents();
 

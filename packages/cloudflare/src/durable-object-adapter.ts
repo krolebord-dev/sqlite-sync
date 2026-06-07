@@ -119,8 +119,8 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     db: crdtStorageDb,
     dbConfig,
     eventHlcAccumulator: createStoredValue<string>({
-      initialValue: storage.kv.get("crdt.consistency.event_hlc_sum.v2") ?? "",
-      saveToStorage: (val) => storage.kv.put("crdt.consistency.event_hlc_sum.v2", val),
+      initialValue: storage.kv.get("crdt.consistency.event_hlc_sum.v3") ?? "",
+      saveToStorage: (val) => storage.kv.put("crdt.consistency.event_hlc_sum.v3", val),
     }),
     onEventApplied: (event) => {
       queueMicrotask(() => {
