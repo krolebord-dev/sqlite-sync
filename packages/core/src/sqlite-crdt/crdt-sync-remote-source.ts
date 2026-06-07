@@ -80,7 +80,6 @@ export type OfflineReason =
   | "REMOTE_PULL_ERROR"
   | "DISCONNECTED";
 
-// TODO: add ERROR_APPLYING_REMOTE_EVENT
 export type DeSyncDetectedReason = "CHECKSUM_MISMATCH" | "ERROR_APPLYING_REMOTE_EVENT";
 
 export const createCrdtSyncRemoteSource = ({
@@ -397,11 +396,16 @@ export const createCrdtSyncRemoteSource = ({
     startPushingEvents();
   });
 
+  const remoteEventApplyFailedSubscription = storage.addEventListener("remote-event-apply-failed", () => {
+    eventTarget.dispatchEvent("de-sync-detected", { reason: "ERROR_APPLYING_REMOTE_EVENT" });
+  });
+
   const getState = (): "pending" | "offline" | "online" => remoteState.type;
 
   const dispose = async () => {
     await goOffline("DISCONNECTED");
     eventsAppliedSubscription.unsubscribe();
+    remoteEventApplyFailedSubscription.unsubscribe();
   };
 
   return {

@@ -119,6 +119,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
   const eventTarget = createTypedEventTarget<{
     "events-applied": EventsAppliedPayload;
+    "remote-event-apply-failed": { syncId: number };
   }>();
 
   const persistEvent = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, event: PersistedCrdtEvent) => {
@@ -482,6 +483,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       }
 
       let appliedSyncId: number | null = null;
+      const failedRemoteSyncIds: number[] = [];
 
       db.executeTransaction((tx) => {
         for (const event of events) {
@@ -489,6 +491,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           notifyEventApplied(event);
           if (event.status === "applied") {
             appliedSyncId = event.sync_id;
+          } else if (event.status === "failed" && event.origin === "remote") {
+            failedRemoteSyncIds.push(event.sync_id);
           }
         }
         persistEventHlcAccumulator();
@@ -496,6 +500,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       if (appliedSyncId !== null) {
         dispatchEventsApplied(appliedSyncId);
+      }
+
+      // A remote event was accepted by the server but could not be applied
+      // locally, which means our local state has diverged from the server.
+      for (const syncId of failedRemoteSyncIds) {
+        eventTarget.dispatchEvent("remote-event-apply-failed", { syncId });
       }
     }
   });
