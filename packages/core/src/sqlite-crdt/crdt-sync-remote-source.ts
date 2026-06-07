@@ -50,6 +50,16 @@ type RemoteSource = {
   disconnect?: () => void | Promise<void>;
 };
 
+export class SchemaVersionMismatchError extends Error {
+  constructor(
+    public remoteSchemaVersion: number,
+    public localSchemaVersion: number,
+  ) {
+    super(`Schema version mismatch: remote ${remoteSchemaVersion} != local ${localSchemaVersion}`);
+    this.name = "SchemaVersionMismatchError";
+  }
+}
+
 type RemoteSourceState =
   | {
       type: "pending";
@@ -264,9 +274,7 @@ export const createCrdtSyncRemoteSource = ({
                 remoteSchemaVersion: x.schema_version,
                 localSchemaVersion: migrator.currentSchemaVersion,
               });
-              throw new Error(
-                `Event schema version ${x.schema_version} is greater than current schema version ${migrator.currentSchemaVersion}`,
-              );
+              throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
             }
             return x;
           }),
