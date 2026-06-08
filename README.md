@@ -8,6 +8,7 @@ offline persistence, and CRDT-based replication.
 - Local-first SQLite data layer for your web apps.
 - Runs reactive queries with full SQLite support, typed through Kysely and React hooks.
 - Automatically resolves write conflicts using Last-Write-Wins per-field replication.
+- Supports real schema migrations, including renames and table/column drops.
 - Persists local state across reloads and coordinates updates across browser tabs.
 - Syncs with a remote server when available, while continuing to work locally when offline.
 - Includes Cloudflare sync helpers, browser devtools, and recovery tools for production apps.
