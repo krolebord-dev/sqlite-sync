@@ -77,7 +77,7 @@ export function introspectDb<BaseDatabase>(_db: SQLiteDbWrapper<BaseDatabase>): 
 
   return Object.fromEntries(
     tables.map(({ name, sql, type }) => {
-      // // Try to find the name of the column that has `autoincrement` 🤦
+      // Try to find the name of the column that has `autoincrement`
       let autoIncrementCol = sql
         ?.split(/[(),]/)
         ?.find((it) => it.toLowerCase().includes("autoincrement"))

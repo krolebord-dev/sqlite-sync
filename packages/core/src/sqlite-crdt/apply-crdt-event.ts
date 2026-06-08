@@ -207,7 +207,6 @@ export function createCrdtApplyFunction({
     }
 
     if (meta) {
-      // Item already exists
       applyItemUpdated({ event, meta });
       return;
     }

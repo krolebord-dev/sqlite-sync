@@ -404,7 +404,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         return event;
       }
 
-      // Migrate event to latest schema version
       const migratedEvent = storage.migrator.migrateEvent(event, storage.migrator.latestSchemaVersion);
 
       if (migratedEvent === null) {
@@ -418,7 +417,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         return event;
       }
 
-      // Update event with migrated values
       event.schema_version = migratedEvent.schema_version;
       event.type = migratedEvent.type;
       event.dataset = migratedEvent.dataset;
