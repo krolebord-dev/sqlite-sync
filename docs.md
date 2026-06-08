@@ -35,12 +35,6 @@ pnpm add @sqlite-sync/devtools
 
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
-
-# Durable Object jobs runtime
-pnpm add do-jobs
-
-# Optional: any Standard Schema v1 validator for jobs API (zod, valibot, arktype, etc.)
-pnpm add zod
 ```
 
 Peer dependencies:
@@ -77,7 +71,7 @@ Remote Server (Cloudflare Durable Object SQLite)
 Every mutation generates a CRDT event containing:
 - A **Hybrid Logical Clock (HLC)** timestamp for causal ordering
 - The **dataset** (table name), **item_id**, and **payload** (changed columns)
-- An event **type**: `item-created`, `item-updated`, or `item-deleted`
+- An event **type**: `item-created` or `item-updated`. Deletes are soft-deletes — they emit an `item-updated` event that sets `tombstone = 1`, not a distinct delete event.
 
 Events are conflict-free — concurrent edits to different columns merge automatically, and concurrent edits to the same column resolve via last-write-wins using HLC comparison.
 
@@ -1047,60 +1041,6 @@ function createMigrator(
   updateLogTableName?: string
 ): SyncDbMigrator
 ```
-
-#### `do-jobs`
-
-SQLite-backed background jobs for Durable Objects with alarm-based execution.
-
-```ts
-import { createDefineJob, setupJobs, type JobRuntime } from "do-jobs";
-import { z } from "zod";
-
-type JobContext = { ctx: DurableObjectState; env: Env };
-const defineJob = createDefineJob<JobContext>();
-
-const exampleJob = defineJob({ type: "example" })
-  .input(z.object({ world: z.string() }))
-  .handler(async ({ input, context }) => {
-    console.log("hello", input.world, context.env);
-  });
-
-let jobs: JobRuntime;
-
-async function onStart(ctx: DurableObjectState, env: Env) {
-  jobs = await setupJobs({
-    jobs: [exampleJob],
-    ctx,
-    context: { ctx, env },
-  });
-}
-
-function onAlarm() {
-  return jobs.onAlarm();
-}
-
-// Schedule a one-off job
-await jobs.schedule(exampleJob, { input: { world: "earth" }, at: Date.now() + 1000 });
-```
-
-**Job APIs**
-
-| Method | Description |
-|--------|-------------|
-| `createDefineJob<TContext>()` | Create a typed `defineJob` factory bound to a context shape. |
-| `defineJob({ type }).input(schema).handler(fn)` | Define a typed job handler. Handler receives `{ input, context, job }`. |
-| `setupJobs({ jobs, ctx, context, maxJobsPerAlarm? })` | Initialize schema/alarms and create runtime. `context` is passed to handlers. |
-| `jobs.schedule(job, { input, at })` | Enqueue one-off run at a timestamp. Always inserts a new row. |
-| `jobs.scheduleInterval(job, { input, dedupeKey, everyMs, startAt? })` | Upsert recurring schedule by `(type, dedupeKey)`. |
-| `jobs.cancelInterval(job, { dedupeKey })` | Cancel active recurring schedule for that key. |
-
-**Execution semantics**
-
-- Due jobs are processed serially in FIFO order by `scheduledAt`.
-- No automatic retries on failure.
-- Interval schedules use fixed-delay (`nextRunAt = now + everyMs`).
-- Missed interval ticks are coalesced into one run after wake-up.
-- Job history is retained in SQLite tables.
 
 ### WebSocket Protocol
 

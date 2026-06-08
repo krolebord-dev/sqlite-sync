@@ -11,6 +11,7 @@ Offline-first SQLite synchronization with CRDT event replication for local-first
 - Typed query support via Kysely.
 - Remote sync is optional; local persistence works without a data server.
 - Cross-tab coherence via worker state and broadcast channels.
+- De-sync and schema-mismatch detection with recovery via reload/reset.
 
 ## Packages
 
@@ -205,47 +206,6 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
-### Durable Object Background Jobs
-
-`do-jobs` provides SQLite-backed job scheduling inside a Durable Object with alarm-driven execution.
-
-```ts
-import { createDefineJob, setupJobs, type JobRuntime } from "do-jobs";
-import { z } from "zod";
-
-type JobContext = { ctx: DurableObjectState; env: Env };
-const defineJob = createDefineJob<JobContext>();
-
-const digestJob = defineJob({ type: "digest" })
-  .input(z.object({ userId: z.string() }))
-  .handler(async ({ input, context }) => {
-    console.log("generate digest for", input.userId, context.env);
-  });
-
-export class DigestServer extends Server<Env> {
-  private jobs!: JobRuntime;
-
-  async onStart() {
-    this.jobs = await setupJobs({
-      jobs: [digestJob],
-      ctx: this.ctx,
-      context: { ctx: this.ctx, env: this.env },
-    });
-  }
-
-  onAlarm() {
-    return this.jobs.onAlarm();
-  }
-
-  onMessage() {
-    void this.jobs.schedule(digestJob, {
-      input: { userId: "u-1" },
-      at: Date.now() + 1_000,
-    });
-  }
-}
-```
-
 ## How Sync Works
 
 Runtime model:
@@ -254,6 +214,25 @@ Runtime model:
 2. A dedicated worker persists events/state using OPFS SQLite.
 3. Worker can sync CRDT event batches with a remote server (optional).
 
+### Recovery and Storage Versioning
+
+The worker detects when the persisted local DB has drifted from the remote event log
+(de-sync) or no longer matches the deployed schema. To recover, ask the elected worker to
+reload all tabs for a `dbId` — optionally wiping the persisted worker DB so the next startup
+re-syncs from scratch:
+
+```ts
+// Reload all tabs, keep the persisted worker DB.
+await syncedDb.requestReload({ clean: false });
+
+// Destructive recovery: reload all tabs and wipe the persisted DB on next startup.
+await syncedDb.requestReload({ clean: true });
+```
+
+To force a wipe across an incompatible deploy, bump `storageVersion` in `startDbWorker`; the
+elected worker wipes the local DB on startup when the stored version no longer matches. See
+[the docs](./docs.md#reload-and-recovery) for details.
+
 ## Feature Highlights
 
 - `createSyncedDb()` for client orchestration (worker attach, snapshot hydration, sync state).
@@ -261,6 +240,8 @@ Runtime model:
 - React hooks over the same engine: `useDbQuery`, `useDbState`. Identical `useDbQuery` calls within the same provider share one live query when SQL and parameter values match.
 - Optional floating devtools UI via `@sqlite-sync/devtools`.
 - Online/offline toggles with explicit sync state (`online | offline | pending`).
+- De-sync and schema-mismatch detection, with reload/reset recovery via `requestReload({ clean })`.
+- Forced local-DB wipes across incompatible deploys via the `storageVersion` worker option.
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.
 - Extensible CRDT schema and migrations (`createSyncDbSchema`, `createMigrations`).
 
