@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/devtools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Embeddable devtools for @sqlite-sync",
   "type": "module",
   "license": "MIT",
