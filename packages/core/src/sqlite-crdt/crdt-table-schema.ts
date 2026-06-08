@@ -1,6 +1,6 @@
 import type { SchemaModule } from "kysely";
 
-export type CrdtEventType = "item-created" | "item-updated";
+export type CrdtEventType = "item-created" | "item-updated" | "item-deleted";
 
 export type CrdtEventStatus = "pending" | "applied" | "failed" | "deduped";
 

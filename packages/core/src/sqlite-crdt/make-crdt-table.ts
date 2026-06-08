@@ -202,10 +202,10 @@ export function registerCrdtFunctions({
     callback: (dataset: string, itemId: string) => {
       storage.applyOwnEvent(
         {
-          type: "item-updated",
+          type: "item-deleted",
           dataset,
           item_id: itemId,
-          payload: JSON.stringify({ tombstone: 1 }),
+          payload: "{}",
         },
         {
           wrapInTransaction: false,

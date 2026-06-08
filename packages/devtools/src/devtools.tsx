@@ -565,7 +565,7 @@ type PersistedCrdtEvent = {
   sync_id: number;
   schema_version: number;
   status: "pending" | "applied" | "failed" | "deduped";
-  type: "item-created" | "item-updated";
+  type: "item-created" | "item-updated" | "item-deleted";
   timestamp: string;
   origin: "remote" | "own" | "local";
   source_node_id: string;
@@ -773,8 +773,13 @@ function EventLogTab({
 }
 
 function EventTypeBadge({ type }: { type: string }) {
-  const isCreate = type === "item-created";
-  return <span style={isCreate ? eventTypeCreateStyles : eventTypeUpdateStyles}>{isCreate ? "create" : "update"}</span>;
+  const { style, label } =
+    type === "item-created"
+      ? { style: eventTypeCreateStyles, label: "create" }
+      : type === "item-deleted"
+        ? { style: eventTypeDeleteStyles, label: "delete" }
+        : { style: eventTypeUpdateStyles, label: "update" };
+  return <span style={style}>{label}</span>;
 }
 
 function EventOriginBadge({ origin }: { origin: string }) {
@@ -1827,7 +1832,6 @@ const runningDotStyles: CSSProperties = {
   height: "6px",
   borderRadius: "50%",
   backgroundColor: "currentColor",
-  animation: "pulse 1s infinite",
 };
 
 // ─── Schema tab styles ────────────────────────────────────────────────────────
@@ -2230,6 +2234,12 @@ const eventTypeUpdateStyles: CSSProperties = {
   ...eventTypeBadgeBase,
   color: "#a78bfa",
   backgroundColor: "rgba(167,139,250,0.12)",
+};
+
+const eventTypeDeleteStyles: CSSProperties = {
+  ...eventTypeBadgeBase,
+  color: C.error,
+  backgroundColor: "rgba(248,113,113,0.12)",
 };
 
 // Origin badges

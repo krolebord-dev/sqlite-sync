@@ -43,10 +43,10 @@ export function createCrdtStorageMutator<Database>({ storage }: { storage: CrdtS
         };
       case "item-deleted":
         return {
-          type: "item-updated",
+          type: "item-deleted",
           dataset: event.dataset,
           item_id: event.item_id,
-          payload: JSON.stringify({ tombstone: 1 }),
+          payload: "{}",
         };
     }
   };

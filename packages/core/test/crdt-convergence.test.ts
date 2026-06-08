@@ -175,6 +175,13 @@ async function createReplica(
       });
       await waitForProcessing();
     },
+    async deleteTodo(todoId: string) {
+      db.execute({
+        sql: `DELETE FROM "${CRDT_TABLE}" WHERE "id" = ?`,
+        parameters: [todoId],
+      });
+      await waitForProcessing();
+    },
     async importEvents(events: RemoteEvent[]) {
       storage.enqueueRemoteEvents(events);
       await waitForProcessing();
@@ -506,6 +513,46 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaB.getTodo("todo-1")).toEqual({
       id: "todo-1",
       title: "Edited before delete",
+      completed: false,
+      tombstone: 1,
+    });
+  });
+
+  it("persists deletes as item-deleted events and converges across replicas", async () => {
+    const replicaA = await createReplica("node-a", 1_000);
+    const replicaB = await createReplica("node-b", 1_000);
+
+    await replicaA.createTodo({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: false,
+    });
+
+    const syncedFromA = await syncOneWay(replicaA, replicaB, 0);
+
+    replicaA.setTime(2_000);
+    await replicaA.deleteTodo("todo-1");
+
+    const deleteEvent = replicaA.getPersistedEvents().find((event) => event.type === "item-deleted");
+    expect(deleteEvent).toBeDefined();
+    expect(deleteEvent?.item_id).toBe("todo-1");
+    // The delete carries no field data — the tombstone is materialized on apply.
+    expect(deleteEvent?.payload).toBe("{}");
+
+    // Local view hides the deleted row, base row is tombstoned.
+    expect(replicaA.getTodo("todo-1")).toEqual({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: 1,
+    });
+
+    await syncOneWay(replicaA, replicaB, syncedFromA);
+
+    expect(replicaB.getTodo("todo-1")).toEqual({
+      id: "todo-1",
+      title: "Initial title",
       completed: false,
       tombstone: 1,
     });

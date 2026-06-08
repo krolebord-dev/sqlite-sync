@@ -154,7 +154,10 @@ export function createCrdtApplyFunction({
     if (!meta) {
       throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
     }
-    const eventPayload = JSON.parse(event.payload);
+    // A delete carries no field data on the wire — the tombstone is a local
+    // materialization of the soft-delete, stamped here with the event's HLC so
+    // it competes with concurrent field edits under the same last-write-wins rule.
+    const eventPayload = event.type === "item-deleted" ? { tombstone: 1 } : JSON.parse(event.payload);
 
     const updatePayload = {} as Record<string, unknown>;
     let hasUpdates = false;
@@ -202,7 +205,7 @@ export function createCrdtApplyFunction({
 
     // TODO Check primary key / unique constraints
 
-    if (event.type !== "item-created" && event.type !== "item-updated") {
+    if (event.type !== "item-created" && event.type !== "item-updated" && event.type !== "item-deleted") {
       throw new Error(`Unknown event type: ${event.type}`);
     }
 

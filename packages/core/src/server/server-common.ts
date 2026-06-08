@@ -16,7 +16,7 @@ const pushEventsZodSchema = z.object({
     z.object({
       schema_version: z.number(),
       timestamp: z.string(),
-      type: z.enum(["item-created", "item-updated"]),
+      type: z.enum(["item-created", "item-updated", "item-deleted"]),
       dataset: z.string(),
       item_id: z.string(),
       payload: z.string(),
