@@ -1,17 +1,16 @@
 # sqlite-sync
 
-Offline-first SQLite synchronization with CRDT event replication for local-first web apps.
+sqlite-sync is a local-first SQLite sync engine for web apps, with reactive queries,
+offline persistence, and CRDT-based replication.
 
-## Features
+## What sqlite-sync does
 
-- Local-first SQLite reads and writes in the browser.
-- Reactive query subscriptions that re-run on relevant table changes.
-- Durable browser state in a Web Worker using OPFS-backed SQLite.
-- CRDT event replication for convergence across tabs and remote nodes.
-- Typed query support via Kysely.
-- Remote sync is optional; local persistence works without a data server.
-- Cross-tab coherence via worker state and broadcast channels.
-- De-sync and schema-mismatch detection with recovery via reload/reset.
+- Local-first SQLite data layer for your web apps.
+- Runs reactive queries with full SQLite support, typed through Kysely and React hooks.
+- Automatically resolves write conflicts using Last-Write-Wins per-field replication.
+- Persists local state across reloads and coordinates updates across browser tabs.
+- Syncs with a remote server when available, while continuing to work locally when offline.
+- Includes Cloudflare sync helpers, browser devtools, and recovery tools for production apps.
 
 ## Packages
 
@@ -111,29 +110,29 @@ Remote sync is optional. If you only need local persistence, call `startDbWorker
 
 ```tsx
 import { generateId } from "@sqlite-sync/core";
-import { useDb, useDbQuery, useDbState } from "./db";
+import { useDb, useDbQuery } from "./db";
 
 export function TodoList() {
-  const { db, state } = useDb();
-  const workerState = useDbState();
-  const { data: todos } = useDbQuery((kdb) => kdb.selectFrom("todo").selectAll().orderBy("id", "asc"));
+  const { db } = useDb();
+
+  // Reactive query: this component re-renders when writes change the "todo" table.
+  const { data: todos } = useDbQuery(
+    (kdb) => kdb.selectFrom("todo").selectAll().orderBy("id", "asc"));
 
   return (
     <div>
-      <button type="button" onClick={() => state.goOffline()}>
-        {workerState.remoteState}
-      </button>
       <button
         type="button"
-        onClick={() =>
+        onClick={() => {
+          // Flow: write locally first; query refetches immediately and the worker syncs changes in the background.
           db.executeKysely((kdb) =>
             kdb.insertInto("todo").values({
               id: generateId(),
               title: "New Todo",
               completed: false,
             }),
-          )
-        }
+          );
+        }}
       >
         Add
       </button>
@@ -237,7 +236,7 @@ elected worker wipes the local DB on startup when the stored version no longer m
 
 - `createSyncedDb()` for client orchestration (worker attach, snapshot hydration, sync state).
 - Live query primitives via `db.createLiveQuery(...)`.
-- React hooks over the same engine: `useDbQuery`, `useDbState`. Identical `useDbQuery` calls within the same provider share one live query when SQL and parameter values match.
+- React hooks over the same engine: `useDb`, `useDbQuery`. Identical `useDbQuery` calls within the same provider share one live query when SQL and parameter values match.
 - Optional floating devtools UI via `@sqlite-sync/devtools`.
 - Online/offline toggles with explicit sync state (`online | offline | pending`).
 - De-sync and schema-mismatch detection, with reload/reset recovery via `requestReload({ clean })`.
@@ -267,6 +266,10 @@ pnpm format
 - Example app: [`apps/example`](./apps/example)
 - Watchlist app: [`apps/watchlist`](./apps/watchlist)
 - Benchmarks: [`apps/benchmarks`](./apps/benchmarks)
+
+## Credits
+
+This library was inspired by James Long's talk ["CRDTs for Mortals"](https://www.youtube.com/watch?v=DEcwa68f-jY) (2019) and Johannes Schickling's [LiveStore](https://livestore.dev/).
 
 ## License
 
