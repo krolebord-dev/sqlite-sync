@@ -69,7 +69,6 @@
     "@sqlite.org/sqlite-wasm": "catalog:",
     "idb-keyval": "^6.2.5",
     "kysely": "^0.28.10",
-    "retry-as-promised": "^7.1.1",
     "xxhash-wasm": "^1.1.0",
     "zod": "^4.3.6"
   },

@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@sqlite.org/sqlite-wasm':
+      specifier: ^3.51.2-build5
+      version: 3.51.2-build5
+
 importers:
 
   .:
@@ -580,9 +586,6 @@ importers:
       kysely:
         specifier: ^0.28.10
         version: 0.28.10
-      retry-as-promised:
-        specifier: ^7.1.1
-        version: 7.1.1
       xxhash-wasm:
         specifier: ^1.1.0
         version: 1.1.0
@@ -6916,9 +6919,6 @@ packages:
   restore-cursor@5.1.0:
     resolution: {integrity: sha512-oMA2dcrw6u0YfxJQXm342bFKX/E4sG9rbTzO9ptUcR/e8A33cHuvStiYOwH7fszkZlZ1z/ta9AAoPk2F4qIOHA==}
     engines: {node: '>=18'}
-
-  retry-as-promised@7.1.1:
-    resolution: {integrity: sha512-hMD7odLOt3LkTjcif8aRZqi/hybjpLNgSk5oF5FCowfCjok6LukpN2bDX7R5wDmbgBQFn7YoBxSagmtXHaJYJw==}
 
   rolldown@1.0.3:
     resolution: {integrity: sha512-i00lAJ2ks1BYr7rjNjKC7BcqAS7nVfiT3QX1SI5aY+AFHblCmaUf9OE9dbdzDvW6dJxbi2ZCZiy9v3CcwOiX3g==}
@@ -13742,8 +13742,6 @@ snapshots:
     dependencies:
       onetime: 7.0.0
       signal-exit: 4.1.0
-
-  retry-as-promised@7.1.1: {}
 
   rolldown@1.0.3:
     dependencies:

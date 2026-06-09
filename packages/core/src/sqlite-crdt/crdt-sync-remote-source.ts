@@ -1,9 +1,9 @@
-import retryAsPromised from "retry-as-promised";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
 import type { EventsPullResponse } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage } from "./crdt-storage";
+import { REMOTE_RETRY_OPTIONS, retryRemoteOperation } from "./retry-remote-operation";
 import type { StoredValue } from "./stored-value";
 
 type CrdtSyncRemoteSourceConfig = {
@@ -248,19 +248,13 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
-      const response = await retryAsPromised(
+      const response = await retryRemoteOperation(
         () =>
           source.pullEvents({
             ...opts,
             afterSyncId,
           }),
-        {
-          max: 3,
-          backoffBase: 100,
-          backoffExponent: 1.5,
-          backoffJitter: 150,
-          timeout: 10000,
-        },
+        REMOTE_RETRY_OPTIONS,
       );
       hasMore = response.hasMore;
       afterSyncId = response.nextSyncId;
@@ -343,7 +337,7 @@ export const createCrdtSyncRemoteSource = ({
 
       let response: EventsPushResponse;
       try {
-        response = await retryAsPromised(
+        response = await retryRemoteOperation(
           () =>
             source.pushEvents({
               nodeId,
@@ -356,13 +350,7 @@ export const createCrdtSyncRemoteSource = ({
                 payload: event.payload,
               })),
             }),
-          {
-            max: 3,
-            backoffBase: 100,
-            backoffExponent: 1.5,
-            backoffJitter: 150,
-            timeout: 10000,
-          },
+          REMOTE_RETRY_OPTIONS,
         );
       } catch (error) {
         console.error("Error pushing events. Going offline.", error);
