@@ -19,7 +19,6 @@ sqlite-sync/packages/react/ # @sqlite-sync/react - React hooks and context bindi
 sqlite-sync/packages/cloudflare/ # @sqlite-sync/cloudflare - Durable Objects adapter, D1 executor
 sqlite-sync/apps/example/ # Demo todo app (Vite + React + Cloudflare Workers)
 sqlite-sync/apps/watchlist/ # App for managing "watch later" lists (TanStack Router + oRPC + Cloudflare D1)
-sqlite-sync/apps/productivity/ # Production app (TanStack Router + oRPC + Cloudflare D1)
 sqlite-sync/apps/benchmarks/ # Performance benchmarks (tinybench)
 sqlite-sync/docs/ # Architecture docs and diagrams
 sqlite-sync/biome.json # Formatter + linter config
