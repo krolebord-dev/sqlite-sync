@@ -7,7 +7,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { formatForDisplay } from "@tanstack/hotkeys";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { Link, useMatches, useNavigate, useRouter } from "@tanstack/react-router";
+import type { LucideIcon } from "lucide-react";
 import {
   ChevronDown,
   ChevronsUpDown,
@@ -15,6 +18,8 @@ import {
   Loader2,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   PlusIcon,
   Search,
   StickyNote,
@@ -25,6 +30,8 @@ import {
 import { useEffect, useState } from "react";
 import { useAuth, useSignOut } from "@/lib/auth-client";
 import { useCommandStore } from "@/lib/command-store";
+import { TOGGLE_SIDEBAR_HOTKEY } from "@/lib/hotkeys";
+import { useSidebarStore } from "@/lib/sidebar-store";
 import { cn } from "@/lib/utils";
 import { useDb, useDbQuery, useDbState } from "@/user-db/user-db";
 import { Avatar, AvatarFallback } from "./ui/avatar";
@@ -79,7 +86,72 @@ function RemoteStateIndicator() {
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarTooltip({
+  label,
+  collapsed,
+  children,
+}: {
+  label: string;
+  collapsed: boolean;
+  children: React.ReactNode;
+}) {
+  if (!collapsed) return children;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={6}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function SidebarNavLink({
+  to,
+  label,
+  icon: Icon,
+  isActive,
+  collapsed,
+  onNavigate,
+}: {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  isActive: boolean;
+  collapsed: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <SidebarTooltip label={label} collapsed={collapsed}>
+      <Link
+        to={to}
+        onClick={onNavigate}
+        viewTransition
+        className={cn(
+          "flex items-center rounded-md font-medium text-sm transition-colors",
+          collapsed ? "justify-center px-2 py-2" : "gap-2 px-3 py-2",
+          isActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
+        )}
+      >
+        <Icon className="size-4 shrink-0" />
+        {!collapsed && label}
+      </Link>
+    </SidebarTooltip>
+  );
+}
+
+function SidebarContent({
+  collapsed = false,
+  onToggleCollapse,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  onNavigate?: () => void;
+}) {
   const auth = useAuth();
   const logout = useSignOut();
   const matches = useMatches();
@@ -88,69 +160,121 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <>
-      <div className="flex h-14 items-center justify-between px-4">
-        <Link to="/" viewTransition className="font-semibold text-base tracking-tight">
-          Productivity
-        </Link>
+      <div className={cn("flex items-center", collapsed ? "flex-col gap-1 px-2 py-3" : "h-14 justify-between px-4")}>
+        <SidebarTooltip label="Productivity" collapsed={collapsed}>
+          <Link
+            to="/"
+            viewTransition
+            className={cn(
+              "font-semibold tracking-tight",
+              collapsed ? "flex size-8 items-center justify-center rounded-md bg-sidebar-accent text-sm" : "text-base",
+            )}
+          >
+            {collapsed ? "P" : "Productivity"}
+          </Link>
+        </SidebarTooltip>
         <RemoteStateIndicator />
       </div>
 
       <Separator />
 
-      <div className="hidden p-2 md:block">
-        <button
-          type="button"
-          onClick={openCommand}
-          className="flex w-full items-center gap-2 rounded-md border bg-sidebar-accent/50 px-3 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        >
-          <Search className="size-4" />
-          <span className="flex-1 text-left">Search...</span>
-          <kbd className="pointer-events-none rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">
-            ⌘K
-          </kbd>
-        </button>
+      <div className={cn("hidden md:block", collapsed ? "flex justify-center p-2" : "p-2")}>
+        <SidebarTooltip label="Search (⌘K)" collapsed={collapsed}>
+          <button
+            type="button"
+            onClick={openCommand}
+            className={cn(
+              "flex items-center rounded-md border bg-sidebar-accent/50 text-muted-foreground text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              collapsed ? "size-9 justify-center p-0" : "w-full gap-2 px-3 py-1.5",
+            )}
+          >
+            <Search className="size-4 shrink-0" />
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left">Search...</span>
+                <kbd className="pointer-events-none rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">
+                  ⌘K
+                </kbd>
+              </>
+            )}
+          </button>
+        </SidebarTooltip>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 p-2">
         {navItems.map((item) => (
-          <Link
+          <SidebarNavLink
             key={item.to}
             to={item.to}
-            onClick={onNavigate}
-            viewTransition
-            className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 font-medium text-sm transition-colors",
-              currentPath === item.to
-                ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
-            )}
-          >
-            <item.icon className="size-4" />
-            {item.label}
-          </Link>
+            label={item.label}
+            icon={item.icon}
+            isActive={currentPath === item.to}
+            collapsed={collapsed}
+            onNavigate={onNavigate}
+          />
         ))}
-        <AccountsNavItem currentPath={currentPath} onNavigate={onNavigate} />
+        <AccountsNavItem currentPath={currentPath} collapsed={collapsed} onNavigate={onNavigate} />
       </nav>
 
       <Separator />
+
+      {onToggleCollapse && (
+        <div className={cn("p-2", collapsed && "flex justify-center")}>
+          <SidebarTooltip
+            label={
+              collapsed
+                ? `Expand sidebar (${formatForDisplay(TOGGLE_SIDEBAR_HOTKEY)})`
+                : `Collapse sidebar (${formatForDisplay(TOGGLE_SIDEBAR_HOTKEY)})`
+            }
+            collapsed={collapsed}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size={collapsed ? "icon" : "sm"}
+              className={cn(!collapsed && "w-full justify-start gap-2")}
+              onClick={onToggleCollapse}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-keyshortcuts={TOGGLE_SIDEBAR_HOTKEY}
+            >
+              {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+              {!collapsed && (
+                <>
+                  <span className="flex-1 text-left">Collapse</span>
+                  <kbd className="pointer-events-none rounded border bg-background px-1.5 font-mono text-[10px] text-muted-foreground">
+                    {formatForDisplay(TOGGLE_SIDEBAR_HOTKEY)}
+                  </kbd>
+                </>
+              )}
+            </Button>
+          </SidebarTooltip>
+        </div>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-md p-3 text-left transition-colors hover:bg-sidebar-accent"
+            className={cn(
+              "flex items-center rounded-md transition-colors hover:bg-sidebar-accent",
+              collapsed ? "justify-center p-2" : "w-full gap-2 p-3 text-left",
+            )}
           >
-            <Avatar className="size-8">
+            <Avatar className="size-8 shrink-0">
               <AvatarFallback className="text-xs">{auth.userName.slice(0, 2)}</AvatarFallback>
             </Avatar>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium text-sm">{auth.userName}</span>
-              <span className="truncate text-muted-foreground text-xs">{auth.userEmail}</span>
-            </div>
-            <ChevronsUpDown className="size-4 shrink-0 text-sidebar-foreground/50" />
+            {!collapsed && (
+              <>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-medium text-sm">{auth.userName}</span>
+                  <span className="truncate text-muted-foreground text-xs">{auth.userEmail}</span>
+                </div>
+                <ChevronsUpDown className="size-4 shrink-0 text-sidebar-foreground/50" />
+              </>
+            )}
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+        <DropdownMenuContent side={collapsed ? "right" : "top"} align="start" className="w-56">
           <DropdownMenuLabel className="font-normal">
             <div className="flex items-center gap-2">
               <Avatar className="size-8">
@@ -239,7 +363,15 @@ function SortableAccountRow({
   );
 }
 
-function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | undefined; onNavigate?: () => void }) {
+function AccountsNavItem({
+  currentPath,
+  collapsed,
+  onNavigate,
+}: {
+  currentPath: string | undefined;
+  collapsed: boolean;
+  onNavigate?: () => void;
+}) {
   const db = useDb();
   const { data: accounts } = useDbQuery((db) =>
     db
@@ -282,6 +414,19 @@ function AccountsNavItem({ currentPath, onNavigate }: { currentPath: string | un
           .where("id", "=", over.id as string),
       );
     });
+  }
+
+  if (collapsed) {
+    return (
+      <SidebarNavLink
+        to="/transactions"
+        label="Accounts"
+        icon={Wallet}
+        isActive={isActive}
+        collapsed={collapsed}
+        onNavigate={onNavigate}
+      />
+    );
   }
 
   return (
@@ -378,11 +523,25 @@ function MobileSidebar() {
 }
 
 export function AppSidebar() {
+  const collapsed = useSidebarStore((s) => s.collapsed);
+  const toggle = useSidebarStore((s) => s.toggle);
+
+  useHotkey(TOGGLE_SIDEBAR_HOTKEY, (e) => {
+    if (!window.matchMedia("(min-width: 768px)").matches) return;
+    e.preventDefault();
+    toggle();
+  });
+
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden h-full w-56 shrink-0 flex-col border-sidebar-border border-r bg-sidebar text-sidebar-foreground md:flex">
-        <SidebarContent />
+      <aside
+        className={cn(
+          "hidden h-full shrink-0 flex-col border-sidebar-border border-r bg-sidebar text-sidebar-foreground transition-[width] duration-200 md:flex",
+          collapsed ? "w-14" : "w-56",
+        )}
+      >
+        <SidebarContent collapsed={collapsed} onToggleCollapse={toggle} />
       </aside>
 
       {/* Mobile sheet trigger + sheet */}
