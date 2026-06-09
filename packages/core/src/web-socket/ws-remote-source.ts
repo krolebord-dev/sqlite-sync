@@ -4,7 +4,9 @@ import { createDeferredPromise, type DeferredPromise, jsonSafeParse } from "../u
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
 
 type WsRemoteSourceConfig = {
-  createWebSocket: () => Pick<WebSocket, "send" | "onmessage" | "close" | "addEventListener">;
+  createWebSocket: () => Pick<WebSocket, "onmessage" | "close" | "addEventListener"> & {
+    send: (data: string) => void;
+  };
 };
 
 export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig): CreateRemoteSourceFactory => {

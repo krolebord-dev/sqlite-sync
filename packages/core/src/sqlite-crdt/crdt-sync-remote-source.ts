@@ -1,6 +1,6 @@
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
-import type { EventsPullResponse } from "../worker-db/worker-common";
+import type { EventsPullResponse, WorkerState } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage } from "./crdt-storage";
 import { REMOTE_RETRY_OPTIONS, retryRemoteOperation } from "./retry-remote-operation";
@@ -63,14 +63,20 @@ export class SchemaVersionMismatchError extends Error {
 type RemoteSourceState =
   | {
       type: "pending";
+      deSynced: boolean;
+      schemaVersionMismatched: boolean;
     }
   | {
       type: "offline";
       reason: OfflineReason;
+      deSynced: boolean;
+      schemaVersionMismatched: boolean;
     }
   | {
       type: "online";
       source: RemoteSource;
+      deSynced: boolean;
+      schemaVersionMismatched: boolean;
     };
 
 export type OfflineReason =
@@ -102,11 +108,16 @@ export const createCrdtSyncRemoteSource = ({
     };
   }>();
 
-  let remoteState: RemoteSourceState = { type: "offline", reason: "NOT_INITIALIZED" };
+  let remoteState: RemoteSourceState = {
+    type: "offline",
+    reason: "NOT_INITIALIZED",
+    deSynced: false,
+    schemaVersionMismatched: false,
+  };
 
-  const setRemoteState = (state: RemoteSourceState) => {
-    remoteState = state;
-    eventTarget.dispatchEvent("state-changed", state.type);
+  const patchRemoteState = (state: Partial<RemoteSourceState>) => {
+    remoteState = { ...remoteState, ...state } as RemoteSourceState;
+    eventTarget.dispatchEvent("state-changed", remoteState.type);
   };
 
   const initRemote = ensureSingletonExecution(
@@ -117,11 +128,11 @@ export const createCrdtSyncRemoteSource = ({
 
       if (!remoteFactory) {
         console.warn("Remote source factory not provided. Going offline.");
-        setRemoteState({ type: "offline", reason: "NOT_INITIALIZED" });
+        patchRemoteState({ type: "offline", reason: "NOT_INITIALIZED" });
         return;
       }
 
-      setRemoteState({ type: "pending" });
+      patchRemoteState({ type: "pending" });
 
       const factoryResult = await tryCatchAsync(async () => {
         return await remoteFactory?.({
@@ -132,14 +143,16 @@ export const createCrdtSyncRemoteSource = ({
       });
 
       if (!factoryResult.success) {
-        setRemoteState({ type: "offline", reason: "INITIALIZATION_FAILED" });
+        patchRemoteState({ type: "offline", reason: "INITIALIZATION_FAILED" });
         console.warn("Failed to create remote source", factoryResult.error);
         return;
       }
 
-      setRemoteState({
+      patchRemoteState({
         type: "online",
         source: factoryResult.data,
+        deSynced: false,
+        schemaVersionMismatched: false,
       });
     },
     { queueReExecution: false },
@@ -164,7 +177,7 @@ export const createCrdtSyncRemoteSource = ({
       }
       const source = remoteState.source;
 
-      setRemoteState({ type: "pending" });
+      patchRemoteState({ type: "pending" });
 
       const disconnectResult = await tryCatchAsync(async () => {
         return await source.disconnect?.();
@@ -174,7 +187,7 @@ export const createCrdtSyncRemoteSource = ({
         console.warn("Error while disconnecting from remote source", disconnectResult.error);
       }
 
-      setRemoteState({ type: "offline", reason });
+      patchRemoteState({ type: "offline", reason });
     },
     { queueReExecution: false },
   );
@@ -267,6 +280,9 @@ export const createCrdtSyncRemoteSource = ({
                 remoteSchemaVersion: x.schema_version,
                 localSchemaVersion: migrator.currentSchemaVersion,
               });
+              if (remoteState.type === "online" && !remoteState.schemaVersionMismatched) {
+                patchRemoteState({ schemaVersionMismatched: true });
+              }
               throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
             }
             return x;
@@ -310,11 +326,17 @@ export const createCrdtSyncRemoteSource = ({
       return;
     }
 
-    if (localEventHlcSum !== remoteEventHlcSum) {
-      eventTarget.dispatchEvent("de-sync-detected", { reason: "CHECKSUM_MISMATCH" });
-      console.warn(
-        `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
-      );
+    if (localEventHlcSum === remoteEventHlcSum) {
+      // No de-sync detected.
+      return;
+    }
+
+    eventTarget.dispatchEvent("de-sync-detected", { reason: "CHECKSUM_MISMATCH" });
+    console.warn(
+      `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
+    );
+    if (remoteState.type === "online" && !remoteState.deSynced) {
+      patchRemoteState({ deSynced: true });
     }
   };
 
@@ -386,9 +408,16 @@ export const createCrdtSyncRemoteSource = ({
 
   const remoteEventApplyFailedSubscription = storage.addEventListener("remote-event-apply-failed", () => {
     eventTarget.dispatchEvent("de-sync-detected", { reason: "ERROR_APPLYING_REMOTE_EVENT" });
+    if (remoteState.type === "online" && !remoteState.deSynced) {
+      patchRemoteState({ deSynced: true });
+    }
   });
 
-  const getState = (): "pending" | "offline" | "online" => remoteState.type;
+  const getState = (): WorkerState => ({
+    remoteState: remoteState.type,
+    deSynced: remoteState.deSynced,
+    schemaVersionMismatched: remoteState.schemaVersionMismatched,
+  });
 
   const dispose = async () => {
     await goOffline("DISCONNECTED");

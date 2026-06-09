@@ -160,9 +160,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const postState = () => {
     broadcastNotification({
       notificationType: "state-changed",
-      state: {
-        remoteState: remoteSource.getState(),
-      },
+      state: remoteSource.getState(),
     });
   };
   const stateChangedSubscription = remoteSource.addEventListener("state-changed", () => {

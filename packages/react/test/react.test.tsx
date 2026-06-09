@@ -238,7 +238,7 @@ function createFakeDb() {
       createLiveQuery,
     },
     state: {
-      getState: () => ({ remoteState: "offline" }),
+      getState: () => ({ remoteState: "offline", deSynced: false, schemaVersionMismatched: false }),
       subscribe: () => () => {},
       goOnline: vi.fn(),
       goOffline: vi.fn(),

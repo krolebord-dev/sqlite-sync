@@ -65,6 +65,6 @@ describe("createCrdtSyncRemoteSource", () => {
       { afterSyncId: 0, excludeNodeId: "local-node" },
       { afterSyncId: 0, excludeNodeId: "local-node" },
     ]);
-    expect(remoteSource.getState()).toBe("online");
+    expect(remoteSource.getState().remoteState).toBe("online");
   });
 });

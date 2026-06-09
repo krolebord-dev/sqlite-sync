@@ -39,6 +39,8 @@ export type WorkerNotificationMessage =
 
 export type WorkerState = {
   remoteState: "online" | "offline" | "pending";
+  deSynced: boolean;
+  schemaVersionMismatched: boolean;
 };
 
 export type GetSnapshotResponse = {
