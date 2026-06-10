@@ -4,7 +4,7 @@ import { type ReactNode, StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDbContext } from "../src/react";
 
-const { DbProvider, useDbQuery } = createDbContext({} as never);
+const { DbProvider, useDbQuery, useDbEvent } = createDbContext({} as never);
 
 type FakeLiveQuery = {
   query: ExecuteParams;
@@ -200,6 +200,60 @@ describe("useDbQuery", () => {
   });
 });
 
+describe("useDbEvent", () => {
+  it("subscribes to db events and unsubscribes on unmount", () => {
+    const fakeDb = createFakeDb();
+    const onEvent = vi.fn();
+
+    const { unmount } = renderWithDb(fakeDb.db, <DbEventView eventName="de-sync-detected" onEvent={onEvent} />);
+
+    expect(fakeDb.subscribe).toHaveBeenCalledTimes(1);
+    expect(fakeDb.subscribe).toHaveBeenCalledWith("de-sync-detected", expect.any(Function));
+
+    act(() => {
+      fakeDb.emit("de-sync-detected", { notificationType: "de-sync-detected", reason: "CHECKSUM_MISMATCH" });
+    });
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0]?.[0].payload.reason).toBe("CHECKSUM_MISMATCH");
+
+    unmount();
+
+    expect(fakeDb.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the latest handler without resubscribing", () => {
+    const fakeDb = createFakeDb();
+    const firstHandler = vi.fn();
+    const secondHandler = vi.fn();
+
+    const { rerender } = renderWithDb(
+      fakeDb.db,
+      <DbEventView eventName="remote-schema-version-mismatch" onEvent={firstHandler} />,
+    );
+
+    rerender(
+      <DbProvider db={fakeDb.db}>
+        <DbEventView eventName="remote-schema-version-mismatch" onEvent={secondHandler} />
+      </DbProvider>,
+    );
+
+    expect(fakeDb.subscribe).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      fakeDb.emit("remote-schema-version-mismatch", {
+        notificationType: "remote-schema-version-mismatch",
+        remoteSchemaVersion: 2,
+        localSchemaVersion: 1,
+      });
+    });
+
+    expect(firstHandler).not.toHaveBeenCalled();
+    expect(secondHandler).toHaveBeenCalledTimes(1);
+    expect(secondHandler.mock.calls[0]?.[0].payload.remoteSchemaVersion).toBe(2);
+  });
+});
+
 function QueryView({
   label,
   query,
@@ -221,12 +275,38 @@ function QueryView({
   );
 }
 
+function DbEventView({
+  eventName,
+  onEvent,
+}: {
+  eventName: "de-sync-detected" | "remote-schema-version-mismatch";
+  onEvent: (event: { payload: { reason?: string; remoteSchemaVersion?: number } }) => void;
+}) {
+  useDbEvent(eventName, onEvent);
+  return null;
+}
+
 function renderWithDb(db: SyncedDb<unknown>, children: ReactNode) {
   return render(<DbProvider db={db}>{children}</DbProvider>);
 }
 
 function createFakeDb() {
   const liveQueries: FakeLiveQuery[] = [];
+  const eventListeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
+  const unsubscribe = vi.fn((eventName: string, listener: (event: { payload: unknown }) => void) => {
+    eventListeners.get(eventName)?.delete(listener);
+  });
+  const subscribe = vi.fn((eventName: string, listener: (event: { payload: unknown }) => void) => {
+    let listeners = eventListeners.get(eventName);
+    if (!listeners) {
+      listeners = new Set();
+      eventListeners.set(eventName, listeners);
+    }
+    listeners.add(listener);
+    return {
+      unsubscribe: () => unsubscribe(eventName, listener),
+    };
+  });
   const createLiveQuery = vi.fn((query: ExecuteParams) => {
     const liveQuery = createFakeLiveQuery(query);
     liveQueries.push(liveQuery);
@@ -243,13 +323,20 @@ function createFakeDb() {
       goOnline: vi.fn(),
       goOffline: vi.fn(),
     },
+    subscribe,
     dispose: vi.fn(),
     _internal: {
       executeAsync: vi.fn(),
     },
   } as unknown as SyncedDb<unknown>;
 
-  return { db, createLiveQuery, liveQueries };
+  const emit = (eventName: string, payload: unknown) => {
+    for (const listener of eventListeners.get(eventName) ?? []) {
+      listener({ payload });
+    }
+  };
+
+  return { db, createLiveQuery, emit, liveQueries, subscribe, unsubscribe };
 }
 
 function createFakeLiveQuery(query: ExecuteParams): FakeLiveQuery {

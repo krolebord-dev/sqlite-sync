@@ -2,7 +2,7 @@ import { createSyncedDb } from "@sqlite-sync/core";
 import { createDbContext } from "@sqlite-sync/react";
 import { type ListDbProps, syncDbSchema } from "./migrations";
 
-export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext(syncDbSchema);
+export const { useDb, DbProvider, useDbQuery, useDbState, useDbEvent } = createDbContext(syncDbSchema);
 
 export async function initListDb({ listId }: { listId: string }) {
   const worker = new Worker(new URL("./list-worker.ts", import.meta.url), {

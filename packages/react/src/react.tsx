@@ -1,7 +1,14 @@
-import type { ExecuteParams, SyncDbSchema, SyncedDb, WorkerState } from "@sqlite-sync/core";
+import type {
+  ExecuteParams,
+  SyncDbSchema,
+  SyncedDb,
+  TypedEvent,
+  WorkerNotificationMessage,
+  WorkerState,
+} from "@sqlite-sync/core";
 import { dummyKysely } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 type DbQueryParams<Database, TResult> =
   | Compilable<TResult>
@@ -11,6 +18,14 @@ type DbQueryParams<Database, TResult> =
 type UseDbQueryOptions<TResult, TMapResult = TResult> = {
   mapData?: (data: TResult[]) => TMapResult;
 };
+
+type DbEventMap = {
+  [K in WorkerNotificationMessage["notificationType"]]: Extract<WorkerNotificationMessage, { notificationType: K }>;
+};
+
+type DbEventName = keyof DbEventMap & string;
+
+type DbEventHandler<EventName extends DbEventName> = (event: TypedEvent<DbEventMap[EventName]>) => void;
 
 type LiveQuery<TResult> = {
   getRows: () => TResult[];
@@ -95,7 +110,23 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
     return useSyncExternalStore<WorkerState>(db.state.subscribe, db.state.getState);
   };
 
-  return { useDb, DbProvider, useDbQuery, useDbState };
+  const useDbEvent = <EventName extends DbEventName>(eventName: EventName, handler: DbEventHandler<EventName>) => {
+    const db = useDb();
+    const handlerRef = useRef(handler);
+    handlerRef.current = handler;
+
+    useEffect(() => {
+      const subscription = db.subscribe(eventName, (event) => {
+        handlerRef.current(event as TypedEvent<DbEventMap[EventName]>);
+      });
+
+      return () => {
+        subscription.unsubscribe();
+      };
+    }, [db, eventName]);
+  };
+
+  return { useDb, DbProvider, useDbQuery, useDbState, useDbEvent };
 }
 
 function getSharedLiveQuery<Database, TResult>(

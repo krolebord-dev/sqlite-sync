@@ -2,7 +2,7 @@
 
 React bindings for [sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) — a local-first SQLite sync engine for web apps, with reactive queries, offline persistence, and CRDT-based replication.
 
-This package provides idiomatic React bindings over [`@sqlite-sync/core`](https://www.npmjs.com/package/@sqlite-sync/core): a `DbProvider` context plus the `useDb`, `useDbQuery`, and `useDbState` hooks. Identical `useDbQuery` calls within the same provider share a single live query when SQL and parameter values match.
+This package provides idiomatic React bindings over [`@sqlite-sync/core`](https://www.npmjs.com/package/@sqlite-sync/core): a `DbProvider` context plus the `useDb`, `useDbQuery`, `useDbState`, and `useDbEvent` hooks. Identical `useDbQuery` calls within the same provider share a single live query when SQL and parameter values match.
 
 ## Install
 
@@ -18,7 +18,7 @@ import { createSyncedDb } from "@sqlite-sync/core";
 import { createDbContext } from "@sqlite-sync/react";
 import { syncDbSchema } from "./db-schema";
 
-export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext(syncDbSchema);
+export const { useDb, DbProvider, useDbQuery, useDbState, useDbEvent } = createDbContext(syncDbSchema);
 ```
 
 ```tsx

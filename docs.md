@@ -71,7 +71,7 @@ Remote Server (Cloudflare Durable Object SQLite)
 Every mutation generates a CRDT event containing:
 - A **Hybrid Logical Clock (HLC)** timestamp for causal ordering
 - The **dataset** (table name), **item_id**, and **payload** (changed columns)
-- An event **type**: `item-created` or `item-updated`. Deletes are soft-deletes — they emit an `item-updated` event that sets `tombstone = 1`, not a distinct delete event.
+- An event **type**: `item-created`, `item-updated`, or `item-deleted`. Deletes are soft-deletes — `item-deleted` events carry no field data on the wire, and the receiver materializes them by setting `tombstone = 1`.
 
 Events are conflict-free — concurrent edits to different columns merge automatically, and concurrent edits to the same column resolve via last-write-wins using HLC comparison.
 
@@ -109,7 +109,7 @@ export const migrations = createMigrations((b) => ({
 
 **Every CRDT table must have:**
 - An `id` column of type `text` (primary key)
-- A `tombstone` column of type `boolean` (soft-delete flag)
+- A `tombstone` column of type `boolean` or `integer` (soft-delete flag, compared as 0/1)
 
 The base table name uses an underscore prefix by convention (e.g., `_todo`). The CRDT view (without the prefix) is what you query and mutate against.
 
@@ -276,7 +276,7 @@ await startDbWorker({
 import { createDbContext } from "@sqlite-sync/react";
 import { syncDbSchema } from "./migrations";
 
-export const { DbProvider, useDb, useDbQuery, useDbState } = createDbContext(syncDbSchema);
+export const { DbProvider, useDb, useDbQuery, useDbState, useDbEvent } = createDbContext(syncDbSchema);
 ```
 
 All hooks are fully typed based on your schema — queries autocomplete table and column names, mutations validate payload types.
@@ -461,7 +461,7 @@ db.executeKysely((db) =>
 );
 ```
 
-Deletes are soft-deletes — the trigger sets `tombstone = 1` via a CRDT event. The CRDT view filters out tombstoned rows automatically.
+Deletes are soft-deletes — the trigger emits an `item-deleted` CRDT event, and applying that event sets `tombstone = 1`. The CRDT view filters out tombstoned rows automatically.
 
 ### Transactions
 
@@ -556,17 +556,68 @@ Use `useDbState` to reactively read the current sync connection state:
 import { useDbState } from "./db";
 
 function SyncStatus() {
-  const { remoteState } = useDbState();
+  const { remoteState, deSynced, schemaVersionMismatched } = useDbState();
 
   return (
     <span>
       {remoteState === "online" && "Connected"}
       {remoteState === "offline" && "Offline"}
       {remoteState === "pending" && "Connecting..."}
+      {schemaVersionMismatched && "New version available"}
+      {deSynced && "Local data out of sync"}
     </span>
   );
 }
 ```
+
+`useDbState()` returns:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `remoteState` | `"online" \| "offline" \| "pending"` | Current remote connection state. |
+| `deSynced` | `boolean` | `true` after the worker detects that local applied events and remote applied events diverged. |
+| `schemaVersionMismatched` | `boolean` | `true` after the worker receives an event from a newer schema version than the local code can apply. |
+
+### De-sync and Schema Mismatch
+
+sqlite-sync detects two recovery conditions while syncing:
+
+- **De-sync detected** — the local worker is caught up to the remote sync ID and no local events are waiting to push, but the local and remote HLC checksums differ. This means the applied event sets have diverged. It can also be raised if applying a remote event fails.
+- **Schema version mismatch** — the remote sends an event with a `schema_version` greater than the local migrator's current schema version. This usually means another client has already written data with newer app code.
+
+You can react to these conditions through `useDbState()` for UI state, or subscribe to the underlying worker notifications with `useDbEvent()`:
+
+```tsx
+function SyncStatusMonitor() {
+  const db = useDb();
+
+  useDbEvent("remote-schema-version-mismatch", () => {
+    showPersistentPrompt({
+      title: "A new version is available",
+      description: "Reload to update before syncing new changes.",
+      actionLabel: "Reload",
+      action: () => db.requestReload({ clean: false }),
+    });
+  });
+
+  useDbEvent("de-sync-detected", () => {
+    showPersistentPrompt({
+      title: "Your local data is out of sync",
+      description: "Reload and reset local data to re-sync from the server.",
+      actionLabel: "Reload and reset",
+      action: () => db.requestReload({ clean: true }),
+    });
+  });
+
+  return null;
+}
+```
+
+Prompt the user before calling `requestReload`. Both recovery paths can reload every open tab for the same `dbId`; the clean recovery path also wipes the persisted local worker DB on next startup.
+
+Use `requestReload({ clean: false })` for schema mismatch first: it reloads all tabs for the `dbId` without wiping the persisted worker DB, letting the app load newer code and migrations. If the user is already on the latest code and the mismatch persists, deploy compatibility migrations or treat it as a recovery incident.
+
+Use `requestReload({ clean: true })` for de-sync recovery: it records a reset request, reloads all tabs for the `dbId`, wipes the persisted worker DB on the next worker startup, and rehydrates from the remote event log. This is destructive to pending in-memory tab events and any local-only durable events that had not reached the remote.
 
 ### Controlling Sync
 
@@ -700,8 +751,8 @@ export class SyncServer extends Server<Env> {
   static options = { hibernate: true };
   private remoteHandler: RemoteHandler = null!;
 
-  onStart(): void {
-    const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
+  async onStart() {
+    const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
       crdtEventsTable: "crdt_events",
       nodeId: this.ctx.id.toString(),
@@ -808,6 +859,16 @@ syncDb.enqueueEvent({
 });
 ```
 
+To delete from the server, enqueue an `item-deleted` event. The payload is omitted because the tombstone is materialized when the event is applied:
+
+```ts
+syncDb.enqueueEvent({
+  type: "item-deleted",
+  dataset: "_item",
+  item_id: itemId,
+});
+```
+
 Events enqueued on the server are applied immediately and broadcast to all connected clients.
 
 ### Listening to Events
@@ -881,6 +942,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server |
 | `state.goOffline()` | `() => void` | Disconnect from remote server |
+| `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `dispose()` | `() => Promise<void>` | Clean up all resources |
 
@@ -963,6 +1025,10 @@ function createDbContext<Schema extends SyncDbSchema>(schema: Schema): {
     options?: { mapData?: (data: TResult[]) => TMapResult }
   ) => { data: TMapResult; refresh: () => void };
   useDbState: () => WorkerState;
+  useDbEvent: <EventName extends DbEventName>(
+    eventName: EventName,
+    handler: (event: TypedEvent<DbEventMap[EventName]>) => void
+  ) => void;
 }
 ```
 
@@ -996,10 +1062,10 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
   crdtEventsTable: string;
   batchSize?: number;
   broadcastPayload: (payload: string) => void;
-}): {
+}): Promise<{
   syncDb: ServerSyncDb<Schema>;
   remoteHandler: RemoteHandler;
-}
+}>
 ```
 
 **`ServerSyncDb<Schema>`:**
@@ -1063,8 +1129,8 @@ The sync protocol uses JSON messages over WebSocket.
 { type: "events-pull-response", requestId: string, data: { events: CrdtEvent[], hasMore: boolean, nextSyncId: number } }
 
 // Response to push-events
-{ type: "events-push-response", requestId: string, data: { ok: true } }
+{ type: "events-push-response", requestId: string, data: { ok: true, beforeSyncId: number, afterSyncId: number } }
 
 // Server push notification when new events are available
-{ type: "events-applied", newSyncId: number }
+{ type: "events-applied", newSyncId: number, eventHlcSum: string | null }
 ```

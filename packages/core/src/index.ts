@@ -103,5 +103,6 @@ export {
 export { RESET_REQUEST_TTL_MS, type ResetRequest, type ResetStore } from "./worker-db/reset-state";
 export type {
   WorkerConfig,
+  WorkerNotificationMessage,
   WorkerState,
 } from "./worker-db/worker-common";

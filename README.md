@@ -18,7 +18,7 @@ offline persistence, and CRDT-based replication.
 | Package | Purpose | Use when |
 | --- | --- | --- |
 | `@sqlite-sync/core` | Core sync engine, schema builder, worker runtime, CRDT primitives | You need SQLite sync in browser/runtime code |
-| `@sqlite-sync/react` | React context + hooks (`useDb`, `useDbQuery`, `useDbState`) | You want idiomatic React bindings |
+| `@sqlite-sync/react` | React context + hooks (`useDb`, `useDbQuery`, `useDbState`, `useDbEvent`) | You want idiomatic React bindings |
 | `@sqlite-sync/devtools` | Floating in-app devtools dialog for inspecting registered databases | You want a browser-side debug UI while developing |
 | `@sqlite-sync/cloudflare` | Durable Object adapter + execution helpers | You run sync backend on Cloudflare |
 
@@ -70,7 +70,7 @@ import { createSyncedDb } from "@sqlite-sync/core";
 import { createDbContext } from "@sqlite-sync/react";
 import { syncDbSchema } from "./db-schema";
 
-export const { useDb, DbProvider, useDbQuery, useDbState } = createDbContext(syncDbSchema);
+export const { useDb, DbProvider, useDbQuery, useDbState, useDbEvent } = createDbContext(syncDbSchema);
 
 export async function initDb() {
   const worker = new Worker(new URL("./db-worker.ts", import.meta.url), { type: "module" });
