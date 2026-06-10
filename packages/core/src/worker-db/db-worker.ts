@@ -101,7 +101,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   migrator.migrateDbToLatest({
     startTransaction: (callback) => {
-      db.executeTransaction((tx) => callback({ execute: (sql, parameters) => tx.execute({ sql, parameters }) }));
+      db.executeTransaction((tx) =>
+        callback({ execute: (sql, parameters, meta) => tx.execute({ sql, parameters }, meta) }),
+      );
     },
   });
   db.invalidateDbSchema();

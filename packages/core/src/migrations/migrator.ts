@@ -274,7 +274,7 @@ export type MigrationsDb = {
 };
 
 type MigrationsTransaction = {
-  execute: (sql: string, parameters: readonly unknown[]) => void;
+  execute: (sql: string, parameters: readonly unknown[], meta?: { loggerLevel?: "system" }) => void;
 };
 
 export function createMigrator({
@@ -305,12 +305,14 @@ export function createMigrator({
       if (updateLogTableName) {
         if (migration.tableRenames) {
           for (const { oldTable, newTable } of migration.tableRenames) {
-            tx.execute(`UPDATE ${updateLogTableName} SET "dataset" = ? WHERE "dataset" = ?`, [newTable, oldTable]);
+            tx.execute(`UPDATE ${updateLogTableName} SET "dataset" = ? WHERE "dataset" = ?`, [newTable, oldTable], {
+              loggerLevel: "system",
+            });
           }
         }
         if (migration.tableDrops) {
           for (const table of migration.tableDrops) {
-            tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [table]);
+            tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [table], { loggerLevel: "system" });
           }
         }
       }

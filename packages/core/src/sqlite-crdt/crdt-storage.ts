@@ -252,16 +252,20 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       queryParams.excludeOrigin ? "origin" : "no-origin",
     ];
 
-    const events = db.executePrepared(`get-events-batch-${filterKeys.join("-")}`, queryParams, (db, params) =>
-      db
-        .selectFrom(crdtEventsTable)
-        .where("sync_id", ">", params("afterSyncId"))
-        .where("status", "=", params("status"))
-        .$if(!!queryParams.excludeNodeId, (qb) => qb.where("source_node_id", "!=", params("excludeNodeId")))
-        .$if(!!queryParams.excludeOrigin, (qb) => qb.where("origin", "!=", params("excludeOrigin")))
-        .selectAll()
-        .limit(params("limit"))
-        .orderBy("sync_id", "asc"),
+    const events = db.executePrepared(
+      `get-events-batch-${filterKeys.join("-")}`,
+      queryParams,
+      (db, params) =>
+        db
+          .selectFrom(crdtEventsTable)
+          .where("sync_id", ">", params("afterSyncId"))
+          .where("status", "=", params("status"))
+          .$if(!!queryParams.excludeNodeId, (qb) => qb.where("source_node_id", "!=", params("excludeNodeId")))
+          .$if(!!queryParams.excludeOrigin, (qb) => qb.where("origin", "!=", params("excludeOrigin")))
+          .selectAll()
+          .limit(params("limit"))
+          .orderBy("sync_id", "asc"),
+      { loggerLevel: "system" },
     );
 
     const hasMore = events.length > limit;
@@ -470,6 +474,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
             .where("status", "=", params("status"))
             .limit(params("limit"))
             .orderBy("sync_id", "asc"),
+        { loggerLevel: "system" },
       );
       hasMore = events.length > batchSize;
       if (hasMore) {

@@ -85,7 +85,7 @@ export async function createSyncBenchmarkHarness({ snapshot }: { snapshot?: Uint
       startTransaction: (callback) => {
         reactiveDb.db.executeTransaction((tx) => {
           callback({
-            execute: (sql, parameters) => tx.execute({ sql, parameters }),
+            execute: (sql, parameters, meta) => tx.execute({ sql, parameters }, meta),
           });
         });
       },
