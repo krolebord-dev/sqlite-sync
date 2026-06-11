@@ -17,6 +17,7 @@ The project is a **pnpm monorepo** containing published packages and application
 sqlite-sync/packages/core/ # @sqlite-sync/core - Core sync engine, CRDT, HLC, migrations
 sqlite-sync/packages/react/ # @sqlite-sync/react - React hooks and context bindings
 sqlite-sync/packages/cloudflare/ # @sqlite-sync/cloudflare - Durable Objects adapter, D1 executor
+sqlite-sync/packages/ai/ # @sqlite-sync/ai - AI agent tools (schema doc + AI SDK ToolSet) for synced DBs
 sqlite-sync/apps/example/ # Demo todo app (Vite + React + Cloudflare Workers)
 sqlite-sync/apps/watchlist/ # App for managing "watch later" lists (TanStack Router + oRPC + Cloudflare D1)
 sqlite-sync/apps/benchmarks/ # Performance benchmarks (tinybench)

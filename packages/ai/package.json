@@ -1,21 +1,22 @@
 {
-  "name": "@sqlite-sync/cloudflare",
+  "name": "@sqlite-sync/ai",
   "version": "0.4.6",
-  "description": "Cloudflare utilities for @sqlite-sync/core",
+  "description": "AI agent tools for @sqlite-sync databases",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/krolebord-dev/sqlite-sync",
-    "directory": "packages/cloudflare"
+    "directory": "packages/ai"
   },
   "keywords": [
     "sqlite",
     "sync",
-    "cloudflare",
-    "workers",
-    "durable-objects",
-    "kysely"
+    "ai",
+    "agent",
+    "tools",
+    "offline-first",
+    "local-first"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -42,19 +43,19 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "vitest run",
     "typecheck": "tsgo --noEmit",
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "^4.0.0",
     "@sqlite-sync/core": "^0.4.6",
-    "kysely": "^0.28.0 || ^0.29.0"
+    "ai": "^6.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260609.1",
     "@sqlite-sync/core": "workspace:*",
-    "kysely": "catalog:",
+    "ai": "^6.0.201",
     "tsup": "^8.3.5",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^4.1.8"
   }
 }

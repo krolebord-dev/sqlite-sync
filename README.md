@@ -21,6 +21,7 @@ offline persistence, and CRDT-based replication.
 | `@sqlite-sync/react` | React context + hooks (`useDb`, `useDbQuery`, `useDbState`, `useDbEvent`) | You want idiomatic React bindings |
 | `@sqlite-sync/devtools` | Floating in-app devtools dialog for inspecting registered databases | You want a browser-side debug UI while developing |
 | `@sqlite-sync/cloudflare` | Durable Object adapter + execution helpers | You run sync backend on Cloudflare |
+| `@sqlite-sync/ai` | AI agent tools: generated schema doc + AI SDK `ToolSet` | You want to expose a synced database to an AI agent |
 
 ## Quick Start (Browser + Worker + React)
 
@@ -206,6 +207,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 ```
 
+## AI Agent Tools
+
+`@sqlite-sync/ai` gives an AI SDK (v6) agent read-only access to a synced database. `createAiDbAccess` lives next to the CRDT storage (e.g. in a Durable Object) and serves a cached markdown schema doc generated from the schema plus app-provided descriptions; `createDbTools` turns that access — or an RPC stub proxying to it — into an AI SDK `ToolSet`. See [`packages/ai`](./packages/ai) for usage.
+
 ## How Sync Works
 
 Runtime model:
@@ -244,6 +249,7 @@ elected worker wipes the local DB on startup when the stored version no longer m
 - Forced local-DB wipes across incompatible deploys via the `storageVersion` worker option.
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.
 - Extensible CRDT schema and migrations (`createSyncDbSchema`, `createMigrations`).
+- AI agent tools via `@sqlite-sync/ai` (schema doc generation + AI SDK `ToolSet`).
 
 ## Known Constraints and Requirements
 

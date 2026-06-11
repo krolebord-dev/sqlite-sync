@@ -16,6 +16,7 @@
 - [Sync State](#sync-state)
 - [Migrations](#migrations)
 - [Server-Side Mutations](#server-side-mutations)
+- [AI Agent Tools](#ai-agent-tools)
 - [Vite Configuration](#vite-configuration)
 - [API Reference](#api-reference)
 
@@ -35,6 +36,9 @@ pnpm add @sqlite-sync/devtools
 
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
+
+# AI agent tools (server)
+pnpm add @sqlite-sync/ai
 ```
 
 Peer dependencies:
@@ -42,9 +46,10 @@ Peer dependencies:
 | Package | Peers |
 |---------|-------|
 | `@sqlite-sync/core` | `@sqlite.org/sqlite-wasm`, `kysely` |
-| `@sqlite-sync/react` | `react ^18 \|\| ^19`, `kysely` |
-| `@sqlite-sync/devtools` | `react ^18 \|\| ^19` |
-| `@sqlite-sync/cloudflare` | `@cloudflare/workers-types`, `kysely` |
+| `@sqlite-sync/react` | `@sqlite-sync/core`, `react ^18 \|\| ^19`, `kysely` |
+| `@sqlite-sync/devtools` | `@sqlite-sync/core`, `react ^18 \|\| ^19` |
+| `@sqlite-sync/cloudflare` | `@sqlite-sync/core`, `@cloudflare/workers-types`, `kysely` |
+| `@sqlite-sync/ai` | `@sqlite-sync/core`, `ai ^6` |
 
 ---
 
@@ -885,6 +890,34 @@ syncDb.addEventListener("event-applied", (event) => {
 
 ---
 
+## AI Agent Tools
+
+`@sqlite-sync/ai` exposes a synced database to an AI SDK (v6) agent. Create the access object where the CRDT storage lives (e.g. a Durable Object's `onStart`, after migrations), then hand the agent a `ToolSet`:
+
+```ts
+import { createAiDbAccess, createDbTools } from "@sqlite-sync/ai";
+import { createKyselyExecutor } from "@sqlite-sync/cloudflare";
+
+// Next to the storage:
+const aiDbAccess = createAiDbAccess({
+  executor: createKyselyExecutor(this.ctx.storage),
+  syncDbSchema,
+  context: {
+    overview: "# My app's database\n\nDeletes are soft-deletes; the views below already hide them.",
+    tables: {
+      todo: { description: "The user's todos.", columns: { completed: "1 when done." } },
+    },
+  },
+});
+
+// In the agent:
+const tools = createDbTools({ access: () => aiDbAccess });
+```
+
+The schema doc is generated from `PRAGMA table_info` plus the app-provided `context` (keys are CRDT view names), introspected once and cached. For cross-Durable-Object setups, `AiDbAccess` method names double as the RPC contract — a stub proxying `getSchemaDoc()` satisfies `createDbTools`. The `ToolSet` currently contains a single `getDbSchema` tool.
+
+---
+
 ## Vite Configuration
 
 sqlite-sync requires specific Vite configuration for WASM and Web Worker support:
@@ -1108,6 +1141,34 @@ function createMigrator(
   updateLogTableName?: string
 ): SyncDbMigrator
 ```
+
+### `@sqlite-sync/ai`
+
+#### `createAiDbAccess(options)`
+
+Creates read-only AI access to a synced database. Lives where the storage lives; the schema doc is introspected lazily and cached.
+
+```ts
+function createAiDbAccess(options: {
+  executor: AiDbExecutor; // satisfied by createKyselyExecutor from @sqlite-sync/cloudflare
+  syncDbSchema: SyncDbSchema;
+  context?: SchemaDocContext; // overview + per-table/column descriptions
+}): AiDbAccess // { getSchemaDoc(): string }
+```
+
+#### `createDbTools(options)`
+
+Builds an AI SDK v6 `ToolSet` backed by an `AiDbAccess` (or a stub proxying to one). `access` is a factory because acquiring the database may itself be async per call.
+
+```ts
+function createDbTools(options: {
+  access: () => DbToolsAccess | Promise<DbToolsAccess>
+}): ToolSet
+```
+
+#### `createSchemaDoc(options)`
+
+Lower-level helper that generates the markdown schema doc directly from an `execute` function — used internally by `createAiDbAccess`.
 
 ### WebSocket Protocol
 

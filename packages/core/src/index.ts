@@ -49,6 +49,7 @@ export {
 } from "./sqlite-crdt/apply-crdt-event";
 // CRDT Schema
 export {
+  type CrdtTableConfig,
   type CreateCrdtSchemaOptions,
   createSyncDbSchema,
   type SyncDbSchema,
