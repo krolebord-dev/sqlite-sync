@@ -1,3 +1,4 @@
+import type { SharedLiveQuerySnapshot } from "@sqlite-sync/core";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -10,7 +11,7 @@ type SQLiteSyncDevtoolsProps = {
   className?: string;
 };
 
-type DevtoolsTab = "overview" | "schema" | "event-log" | "query-runner";
+type DevtoolsTab = "overview" | "schema" | "live-queries" | "event-log" | "query-runner";
 type QueryTarget = "memory" | "worker";
 
 type QueryState =
@@ -242,6 +243,14 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
                     </button>
                     <button
                       type="button"
+                      style={getTabButtonStyles(activeTab === "live-queries")}
+                      onClick={() => setActiveTab("live-queries")}
+                    >
+                      <span style={navIconStyles}>◉</span>
+                      Live Queries
+                    </button>
+                    <button
+                      type="button"
                       style={getTabButtonStyles(activeTab === "event-log")}
                       onClick={() => setActiveTab("event-log")}
                     >
@@ -279,6 +288,8 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
                     <OverviewTab selectedInstance={selectedInstance} dbIdCounts={dbIdCounts} />
                   ) : activeTab === "schema" ? (
                     <SchemaTab selectedInstance={selectedInstance} />
+                  ) : activeTab === "live-queries" ? (
+                    <LiveQueriesTab selectedInstance={selectedInstance} />
                   ) : activeTab === "event-log" ? (
                     <EventLogTab selectedInstance={selectedInstance} />
                   ) : (
@@ -559,6 +570,95 @@ function SchemaTab({
       </div>
     </div>
   );
+}
+
+function LiveQueriesTab({ selectedInstance }: { selectedInstance: SQLiteSyncDevtoolsInstance | null }) {
+  const [queries, setQueries] = useState<SharedLiveQuerySnapshot[]>([]);
+
+  const refresh = useCallback(() => {
+    if (!selectedInstance) {
+      setQueries([]);
+      return;
+    }
+
+    setQueries(
+      selectedInstance.instance._internal
+        .getSharedLiveQueriesSnapshot()
+        .sort(
+          (a, b) =>
+            a.sql.localeCompare(b.sql) ||
+            formatLiveQueryParameters(a.parameters).localeCompare(formatLiveQueryParameters(b.parameters)),
+        ),
+    );
+  }, [selectedInstance]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const totalSubscribers = queries.reduce((total, query) => total + query.subscriberCount, 0);
+
+  return (
+    <div style={schemaLayoutStyles}>
+      <div style={schemaSectionStyles}>
+        <div style={schemaSectionHeaderStyles}>
+          <div style={schemaSectionTitleStyles}>Shared Live Queries</div>
+          <span style={schemaBadgeStyles}>{queries.length}</span>
+          <span style={schemaVersionChipStyles}>
+            {totalSubscribers} subscriber{totalSubscribers !== 1 ? "s" : ""}
+          </span>
+          <button
+            type="button"
+            style={{ ...eventLogRefreshButtonStyles, marginLeft: "auto" }}
+            onClick={refresh}
+            disabled={!selectedInstance}
+          >
+            ↻ Refresh
+          </button>
+        </div>
+        {queries.length === 0 ? (
+          <div style={schemaEmptyStyles}>
+            No active live queries. Queries created via <code style={inlineCodeStyles}>useDbQuery</code> appear here
+            while components are subscribed.
+          </div>
+        ) : (
+          <div style={schemaTableGridStyles}>
+            <div style={liveQueryHeaderRowStyles}>
+              <div style={schemaColHeaderStyles}>SQL</div>
+              <div style={schemaColHeaderStyles}>Parameters</div>
+              <div style={{ ...schemaColHeaderStyles, textAlign: "center" }}>Subscribers</div>
+            </div>
+            {queries.map((query) => {
+              const parameters = formatLiveQueryParameters(query.parameters);
+              return (
+                <div key={`${query.sql}|${parameters}`} style={liveQueryRowStyles}>
+                  <div style={liveQuerySqlStyles} title={query.sql}>
+                    {query.sql}
+                  </div>
+                  <div style={liveQueryParametersStyles} title={parameters}>
+                    {parameters}
+                  </div>
+                  <div style={schemaStatusCellStyles}>
+                    <span style={query.subscriberCount > 0 ? schemaActiveTagStyles : liveQueryIdleTagStyles}>
+                      {query.subscriberCount}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatLiveQueryParameters(parameters: readonly unknown[]): string {
+  try {
+    return JSON.stringify(parameters);
+  } catch {
+    return String(parameters);
+  }
 }
 
 type PersistedCrdtEvent = {
@@ -2052,6 +2152,54 @@ function getMigrationTagStyles(applied: boolean, isCurrent: boolean): CSSPropert
 }
 
 // ─── Event log tab styles ─────────────────────────────────────────────────────
+
+const liveQueryHeaderRowStyles: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 220px 110px",
+  gap: 0,
+  backgroundColor: C.bgCard,
+  borderBottom: `1px solid ${C.border}`,
+};
+
+const liveQueryRowStyles: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) 220px 110px",
+  gap: 0,
+  borderBottom: `1px solid ${C.border}`,
+};
+
+const liveQuerySqlStyles: CSSProperties = {
+  padding: "0.6rem 0.85rem",
+  fontSize: "0.78rem",
+  fontFamily: "ui-monospace, monospace",
+  color: C.text,
+  borderRight: `1px solid ${C.border}`,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const liveQueryParametersStyles: CSSProperties = {
+  padding: "0.6rem 0.85rem",
+  fontSize: "0.78rem",
+  fontFamily: "ui-monospace, monospace",
+  color: C.textDim,
+  borderRight: `1px solid ${C.border}`,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const liveQueryIdleTagStyles: CSSProperties = {
+  fontSize: "0.68rem",
+  fontWeight: 700,
+  color: C.textMuted,
+  backgroundColor: C.bgCard,
+  border: `1px solid ${C.border}`,
+  borderRadius: "4px",
+  padding: "0.15rem 0.45rem",
+  fontFamily: "ui-monospace, monospace",
+};
 
 const eventLogLayoutStyles: CSSProperties = {
   display: "flex",
