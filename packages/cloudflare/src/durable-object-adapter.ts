@@ -15,6 +15,7 @@ import {
   HLCCounter,
   jsonSafeParse,
   type PersistedCrdtEvent,
+  quoteId,
   runSystemMigrations,
   type SyncDbSchema,
   type TypedEventTarget,
@@ -107,6 +108,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     dbConfig.updateLogTable.fullIdentifier,
   );
   migrator.migrateDbToLatest();
+  createReadOnlyCrdtViews(sqlExecutor, syncDbSchema);
 
   const truncatedNodeId = nodeId.slice(0, 12);
   const hlc = new HLCCounter(truncatedNodeId, () => Date.now());
@@ -264,6 +266,21 @@ function getLatestSyncId(executor: KyselyExecutor<any>) {
     db.selectFrom("crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
   );
   return result.rows[0]?.sync_id ?? 0;
+}
+
+function createReadOnlyCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: SyncDbSchema) {
+  executor.transaction((tx) => {
+    for (const { baseTableName, crdtTableName } of syncDbSchema.tablesConfig) {
+      tx.execute({
+        sql: `DROP VIEW IF EXISTS ${quoteId(crdtTableName)}`,
+        parameters: [],
+      });
+      tx.execute({
+        sql: `CREATE VIEW ${quoteId(crdtTableName)} AS SELECT * FROM ${quoteId(baseTableName)} WHERE "tombstone" = 0`,
+        parameters: [],
+      });
+    }
+  });
 }
 
 export const durableObjectAdapter = {

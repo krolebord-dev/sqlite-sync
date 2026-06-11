@@ -55,7 +55,7 @@ class CrdtSchemaBuilder<ClientDB = {}, ServerDB = {}, MutationsDB = {}>
       this.config.tables.push({ baseTableName, crdtTableName });
       return new CrdtSchemaBuilder<
         ClientDB & { [K in CrdtTable]: Table } & { [K in BaseTable]: ReadonlyTable<Table> },
-        ServerDB & { [K in BaseTable]: ReadonlyTable<Table> },
+        ServerDB & { [K in CrdtTable]: ReadonlyTable<Table> } & { [K in BaseTable]: ReadonlyTable<Table> },
         MutationsDB & { [K in BaseTable]: Table }
       >(this.config);
     };

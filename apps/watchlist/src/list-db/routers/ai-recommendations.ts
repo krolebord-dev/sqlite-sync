@@ -127,8 +127,7 @@ const getRecommendations = listProcedure
 
     const items = context.syncDb.executeKysely((db) =>
       db
-        .selectFrom("_item")
-        .where("tombstone", "=", false)
+        .selectFrom("item")
         .select(["id", "title", "type", "tmdbId", "tags", "tagHighlights", "userRating", "watchedAt", "priority"]),
     ).rows as ListItemRow[];
 

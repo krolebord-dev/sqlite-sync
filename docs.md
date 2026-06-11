@@ -158,7 +158,7 @@ export const syncDbSchema = createSyncDbSchema({ migrations })
 
 The schema carries three phantom types used for type inference:
 - `~clientSchema` — Used by React hooks. Includes both base tables (read-only) and CRDT views (read-write).
-- `~serverSchema` — Used by server-side `executeKysely`. Base tables only (read-only via Kysely types).
+- `~serverSchema` — Used by server-side `executeKysely`. Includes both base tables and read-only CRDT views.
 - `~mutationsSchema` — Used by `enqueueEvent` for typed CRDT payloads.
 
 ---
@@ -837,8 +837,7 @@ The `syncDb` object returned by `durableObjectAdapter.createCrdtStorage` lets yo
 ```ts
 const { rows } = syncDb.executeKysely((db) =>
   db
-    .selectFrom("_item")
-    .where("tombstone", "=", false)
+    .selectFrom("item")
     .where("id", "=", itemId)
     .select(["id", "title"])
 );
@@ -846,7 +845,7 @@ const { rows } = syncDb.executeKysely((db) =>
 const item = rows[0];
 ```
 
-Server-side reads use the **base table name** (e.g., `"_item"`), not the CRDT view name, since CRDT views are only set up on the client.
+Server-side reads can use the read-only **CRDT view name** (e.g., `"item"`). The Durable Object adapter creates these views from the schema and filters out tombstoned rows automatically. Writes still go through CRDT events, not SQL writes to the view.
 
 ### Writing Events
 
@@ -1053,6 +1052,8 @@ Behavior:
 #### `durableObjectAdapter.createCrdtStorage(options)`
 
 Sets up CRDT storage inside a Cloudflare Durable Object.
+
+After running your schema migrations, the adapter recreates read-only CRDT views for each configured table. Each view uses the configured CRDT table name and selects non-tombstoned rows from the base table.
 
 ```ts
 function createCrdtStorage<Schema extends SyncDbSchema>(options: {

@@ -11,11 +11,7 @@ const suggestTags = listProcedure
     })("@preset/fast-and-efficient");
 
     const [item] = context.syncDb.executeKysely((db) =>
-      db
-        .selectFrom("_item")
-        .where("tombstone", "=", false)
-        .where("id", "=", input.itemId)
-        .select(["id", "title", "overview"]),
+      db.selectFrom("item").where("id", "=", input.itemId).select(["id", "title", "overview"]),
     ).rows;
 
     if (!item) {
