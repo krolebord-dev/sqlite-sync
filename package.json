@@ -11,7 +11,7 @@
     "typecheck": "pnpm -r typecheck",
     "publish:packages": "pnpm --filter './packages/**' publish --access public --no-git-checks",
     "publish:dry": "pnpm --filter './packages/**' publish --access public --dry-run",
-    "version": "pnpm --filter './packages/**' exec npm version $(node -p \"require('./package.json').version\") --no-git-tag-version && git add --all",
+    "version": "node ./scripts/version-packages.mjs && git add --all",
     "version:patch": "npm version patch",
     "version:minor": "npm version minor",
     "version:major": "npm version major",
