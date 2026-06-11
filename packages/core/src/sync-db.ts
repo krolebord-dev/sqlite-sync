@@ -186,6 +186,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     _internal: {
       executeAsync: workerClient.execute.bind(workerClient),
       getMemoryQueryTables: reactiveDb.getTablesUsed.bind(reactiveDb),
+      getSharedLiveQueriesSnapshot: reactiveDb.getSharedLiveQueriesSnapshot.bind(reactiveDb),
       crdtTableNames: options.syncDbSchema.tablesConfig.map((table) => table.crdtTableName),
       crdtTablesConfig: options.syncDbSchema.tablesConfig,
       schemaVersion: workerClientSnapshot.schemaVersion,

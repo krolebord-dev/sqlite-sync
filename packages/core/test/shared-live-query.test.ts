@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 
 const noopLogger = () => {};
@@ -70,6 +70,63 @@ describe("getSharedLiveQuery", () => {
     await flushCleanupTimers();
 
     expect(db.getSharedLiveQuery(QUERY)).not.toBe(first);
+  });
+
+  it("re-registers an evicted entry when a late subscriber attaches", async () => {
+    const db = await createDb();
+
+    const first = db.getSharedLiveQuery(QUERY);
+    // React can yield between render (getSharedLiveQuery) and commit (subscribe),
+    // so the eviction timer may fire in between.
+    await flushCleanupTimers();
+
+    const unsubscribe = first.subscribe(() => {});
+
+    expect(db.getSharedLiveQuery(QUERY)).toBe(first);
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([{ sql: QUERY.sql, parameters: [], subscriberCount: 1 }]);
+
+    unsubscribe();
+    await flushCleanupTimers();
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([]);
+  });
+
+  it("refreshes stale rows when re-attaching after all subscribers left", async () => {
+    const db = await createDb();
+
+    const entry = db.getSharedLiveQuery<{ id: string; title: string }>(QUERY);
+    const unsubscribe = entry.subscribe(() => {});
+    expect(entry.getRows()).toEqual([]);
+
+    unsubscribe();
+    // Entry is detached from table-change events; data changes while nobody listens.
+    db.db.execute(`INSERT INTO "todo" ("id", "title") VALUES ('1', 'created while detached')`);
+
+    const onChange = vi.fn();
+    const resubscribe = entry.subscribe(onChange);
+
+    expect(entry.getRows()).toEqual([{ id: "1", title: "created while detached" }]);
+    expect(onChange).toHaveBeenCalled();
+
+    resubscribe();
+  });
+
+  it("reports active queries through getSharedLiveQueriesSnapshot", async () => {
+    const db = await createDb();
+
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([]);
+
+    const entry = db.getSharedLiveQuery(QUERY);
+    const unsubscribeFirst = entry.subscribe(() => {});
+    const unsubscribeSecond = entry.subscribe(() => {});
+
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([{ sql: QUERY.sql, parameters: [], subscriberCount: 2 }]);
+
+    unsubscribeFirst();
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([{ sql: QUERY.sql, parameters: [], subscriberCount: 1 }]);
+
+    unsubscribeSecond();
+    await flushCleanupTimers();
+    expect(db.getSharedLiveQueriesSnapshot()).toEqual([]);
   });
 
   it("tears down active subscriptions on dispose", async () => {

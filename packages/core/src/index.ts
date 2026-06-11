@@ -16,7 +16,12 @@ export { type DatabaseIntrospection, introspectDb, type TableMetadata } from "./
 // Logger
 export { type Logger, type LogLevel, startPerformanceLogger } from "./logger";
 // Memory DB
-export { parametersAreEqual, type SharedLiveQuery, SQLiteReactiveDb } from "./memory-db/sqlite-reactive-db";
+export {
+  parametersAreEqual,
+  type SharedLiveQuery,
+  type SharedLiveQuerySnapshot,
+  SQLiteReactiveDb,
+} from "./memory-db/sqlite-reactive-db";
 // Migrations
 export {
   createMigrations,

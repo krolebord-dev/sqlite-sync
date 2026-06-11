@@ -37,6 +37,12 @@ type SharedLiveQueryEntry<TResult> = SharedLiveQuery<TResult> & {
   cleanupTimeout: ReturnType<typeof setTimeout> | null;
 };
 
+export type SharedLiveQuerySnapshot = {
+  sql: string;
+  parameters: readonly unknown[];
+  subscriberCount: number;
+};
+
 export function createSQLiteReactiveDb<Database>(opts: SQLiteReactiveDbOptions) {
   return SQLiteReactiveDb.create<Database>(opts);
 }
@@ -153,6 +159,7 @@ export class SQLiteReactiveDb<Database> {
     }
 
     const liveQuery = this.createLiveQuery<TResult>(query);
+    let hasDetachedFromLiveQuery = false;
     const entry: SharedLiveQueryEntry<TResult> = {
       sql: query.sql,
       parameters: query.parameters,
@@ -166,6 +173,7 @@ export class SQLiteReactiveDb<Database> {
       getSubscriberCount: () => entry.listeners.size,
       subscribe: (onchange) => {
         this.cancelSharedLiveQueryCleanup(entry);
+        this.registerSharedLiveQueryEntry(entry as SharedLiveQueryEntry<unknown>);
         entry.listeners.add(onchange);
 
         if (!entry.unsubscribeFromLiveQuery) {
@@ -174,6 +182,13 @@ export class SQLiteReactiveDb<Database> {
               listener();
             }
           });
+
+          // Rows may have gone stale while no subscriber was listening
+          // for table changes.
+          if (hasDetachedFromLiveQuery) {
+            hasDetachedFromLiveQuery = false;
+            liveQuery.refresh();
+          }
         }
 
         return () => {
@@ -182,21 +197,41 @@ export class SQLiteReactiveDb<Database> {
           if (entry.listeners.size === 0) {
             entry.unsubscribeFromLiveQuery?.();
             entry.unsubscribeFromLiveQuery = null;
+            hasDetachedFromLiveQuery = true;
             this.scheduleSharedLiveQueryCleanup(entry);
           }
         };
       },
     };
 
-    const matchingSqlEntries = this.sharedLiveQueries.get(query.sql) ?? [];
-    matchingSqlEntries.push(entry as SharedLiveQueryEntry<unknown>);
-    this.sharedLiveQueries.set(query.sql, matchingSqlEntries);
+    this.registerSharedLiveQueryEntry(entry as SharedLiveQueryEntry<unknown>);
 
-    // Evict the entry if no subscriber attaches by the next tick (e.g. a
-    // discarded React render that never commits).
+    // Evict the entry if no subscriber attaches by the next tick.
     this.scheduleSharedLiveQueryCleanup(entry as SharedLiveQueryEntry<unknown>);
 
     return entry;
+  }
+
+  private registerSharedLiveQueryEntry(entry: SharedLiveQueryEntry<unknown>) {
+    const matchingSqlEntries = this.sharedLiveQueries.get(entry.sql) ?? [];
+    if (!matchingSqlEntries.includes(entry)) {
+      matchingSqlEntries.push(entry);
+      this.sharedLiveQueries.set(entry.sql, matchingSqlEntries);
+    }
+  }
+
+  getSharedLiveQueriesSnapshot(): SharedLiveQuerySnapshot[] {
+    const snapshot: SharedLiveQuerySnapshot[] = [];
+    for (const entries of this.sharedLiveQueries.values()) {
+      for (const entry of entries) {
+        snapshot.push({
+          sql: entry.sql,
+          parameters: entry.parameters,
+          subscriberCount: entry.listeners.size,
+        });
+      }
+    }
+    return snapshot;
   }
 
   private scheduleSharedLiveQueryCleanup(entry: SharedLiveQueryEntry<unknown>) {
