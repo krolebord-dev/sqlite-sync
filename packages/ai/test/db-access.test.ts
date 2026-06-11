@@ -43,7 +43,8 @@ describe("createAiDbAccess", () => {
     const doc = access.getSchemaDoc();
 
     expect(calls).toEqual(['PRAGMA table_info("item")']);
-    expect(doc).toBe(
+    expect(doc).toContain("read-only SQL views");
+    expect(doc).toContain(
       ["## items", "", "The user's items.", "", "Columns:", "- `id` TEXT NOT NULL", "- `title` TEXT NOT NULL"].join(
         "\n",
       ),

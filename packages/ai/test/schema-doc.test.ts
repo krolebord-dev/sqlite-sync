@@ -75,6 +75,11 @@ describe("createSchemaDoc", () => {
         "",
         "A todo app.",
         "",
+        "This is a synced SQLite database — data replicates automatically between the user's devices.",
+        "All writes go through a sync event log, which is why the tables listed below are exposed as",
+        "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
+        "without any tombstone filtering. Every table has a unique `id` text primary key.",
+        "",
         "## todos",
         "",
         "The user's todos.",
@@ -94,7 +99,7 @@ describe("createSchemaDoc", () => {
     );
   });
 
-  it("renders without context and always hides the tombstone column", async () => {
+  it("renders the preamble without context and always hides the tombstone column", async () => {
     const db = await createTestDb();
     db.execute(`
       CREATE TABLE "tag" (
@@ -113,8 +118,20 @@ describe("createSchemaDoc", () => {
       syncDbSchema,
     });
 
-    expect(doc).toBe(["## tags", "", "Columns:", "- `id` TEXT NOT NULL"].join("\n"));
-    expect(doc).not.toContain("tombstone");
+    expect(doc).toBe(
+      [
+        "This is a synced SQLite database — data replicates automatically between the user's devices.",
+        "All writes go through a sync event log, which is why the tables listed below are exposed as",
+        "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
+        "without any tombstone filtering. Every table has a unique `id` text primary key.",
+        "",
+        "## tags",
+        "",
+        "Columns:",
+        "- `id` TEXT NOT NULL",
+      ].join("\n"),
+    );
+    expect(doc).not.toContain("- `tombstone`");
   });
 
   it("quotes base table names when introspecting", async () => {
@@ -136,6 +153,6 @@ describe("createSchemaDoc", () => {
       syncDbSchema,
     });
 
-    expect(doc).toBe(["## weird", "", "Columns:", "- `id` TEXT NOT NULL"].join("\n"));
+    expect(doc).toContain(["## weird", "", "Columns:", "- `id` TEXT NOT NULL"].join("\n"));
   });
 });

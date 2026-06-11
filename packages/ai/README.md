@@ -21,7 +21,7 @@ async onStart() {
     executor: createKyselyExecutor(this.ctx.storage),
     syncDbSchema,
     context: {
-      overview: "# My app's database\n\nDeletes are soft-deletes; the views below already hide them.",
+      overview: "# My app's database\n\nA todo app for a single user.",
       tables: {
         todos: {
           description: "The user's todos.",
@@ -53,3 +53,5 @@ getTools() {
 ```
 
 `context.tables` keys are CRDT view names (`crdtTableName`). The doc skips the internal `tombstone` column and introspects base tables (views lose `NOT NULL` fidelity), presenting them under their view names.
+
+The generated doc always includes a built-in preamble (after your `overview`) explaining sqlite-sync mechanics — that the database syncs between devices and that the listed tables are read-only views with soft-deleted rows already filtered out. Your `context` only needs to describe your domain: what the app is, what each table/column means, and any data conventions (units, enums, timestamp formats).
