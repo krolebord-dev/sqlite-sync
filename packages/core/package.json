@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/core",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "SQLite synchronization library with CRDT support",
   "type": "module",
   "license": "MIT",
