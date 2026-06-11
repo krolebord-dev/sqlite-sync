@@ -632,12 +632,8 @@ function LiveQueriesTab({ selectedInstance }: { selectedInstance: SQLiteSyncDevt
               const parameters = formatLiveQueryParameters(query.parameters);
               return (
                 <div key={`${query.sql}|${parameters}`} style={liveQueryRowStyles}>
-                  <div style={liveQuerySqlStyles} title={query.sql}>
-                    {query.sql}
-                  </div>
-                  <div style={liveQueryParametersStyles} title={parameters}>
-                    {parameters}
-                  </div>
+                  <div style={liveQuerySqlStyles}>{query.sql}</div>
+                  <div style={liveQueryParametersStyles}>{parameters}</div>
                   <div style={schemaStatusCellStyles}>
                     <span style={query.subscriberCount > 0 ? schemaActiveTagStyles : liveQueryIdleTagStyles}>
                       {query.subscriberCount}
@@ -2174,9 +2170,8 @@ const liveQuerySqlStyles: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   color: C.text,
   borderRight: `1px solid ${C.border}`,
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
 };
 
 const liveQueryParametersStyles: CSSProperties = {
@@ -2185,9 +2180,8 @@ const liveQueryParametersStyles: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   color: C.textDim,
   borderRight: `1px solid ${C.border}`,
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
 };
 
 const liveQueryIdleTagStyles: CSSProperties = {
