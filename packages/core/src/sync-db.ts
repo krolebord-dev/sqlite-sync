@@ -152,6 +152,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       executeKysely: reactiveDb.db.executeKysely.bind(reactiveDb.db),
       executeTransaction: reactiveDb.db.executeTransaction.bind(reactiveDb.db),
       createLiveQuery: reactiveDb.createLiveQuery.bind(reactiveDb),
+      getSharedLiveQuery: reactiveDb.getSharedLiveQuery.bind(reactiveDb),
     },
     state: {
       getState: workerClient.getState.bind(workerClient),

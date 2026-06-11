@@ -1,4 +1,4 @@
-import type { ExecuteParams, SyncedDb } from "@sqlite-sync/core";
+import type { ExecuteParams, SharedLiveQuery, SyncedDb } from "@sqlite-sync/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,22 +6,54 @@ import { createDbContext } from "../src/react";
 
 const { DbProvider, useDbQuery, useDbEvent } = createDbContext({} as never);
 
-type FakeLiveQuery = {
-  query: ExecuteParams;
-  unsubscribeCalls: number;
-  getRows: ReturnType<typeof vi.fn<() => unknown[]>>;
+// Thin stand-in for core's getSharedLiveQuery: returns a stable entry per
+// sql+parameters and tracks subscribers. Sharing/eviction semantics are core's
+// contract, covered by packages/core/test/shared-live-query.test.ts — these
+// tests only verify how useDbQuery consumes that contract.
+type FakeSharedQuery = SharedLiveQuery<unknown> & {
   refresh: ReturnType<typeof vi.fn<() => void>>;
-  subscribe: ReturnType<typeof vi.fn<(onchange: () => void) => () => void>>;
   setRows: (rows: unknown[]) => void;
 };
 
-afterEach(async () => {
+afterEach(() => {
   cleanup();
-  await flushCleanupTimers();
 });
 
 describe("useDbQuery", () => {
-  it("reuses one live query for identical sql and parameters", () => {
+  it("renders the shared query rows and re-renders when the query notifies", () => {
+    const fakeDb = createFakeDb();
+    const query = { sql: "select * from todo where id = ?", parameters: [1] } satisfies ExecuteParams;
+
+    renderWithDb(fakeDb.db, <QueryView label="result" query={query} />);
+
+    const entry = fakeDb.entries[0];
+    expect(entry?.getSubscriberCount()).toBe(1);
+
+    act(() => {
+      entry?.setRows([{ value: "updated" }]);
+    });
+
+    expect(screen.getByTestId("result").textContent).toBe('[{"value":"updated"}]');
+  });
+
+  it("requests the shared query once per query identity across re-renders", () => {
+    const fakeDb = createFakeDb();
+
+    const { rerender } = renderWithDb(
+      fakeDb.db,
+      <QueryView label="result" query={{ sql: "select * from todo where id = ?", parameters: [1] }} />,
+    );
+
+    rerender(
+      <DbProvider db={fakeDb.db}>
+        <QueryView label="result" query={{ sql: "select * from todo where id = ?", parameters: [1] }} />
+      </DbProvider>,
+    );
+
+    expect(fakeDb.getSharedLiveQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one entry between consumers of the same query and updates both", () => {
     const fakeDb = createFakeDb();
     const query = { sql: "select * from todo where id = ?", parameters: [1] } satisfies ExecuteParams;
 
@@ -33,17 +65,18 @@ describe("useDbQuery", () => {
       </>,
     );
 
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(1);
+    expect(fakeDb.entries).toHaveLength(1);
+    expect(fakeDb.entries[0]?.getSubscriberCount()).toBe(2);
 
     act(() => {
-      fakeDb.liveQueries[0]?.setRows([{ value: "updated" }]);
+      fakeDb.entries[0]?.setRows([{ value: "updated" }]);
     });
 
     expect(screen.getByTestId("first").textContent).toBe('[{"value":"updated"}]');
     expect(screen.getByTestId("second").textContent).toBe('[{"value":"updated"}]');
   });
 
-  it("does not dedupe queries with different parameters", () => {
+  it("uses distinct entries for different parameters or sql", () => {
     const fakeDb = createFakeDb();
     const sql = "select * from todo where id = ?";
 
@@ -52,34 +85,21 @@ describe("useDbQuery", () => {
       <>
         <QueryView label="first" query={{ sql, parameters: [1] }} />
         <QueryView label="second" query={{ sql, parameters: [2] }} />
+        <QueryView label="third" query={{ sql: "select * from account", parameters: [] }} />
       </>,
     );
 
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(2);
+    expect(fakeDb.entries).toHaveLength(3);
   });
 
-  it("does not dedupe queries with different sql", () => {
-    const fakeDb = createFakeDb();
-
-    renderWithDb(
-      fakeDb.db,
-      <>
-        <QueryView label="first" query={{ sql: "select * from todo", parameters: [] }} />
-        <QueryView label="second" query={{ sql: "select * from account", parameters: [] }} />
-      </>,
-    );
-
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(2);
-  });
-
-  it("releases the previous live query when parameters change", async () => {
+  it("switches to a new entry and unsubscribes from the previous one when parameters change", async () => {
     const fakeDb = createFakeDb();
     const { rerender } = renderWithDb(
       fakeDb.db,
       <QueryView label="result" query={{ sql: "select * from todo where id = ?", parameters: [1] }} />,
     );
 
-    const firstLiveQuery = fakeDb.liveQueries[0];
+    const firstEntry = fakeDb.entries[0];
 
     rerender(
       <DbProvider db={fakeDb.db}>
@@ -88,12 +108,14 @@ describe("useDbQuery", () => {
     );
 
     await waitFor(() => {
-      expect(firstLiveQuery?.unsubscribeCalls).toBe(1);
+      expect(firstEntry?.getSubscriberCount()).toBe(0);
     });
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(2);
+    expect(fakeDb.entries).toHaveLength(2);
+    expect(fakeDb.entries[1]?.getSubscriberCount()).toBe(1);
+    expect(screen.getByTestId("result").textContent).toContain('"parameters":[2]');
   });
 
-  it("keeps mapData isolated per consumer while sharing the raw live query", () => {
+  it("keeps mapData isolated per consumer while sharing the entry", () => {
     const fakeDb = createFakeDb();
     const query = { sql: "select * from todo", parameters: [] } satisfies ExecuteParams;
 
@@ -109,17 +131,17 @@ describe("useDbQuery", () => {
       </>,
     );
 
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(1);
+    expect(fakeDb.entries).toHaveLength(1);
 
     act(() => {
-      fakeDb.liveQueries[0]?.setRows([{ value: "one" }, { value: "two" }]);
+      fakeDb.entries[0]?.setRows([{ value: "one" }, { value: "two" }]);
     });
 
     expect(screen.getByTestId("count").textContent).toBe("2");
     expect(screen.getByTestId("first-value").textContent).toBe('"one"');
   });
 
-  it("refreshes the active shared query for all consumers", () => {
+  it("delegates refresh to the shared entry and updates all consumers", () => {
     const fakeDb = createFakeDb();
     const query = { sql: "select * from todo where id = ?", parameters: [1] } satisfies ExecuteParams;
 
@@ -133,12 +155,12 @@ describe("useDbQuery", () => {
 
     fireEvent.click(screen.getByTestId("refresh-first"));
 
-    expect(fakeDb.liveQueries[0]?.refresh).toHaveBeenCalledTimes(1);
+    expect(fakeDb.entries[0]?.refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("first").textContent).toContain('"revision":1');
     expect(screen.getByTestId("second").textContent).toContain('"revision":1');
   });
 
-  it("refreshes the current declarative query after parameters change", async () => {
+  it("refreshes the current entry after parameters change", async () => {
     const fakeDb = createFakeDb();
     const { rerender } = renderWithDb(
       fakeDb.db,
@@ -152,17 +174,18 @@ describe("useDbQuery", () => {
     );
 
     await waitFor(() => {
-      expect(fakeDb.liveQueries[0]?.unsubscribeCalls).toBe(1);
+      expect(fakeDb.entries[0]?.getSubscriberCount()).toBe(0);
     });
 
     fireEvent.click(screen.getByTestId("refresh-result"));
 
-    expect(fakeDb.liveQueries[1]?.refresh).toHaveBeenCalledTimes(1);
+    expect(fakeDb.entries[0]?.refresh).not.toHaveBeenCalled();
+    expect(fakeDb.entries[1]?.refresh).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("result").textContent).toContain('"parameters":[2]');
     expect(screen.getByTestId("result").textContent).toContain('"revision":1');
   });
 
-  it("does not create duplicate live queries when rendered inside StrictMode", () => {
+  it("ends up with a single subscription per consumer under StrictMode", () => {
     const fakeDb = createFakeDb();
     const query = { sql: "select * from todo where id = ?", parameters: [1] } satisfies ExecuteParams;
 
@@ -173,30 +196,26 @@ describe("useDbQuery", () => {
       </StrictMode>,
     );
 
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(1);
+    expect(fakeDb.entries).toHaveLength(1);
+    expect(fakeDb.entries[0]?.getSubscriberCount()).toBe(1);
 
     act(() => {
-      fakeDb.liveQueries[0]?.setRows([{ value: "strict-mode" }]);
+      fakeDb.entries[0]?.setRows([{ value: "strict-mode" }]);
     });
 
     expect(screen.getByTestId("result").textContent).toBe('[{"value":"strict-mode"}]');
   });
 
-  it("cleans up the shared entry when the last subscriber unmounts", async () => {
+  it("unsubscribes from the entry on unmount", () => {
     const fakeDb = createFakeDb();
     const query = { sql: "select * from todo where id = ?", parameters: [1] } satisfies ExecuteParams;
     const { unmount } = renderWithDb(fakeDb.db, <QueryView label="result" query={query} />);
 
-    const firstLiveQuery = fakeDb.liveQueries[0];
+    expect(fakeDb.entries[0]?.getSubscriberCount()).toBe(1);
 
     unmount();
-    await flushCleanupTimers();
 
-    expect(firstLiveQuery?.unsubscribeCalls).toBe(1);
-
-    renderWithDb(fakeDb.db, <QueryView label="result" query={query} />);
-
-    expect(fakeDb.createLiveQuery).toHaveBeenCalledTimes(2);
+    expect(fakeDb.entries[0]?.getSubscriberCount()).toBe(0);
   });
 });
 
@@ -291,7 +310,7 @@ function renderWithDb(db: SyncedDb<unknown>, children: ReactNode) {
 }
 
 function createFakeDb() {
-  const liveQueries: FakeLiveQuery[] = [];
+  const entries: FakeSharedQuery[] = [];
   const eventListeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
   const unsubscribe = vi.fn((eventName: string, listener: (event: { payload: unknown }) => void) => {
     eventListeners.get(eventName)?.delete(listener);
@@ -307,15 +326,52 @@ function createFakeDb() {
       unsubscribe: () => unsubscribe(eventName, listener),
     };
   });
-  const createLiveQuery = vi.fn((query: ExecuteParams) => {
-    const liveQuery = createFakeLiveQuery(query);
-    liveQueries.push(liveQuery);
-    return liveQuery;
+  const getSharedLiveQuery = vi.fn((query: ExecuteParams): SharedLiveQuery<unknown> => {
+    const existing = entries.find(
+      (entry) => entry.sql === query.sql && JSON.stringify(entry.parameters) === JSON.stringify(query.parameters),
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const listeners = new Set<() => void>();
+    let revision = 0;
+    let rows: unknown[] = buildRows(query.sql, query.parameters, revision);
+    const notify = () => {
+      for (const listener of listeners) {
+        listener();
+      }
+    };
+
+    const entry: FakeSharedQuery = {
+      sql: query.sql,
+      parameters: query.parameters,
+      getRows: () => rows,
+      refresh: vi.fn(() => {
+        revision += 1;
+        rows = buildRows(query.sql, query.parameters, revision);
+        notify();
+      }),
+      getSubscriberCount: () => listeners.size,
+      subscribe: (onchange) => {
+        listeners.add(onchange);
+        return () => {
+          listeners.delete(onchange);
+        };
+      },
+      setRows: (nextRows) => {
+        rows = nextRows;
+        notify();
+      },
+    };
+
+    entries.push(entry);
+    return entry;
   });
 
   const db = {
     db: {
-      createLiveQuery,
+      getSharedLiveQuery,
     },
     state: {
       getState: () => ({ remoteState: "offline", deSynced: false, schemaVersionMismatched: false }),
@@ -336,51 +392,9 @@ function createFakeDb() {
     }
   };
 
-  return { db, createLiveQuery, emit, liveQueries, subscribe, unsubscribe };
-}
-
-function createFakeLiveQuery(query: ExecuteParams): FakeLiveQuery {
-  let subscriber: (() => void) | null = null;
-  const currentParameters = query.parameters;
-  let revision = 0;
-  let rows = buildRows(query.sql, currentParameters, revision);
-
-  const liveQuery: FakeLiveQuery = {
-    query,
-    unsubscribeCalls: 0,
-    getRows: vi.fn(() => rows),
-    refresh: vi.fn(() => {
-      revision += 1;
-      rows = buildRows(query.sql, currentParameters, revision);
-      subscriber?.();
-    }),
-    subscribe: vi.fn((onchange: () => void) => {
-      if (subscriber) {
-        throw new Error("Subscriber already exists");
-      }
-
-      subscriber = onchange;
-
-      return () => {
-        liveQuery.unsubscribeCalls += 1;
-        subscriber = null;
-      };
-    }),
-    setRows: (nextRows) => {
-      rows = nextRows;
-      subscriber?.();
-    },
-  };
-
-  return liveQuery;
+  return { db, emit, entries, getSharedLiveQuery, subscribe, unsubscribe };
 }
 
 function buildRows(sql: string, parameters: readonly unknown[], revision: number) {
   return [{ sql, parameters: [...parameters], revision }];
-}
-
-async function flushCleanupTimers() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
 }

@@ -19,6 +19,24 @@ type EventsMap = {
   "any-table-changed": undefined;
 } & Record<`table:${string}`, void>;
 
+type LiveQuery<TResult> = {
+  getRows: () => TResult[];
+  refresh: () => void;
+  subscribe: (onchange: () => void) => () => void;
+};
+
+export type SharedLiveQuery<TResult> = LiveQuery<TResult> & {
+  readonly sql: string;
+  readonly parameters: readonly unknown[];
+  getSubscriberCount: () => number;
+};
+
+type SharedLiveQueryEntry<TResult> = SharedLiveQuery<TResult> & {
+  listeners: Set<() => void>;
+  unsubscribeFromLiveQuery: (() => void) | null;
+  cleanupTimeout: ReturnType<typeof setTimeout> | null;
+};
+
 export function createSQLiteReactiveDb<Database>(opts: SQLiteReactiveDbOptions) {
   return SQLiteReactiveDb.create<Database>(opts);
 }
@@ -71,6 +89,8 @@ export class SQLiteReactiveDb<Database> {
     },
   });
 
+  private sharedLiveQueries = new Map<string, SharedLiveQueryEntry<unknown>[]>();
+
   createLiveQuery<TResult>(query: { sql: string; parameters: readonly unknown[] }) {
     const fetchRows = (parameters: readonly unknown[]) => {
       let statement = this.liveQueryStatements.get(query.sql);
@@ -119,6 +139,97 @@ export class SQLiteReactiveDb<Database> {
     };
 
     return { getRows, refresh, subscribe };
+  }
+
+  getSharedLiveQuery<TResult>(query: { sql: string; parameters: readonly unknown[] }) {
+    const existingEntry = this.sharedLiveQueries
+      .get(query.sql)
+      ?.find((entry) => parametersAreEqual(entry.parameters, query.parameters));
+    if (existingEntry) {
+      if (existingEntry.listeners.size === 0) {
+        this.scheduleSharedLiveQueryCleanup(existingEntry);
+      }
+      return existingEntry as SharedLiveQuery<TResult>;
+    }
+
+    const liveQuery = this.createLiveQuery<TResult>(query);
+    const entry: SharedLiveQueryEntry<TResult> = {
+      sql: query.sql,
+      parameters: query.parameters,
+      listeners: new Set(),
+      unsubscribeFromLiveQuery: null,
+      cleanupTimeout: null,
+      getRows: () => liveQuery.getRows(),
+      refresh: () => {
+        liveQuery.refresh();
+      },
+      getSubscriberCount: () => entry.listeners.size,
+      subscribe: (onchange) => {
+        this.cancelSharedLiveQueryCleanup(entry);
+        entry.listeners.add(onchange);
+
+        if (!entry.unsubscribeFromLiveQuery) {
+          entry.unsubscribeFromLiveQuery = liveQuery.subscribe(() => {
+            for (const listener of entry.listeners) {
+              listener();
+            }
+          });
+        }
+
+        return () => {
+          entry.listeners.delete(onchange);
+
+          if (entry.listeners.size === 0) {
+            entry.unsubscribeFromLiveQuery?.();
+            entry.unsubscribeFromLiveQuery = null;
+            this.scheduleSharedLiveQueryCleanup(entry);
+          }
+        };
+      },
+    };
+
+    const matchingSqlEntries = this.sharedLiveQueries.get(query.sql) ?? [];
+    matchingSqlEntries.push(entry as SharedLiveQueryEntry<unknown>);
+    this.sharedLiveQueries.set(query.sql, matchingSqlEntries);
+
+    // Evict the entry if no subscriber attaches by the next tick (e.g. a
+    // discarded React render that never commits).
+    this.scheduleSharedLiveQueryCleanup(entry as SharedLiveQueryEntry<unknown>);
+
+    return entry;
+  }
+
+  private scheduleSharedLiveQueryCleanup(entry: SharedLiveQueryEntry<unknown>) {
+    this.cancelSharedLiveQueryCleanup(entry);
+    entry.cleanupTimeout = setTimeout(() => {
+      entry.cleanupTimeout = null;
+      this.releaseSharedLiveQuery(entry);
+    }, 0);
+  }
+
+  private cancelSharedLiveQueryCleanup(entry: SharedLiveQueryEntry<unknown>) {
+    if (entry.cleanupTimeout) {
+      clearTimeout(entry.cleanupTimeout);
+      entry.cleanupTimeout = null;
+    }
+  }
+
+  private releaseSharedLiveQuery(entry: SharedLiveQueryEntry<unknown>) {
+    if (entry.listeners.size > 0 || entry.unsubscribeFromLiveQuery) {
+      return;
+    }
+
+    const matchingSqlEntries = this.sharedLiveQueries.get(entry.sql);
+    if (!matchingSqlEntries) {
+      return;
+    }
+
+    const nextEntries = matchingSqlEntries.filter((candidate) => candidate !== entry);
+    if (nextEntries.length > 0) {
+      this.sharedLiveQueries.set(entry.sql, nextEntries);
+    } else {
+      this.sharedLiveQueries.delete(entry.sql);
+    }
   }
 
   subscribeToQueryChanges(params: { sql: string; onDataChange: () => void }) {
@@ -289,6 +400,15 @@ export class SQLiteReactiveDb<Database> {
   }
 
   dispose() {
+    for (const entries of this.sharedLiveQueries.values()) {
+      for (const entry of entries) {
+        this.cancelSharedLiveQueryCleanup(entry);
+        entry.unsubscribeFromLiveQuery?.();
+        entry.unsubscribeFromLiveQuery = null;
+        entry.listeners.clear();
+      }
+    }
+    this.sharedLiveQueries.clear();
     this.liveQueryStatements.clear();
     if (this.tablesUsedStatement) {
       this.tablesUsedStatement.finalize();
@@ -321,4 +441,16 @@ function createDebouncedCallback<TArgs extends unknown[]>(callback: (...args: TA
 
     timeout = setTimeout(effect, delay);
   };
+}
+
+export function parametersAreEqual(a: readonly unknown[] | undefined, b: readonly unknown[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Object.is(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
 }
