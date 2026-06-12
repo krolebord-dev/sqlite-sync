@@ -1,71 +1,33 @@
-import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
+import { createMigrations, defineSyncSchema, t } from "@sqlite-sync/core";
 import { describe, expect, it } from "vitest";
-import { createSQLiteReactiveDb } from "../../core/src/memory-db/sqlite-reactive-db";
 import { createSchemaDoc } from "../src/schema-doc";
 
-type TodoRow = {
-  id: string;
-  title: string;
-  completed: number;
-  notes: string | null;
-};
-
-type TagRow = {
-  id: string;
-  name: string;
-};
-
-const noopLogger = () => {};
-
-async function createTestDb() {
-  const reactiveDb = await createSQLiteReactiveDb({
-    snapshot: new Uint8Array(),
-    logger: noopLogger,
-  });
-  return reactiveDb.db;
-}
+const migrations = createMigrations(() => ({ 0: [] }));
 
 describe("createSchemaDoc", () => {
-  it("renders introspected tables under view names, merged with context", async () => {
-    const db = await createTestDb();
-    db.execute(`
-      CREATE TABLE "todo" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "title" TEXT NOT NULL,
-        "completed" INTEGER NOT NULL DEFAULT 0,
-        "notes" TEXT,
-        "tombstone" INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-    db.execute(`
-      CREATE TABLE "tag" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "name" TEXT NOT NULL,
-        "tombstone" INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-
-    const syncDbSchema = createSyncDbSchema({ migrations: createMigrations(() => ({ 0: [] })) })
-      .addTable<TodoRow>()
-      .withConfig({ baseTableName: "todo", crdtTableName: "todos" })
-      .addTable<TagRow>()
-      .withConfig({ baseTableName: "tag", crdtTableName: "tags" })
-      .build();
+  it("renders declared tables under view names with schema descriptions and context overview", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        todos: t
+          .table({
+            title: t.text().describe("Todo title."),
+            completed: t.boolean().default(false).describe("1 when done."),
+            notes: t.text().nullable(),
+          })
+          .describe("Todos declared in the schema."),
+        tags: t
+          .table({
+            name: t.text(),
+          })
+          .describe("Tags declared in the schema."),
+      },
+      migrations,
+    });
 
     const doc = createSchemaDoc({
-      execute: (sql) => db.execute(sql).rows as Record<string, unknown>[],
       syncDbSchema,
       context: {
         overview: "# Test database\n\nA todo app.",
-        tables: {
-          todos: {
-            description: "The user's todos.",
-            columns: {
-              title: "Todo title.",
-              completed: "1 when done.",
-            },
-          },
-        },
       },
     });
 
@@ -82,41 +44,36 @@ describe("createSchemaDoc", () => {
         "",
         "## todos",
         "",
-        "The user's todos.",
+        "Todos declared in the schema.",
         "",
         "Columns:",
-        "- `id` TEXT NOT NULL",
+        "- `id` TEXT NOT NULL — Unique immutable item id",
         "- `title` TEXT NOT NULL — Todo title.",
-        "- `completed` INTEGER NOT NULL — 1 when done.",
+        "- `completed` INTEGER NOT NULL (boolean 0/1) — 1 when done.",
         "- `notes` TEXT",
         "",
         "## tags",
         "",
+        "Tags declared in the schema.",
+        "",
         "Columns:",
-        "- `id` TEXT NOT NULL",
+        "- `id` TEXT NOT NULL — Unique immutable item id",
         "- `name` TEXT NOT NULL",
       ].join("\n"),
     );
   });
 
-  it("renders the preamble without context and always hides the tombstone column", async () => {
-    const db = await createTestDb();
-    db.execute(`
-      CREATE TABLE "tag" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "tombstone" INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-
-    const syncDbSchema = createSyncDbSchema({ migrations: createMigrations(() => ({ 0: [] })) })
-      .addTable<TagRow>()
-      .withConfig({ baseTableName: "tag", crdtTableName: "tags" })
-      .build();
-
-    const doc = createSchemaDoc({
-      execute: (sql) => db.execute(sql).rows as Record<string, unknown>[],
-      syncDbSchema,
+  it("renders the preamble without context and always hides the tombstone column", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        tags: t.table({
+          name: t.text(),
+        }),
+      },
+      migrations,
     });
+
+    const doc = createSchemaDoc({ syncDbSchema });
 
     expect(doc).toBe(
       [
@@ -128,31 +85,27 @@ describe("createSchemaDoc", () => {
         "## tags",
         "",
         "Columns:",
-        "- `id` TEXT NOT NULL",
+        "- `id` TEXT NOT NULL — Unique immutable item id",
+        "- `name` TEXT NOT NULL",
       ].join("\n"),
     );
     expect(doc).not.toContain("- `tombstone`");
   });
 
-  it("quotes base table names when introspecting", async () => {
-    const db = await createTestDb();
-    db.execute(`
-      CREATE TABLE "we""ird table" (
-        "id" TEXT NOT NULL PRIMARY KEY,
-        "tombstone" INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-
-    const syncDbSchema = createSyncDbSchema({ migrations: createMigrations(() => ({ 0: [] })) })
-      .addTable<TagRow>()
-      .withConfig({ baseTableName: 'we"ird table', crdtTableName: "weird" })
-      .build();
-
-    const doc = createSchemaDoc({
-      execute: (sql) => db.execute(sql).rows as Record<string, unknown>[],
-      syncDbSchema,
+  it("renders enum values and builder descriptions", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        items: t.table({
+          status: t.enum(["active", "archived"]).describe("Lifecycle state."),
+          score: t.real().nullable().describe("Normalized 0..1."),
+        }),
+      },
+      migrations,
     });
 
-    expect(doc).toContain(["## weird", "", "Columns:", "- `id` TEXT NOT NULL"].join("\n"));
+    const doc = createSchemaDoc({ syncDbSchema });
+
+    expect(doc).toContain('- `status` TEXT NOT NULL (one of "active" | "archived") — Lifecycle state.');
+    expect(doc).toContain("- `score` REAL — Normalized 0..1.");
   });
 });

@@ -34,24 +34,33 @@ const migrations = createMigrations((b) => ({
 
 export const syncDbSchema = defineSyncSchema({
   tables: {
-    item: t.table({
-      type: t.enum(["movie", "tv"]).default("movie"),
-      tmdbId: t.integer(),
-      priority: t.integer().default(0),
-      title: t.text(),
-      posterUrl: t.text().nullable(),
-      rating: t.integer().nullable(),
-      overview: t.text().nullable(),
-      releaseDate: t.integer().nullable(),
-      duration: t.integer().nullable(),
-      episodeCount: t.integer().nullable(),
-      watchedAt: t.integer().nullable(),
-      processingStatus: t.text().$type<"idle" | "pending" | (string & {})>().default("idle"),
-      tags: t.text().default("[]"),
-      createdAt: t.integer(),
-      userRating: t.real().nullable().default(null),
-      tagHighlights: t.text().nullable().default("{}"),
-    }),
+    item: t
+      .table({
+        type: t.enum(["movie", "tv"]).default("movie").describe("movie | tv."),
+        tmdbId: t.integer().describe("TMDB media id."),
+        priority: t.integer().default(0).describe("Manual sort position, ascending."),
+        title: t.text().describe("Movie or TV show title."),
+        posterUrl: t.text().nullable().describe("Poster image URL, if available."),
+        rating: t.integer().nullable().describe("TMDB rating on a 0-100 scale, if available."),
+        overview: t.text().nullable().describe("TMDB synopsis."),
+        releaseDate: t.integer().nullable().describe("Release date as unix epoch milliseconds, if known."),
+        duration: t.integer().nullable().describe("Movie runtime in minutes, if known."),
+        episodeCount: t.integer().nullable().describe("TV episode count, if known."),
+        watchedAt: t
+          .integer()
+          .nullable()
+          .describe("When the user marked the item watched, as unix epoch milliseconds."),
+        processingStatus: t
+          .text()
+          .$type<"idle" | "pending" | (string & {})>()
+          .default("idle")
+          .describe("AI enrichment status."),
+        tags: t.text().default("[]").describe("JSON array of user-facing tags."),
+        createdAt: t.integer().describe("When the item was added, as unix epoch milliseconds."),
+        userRating: t.real().nullable().default(null).describe("User rating, if set."),
+        tagHighlights: t.text().nullable().default("{}").describe("JSON object with AI-generated tag evidence."),
+      })
+      .describe("Movies and TV shows in the user's watchlist."),
   },
   migrations,
 });

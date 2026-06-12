@@ -14,10 +14,12 @@ export const migrations = createMigrations((b) => ({
 
 export const syncDbSchema = defineSyncSchema({
   tables: {
-    todo: t.table({
-      title: t.text(),
-      completed: t.boolean().default(false),
-    }),
+    todo: t
+      .table({
+        title: t.text().describe("Todo title."),
+        completed: t.boolean().default(false).describe("1 when done."),
+      })
+      .describe("The user's todos."),
   },
   migrations,
 });

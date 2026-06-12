@@ -59,18 +59,13 @@ export function createAiDbAccess(opts: {
   context?: SchemaDocContext;
   limits?: { maxRows?: number; maxCellChars?: number };
 }): AiDbAccess {
-  let schemaDoc: string | undefined;
+  const schemaDoc = createSchemaDoc({ syncDbSchema: opts.syncDbSchema, context: opts.context });
   const guard = createQueryGuard({ executor: opts.executor });
   const maxRows = opts.limits?.maxRows ?? 200;
   const maxCellChars = opts.limits?.maxCellChars ?? 2000;
 
   return {
     getSchemaDoc() {
-      schemaDoc ??= createSchemaDoc({
-        execute: (sql) => opts.executor.execute<Record<string, unknown>>({ sql, parameters: [] }).rows,
-        syncDbSchema: opts.syncDbSchema,
-        context: opts.context,
-      });
       return schemaDoc;
     },
     query(input) {

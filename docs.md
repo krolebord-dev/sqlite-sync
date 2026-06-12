@@ -145,11 +145,13 @@ import { defineSyncSchema, t } from "@sqlite-sync/core";
 
 export const syncDbSchema = defineSyncSchema({
   tables: {
-    todo: t.table({
-      title: t.text(),
-      completed: t.boolean().default(false),
-      priority: t.integer().default(0),
-    }),
+    todo: t
+      .table({
+        title: t.text().describe("Todo title."),
+        completed: t.boolean().default(false).describe("1 when done."),
+        priority: t.integer().default(0),
+      })
+      .describe("The user's todos."),
     tag: t.table({
       name: t.text(),
     }),
@@ -164,9 +166,9 @@ export type Todo = typeof syncDbSchema.tables.todo.$row;
 Column builders: `t.text()`, `t.integer()`, `t.real()`, `t.boolean()` (stored as INTEGER 0/1),
 and `t.enum(["a", "b"])` (TEXT, validated against the values at runtime — no SQL CHECK
 constraint). JSON values are stored as serialized TEXT via `t.text()` — parse at the call site.
-Each chains `.nullable()`, `.default(value)`,
+Each column builder chains `.nullable()`, `.default(value)`,
 `.$type<Narrowed>()` (type-only narrowing, e.g. `t.text().$type<"a" | (string & {})>()`), and
-`.describe(text)` for generated schema docs.
+`.describe(text)` for generated schema docs. Table builders also chain `.describe(text)`.
 
 The table builders also expose runtime metadata: `syncDbSchema.tables.todo.columns` (per-column
 kind, nullability, defaults) and `validatePayload(payload, { event })` for checking CRDT event
@@ -933,9 +935,6 @@ const aiDbAccess = createAiDbAccess({
   syncDbSchema,
   context: {
     overview: "# My app's database\n\nDeletes are soft-deletes; the views below already hide them.",
-    tables: {
-      todo: { description: "The user's todos.", columns: { completed: "1 when done." } },
-    },
   },
 });
 
@@ -943,7 +942,7 @@ const aiDbAccess = createAiDbAccess({
 const tools = createDbTools({ access: () => aiDbAccess });
 ```
 
-The schema doc is generated from `PRAGMA table_info` plus the app-provided `context` (keys are CRDT view names), introspected once and cached. For cross-Durable-Object setups, `AiDbAccess` method names double as the RPC contract — a stub proxying `getSchemaDoc()` satisfies `createDbTools`. The `ToolSet` currently contains a single `getDbSchema` tool.
+The schema doc is generated from the declared sync schema's table builders (including table/column `.describe()` descriptions and enum values) plus the app-provided `context.overview` — no database access involved. For cross-Durable-Object setups, `AiDbAccess` method names double as the RPC contract — a stub proxying `getSchemaDoc()` and `query()` satisfies `createDbTools`. The `ToolSet` contains `getDbSchema` and `queryDb`.
 
 ---
 
@@ -1189,14 +1188,14 @@ function createMigrator(
 
 #### `createAiDbAccess(options)`
 
-Creates read-only AI access to a synced database. Lives where the storage lives; the schema doc is introspected lazily and cached.
+Creates read-only AI access to a synced database. Lives where the storage lives; the schema doc is generated once from the declared schema.
 
 ```ts
 function createAiDbAccess(options: {
   executor: AiDbExecutor; // satisfied by createKyselyExecutor from @sqlite-sync/cloudflare
   syncDbSchema: SyncDbSchema;
-  context?: SchemaDocContext; // overview + per-table/column descriptions
-}): AiDbAccess // { getSchemaDoc(): string }
+  context?: SchemaDocContext; // overview/app-level notes
+}): AiDbAccess // { getSchemaDoc(): string; query(input): AiQueryResult }
 ```
 
 #### `createDbTools(options)`
@@ -1211,7 +1210,7 @@ function createDbTools(options: {
 
 #### `createSchemaDoc(options)`
 
-Lower-level helper that generates the markdown schema doc directly from an `execute` function — used internally by `createAiDbAccess`.
+Lower-level helper that generates the markdown schema doc directly from a `syncDbSchema` (and optional `context`) — used internally by `createAiDbAccess`.
 
 ### WebSocket Protocol
 

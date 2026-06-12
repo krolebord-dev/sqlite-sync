@@ -1,24 +1,14 @@
-import { createMigrations, createSyncDbSchema, SQLiteReactiveDb } from "@sqlite-sync/core";
+import { createMigrations, defineSyncSchema, SQLiteReactiveDb, t } from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type AiDbExecutor, createAiDbAccess } from "../src/db-access";
 
-type ItemRow = {
-  id: string;
-  title: string;
-};
-
 function createFakeExecutor() {
   const calls: string[] = [];
-  const tableInfoRows = [
-    { cid: 0, name: "id", type: "TEXT", notnull: 1, dflt_value: null, pk: 1 },
-    { cid: 1, name: "title", type: "TEXT", notnull: 1, dflt_value: null, pk: 0 },
-    { cid: 2, name: "tombstone", type: "INTEGER", notnull: 1, dflt_value: "0", pk: 0 },
-  ];
 
   const executor: AiDbExecutor = {
     execute: <TResult>(query: { sql: string; parameters: readonly unknown[] }) => {
       calls.push(query.sql);
-      return { rows: tableInfoRows as TResult[] };
+      return { rows: [] as TResult[] };
     },
     transaction: (callback) => callback(executor),
   };
@@ -26,40 +16,37 @@ function createFakeExecutor() {
   return { executor, calls };
 }
 
-const syncDbSchema = createSyncDbSchema({ migrations: createMigrations(() => ({ 0: [] })) })
-  .addTable<ItemRow>()
-  .withConfig({ baseTableName: "item", crdtTableName: "items" })
-  .build();
+const syncDbSchema = defineSyncSchema({
+  tables: {
+    items: t.table({ title: t.text() }, { baseName: "item" }).describe("The user's items."),
+  },
+  migrations: createMigrations(() => ({ 0: [] })),
+});
 
 describe("createAiDbAccess", () => {
-  it("builds the schema doc through the executor", () => {
+  it("builds the schema doc from the declared schema without touching the database", () => {
     const { executor, calls } = createFakeExecutor();
     const access = createAiDbAccess({
       executor,
       syncDbSchema,
-      context: { tables: { items: { description: "The user's items." } } },
     });
 
     const doc = access.getSchemaDoc();
 
-    expect(calls).toEqual(['PRAGMA table_info("item")']);
+    expect(calls).toEqual([]);
+    expect(access.getSchemaDoc()).toBe(doc);
     expect(doc).toContain("read-only SQL views");
     expect(doc).toContain(
-      ["## items", "", "The user's items.", "", "Columns:", "- `id` TEXT NOT NULL", "- `title` TEXT NOT NULL"].join(
-        "\n",
-      ),
+      [
+        "## items",
+        "",
+        "The user's items.",
+        "",
+        "Columns:",
+        "- `id` TEXT NOT NULL — Unique immutable item id",
+        "- `title` TEXT NOT NULL",
+      ].join("\n"),
     );
-  });
-
-  it("introspects once and caches the doc", () => {
-    const { executor, calls } = createFakeExecutor();
-    const access = createAiDbAccess({ executor, syncDbSchema });
-
-    const first = access.getSchemaDoc();
-    const second = access.getSchemaDoc();
-
-    expect(second).toBe(first);
-    expect(calls).toHaveLength(1);
   });
 });
 

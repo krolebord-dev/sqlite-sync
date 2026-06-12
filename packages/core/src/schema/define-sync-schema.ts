@@ -48,7 +48,6 @@ export type DefineSyncSchemaConfig<Tables extends SyncSchemaTables> = {
  *
  * Record keys are the crdt (view) table names; base table names default to the key
  * prefixed with "_", overridable per table via `t.table(cols, { baseName })`.
- * Compiles to the same `SyncDbSchema` shape as the `createSyncDbSchema` builder.
  */
 export function defineSyncSchema<Tables extends SyncSchemaTables>({
   tables,

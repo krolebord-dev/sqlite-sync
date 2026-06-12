@@ -52,6 +52,7 @@ export type SyncSchemaTables = Record<string, AnyTableBuilder>;
 export type TableOptions<BaseName extends string | undefined = string | undefined> = {
   /** Override the materialized base table name (defaults to the crdt table name prefixed with "_"). */
   baseName?: BaseName;
+  description?: string;
 };
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -89,6 +90,7 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   /** All columns in DDL order, including the auto-injected `id` and `tombstone`. */
   readonly columns: Record<string, ColumnMeta>;
   readonly baseName: BaseName;
+  readonly description: string | undefined;
 
   constructor(
     readonly userColumns: Cols,
@@ -106,6 +108,11 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
       tombstone: tombstoneColumnMeta,
     };
     this.baseName = options?.baseName as BaseName;
+    this.description = options?.description;
+  }
+
+  describe(description: string): TableBuilder<Cols, BaseName> {
+    return new TableBuilder(this.userColumns, { baseName: this.baseName, description });
   }
 
   /** Type-only: the row shape returned by queries. Do not access at runtime. */

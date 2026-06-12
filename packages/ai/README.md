@@ -4,7 +4,7 @@ AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) 
 
 ## What's included
 
-- `createSchemaDoc` — generates a markdown schema doc by introspecting the synced database (structure from `PRAGMA table_info`, semantics from app-provided context).
+- `createSchemaDoc` — generates a markdown schema doc from the declared sync schema (structure from the `t.table()` builders, semantics from `.describe()` and app-provided context). No database access needed.
 - `createAiDbAccess` — server-side access object living next to the storage; its methods double as an RPC contract for cross-Durable-Object setups.
 - `createDbTools` — AI SDK v6 `ToolSet` (`getDbSchema` and `queryDb` tools) backed by an `AiDbAccess` or a stub proxying to one.
 
@@ -24,12 +24,6 @@ async onStart() {
     syncDbSchema,
     context: {
       overview: "# My app's database\n\nA todo app for a single user.",
-      tables: {
-        todos: {
-          description: "The user's todos.",
-          columns: { completed: "1 when done." },
-        },
-      },
     },
   });
 }
@@ -60,6 +54,6 @@ getTools() {
 }
 ```
 
-`context.tables` keys are CRDT view names (`crdtTableName`). The doc skips the internal `tombstone` column and introspects base tables (views lose `NOT NULL` fidelity), presenting them under their view names.
+The doc skips the internal `tombstone` column and renders enum columns with their allowed values and boolean columns with a `0/1` hint. Table and column descriptions come from `.describe()` on the builders.
 
-The generated doc always includes a built-in preamble (after your `overview`) explaining sqlite-sync mechanics — that the database syncs between devices and that the listed tables are read-only views with soft-deleted rows already filtered out. Your `context` only needs to describe your domain: what the app is, what each table/column means, and any data conventions (units, enums, timestamp formats).
+The generated doc always includes a built-in preamble (after your `overview`) explaining sqlite-sync mechanics — that the database syncs between devices and that the listed tables are read-only views with soft-deleted rows already filtered out. Prefer keeping domain semantics in the schema with `.describe()` and using `context.overview` for app-level notes.

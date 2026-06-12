@@ -56,6 +56,15 @@ describe("column metadata", () => {
     expect(t.table({ title: t.text() }).baseName).toBeUndefined();
     expect(t.table({ title: t.text() }, { baseName: "raw_item" }).baseName).toBe("raw_item");
   });
+
+  it("records table descriptions without mutating the original builder", () => {
+    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
+    const described = base.describe("Items the user tracks.");
+
+    expect(base.description).toBeUndefined();
+    expect(described.description).toBe("Items the user tracks.");
+    expect(described.baseName).toBe("raw_item");
+  });
 });
 
 describe("row type inference", () => {
