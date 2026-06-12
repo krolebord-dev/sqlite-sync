@@ -77,6 +77,6 @@ export interface SyncDbSchema<ClientDB = {}, ServerDB = {}, MutationsDB = {}> {
   "~mutationsSchema": MutationsDB;
 }
 
-type ReadonlyTable<Table extends Record<string, unknown>> = {
+export type ReadonlyTable<Table extends Record<string, unknown>> = {
   [K in keyof Table]: ColumnType<Table[K], never, never>;
 };

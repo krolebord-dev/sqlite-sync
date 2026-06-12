@@ -1,9 +1,9 @@
-import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
+import { createMigrations, defineSyncSchema, t } from "@sqlite-sync/core";
 
 export const migrations = createMigrations((b) => ({
   0: [
-    b.createTable("_todo", (t) =>
-      t
+    b.createTable("_todo", (table) =>
+      table
         .addColumn("id", "text", (col) => col.primaryKey().notNull())
         .addColumn("title", "text", (col) => col.notNull())
         .addColumn("completed", "boolean", (col) => col.notNull().defaultTo(false))
@@ -12,16 +12,14 @@ export const migrations = createMigrations((b) => ({
   ],
 }));
 
-export const syncDbSchema = createSyncDbSchema({
+export const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({
+      title: t.text(),
+      completed: t.boolean().default(false),
+    }),
+  },
   migrations,
-})
-  .addTable<Todo>()
-  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
-  .build();
+});
 
-export type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-  tombstone?: boolean;
-};
+export type Todo = typeof syncDbSchema.tables.todo.$row;

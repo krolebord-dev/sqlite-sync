@@ -41,6 +41,28 @@ export {
   type SystemMigration,
   type SystemMigrationContext,
 } from "./migrations/system-schema";
+// Schema definition (defineSyncSchema)
+export {
+  type AnyTableBuilder,
+  type DefinedSyncSchema,
+  type DefineSyncSchemaConfig,
+  defineSyncSchema,
+  type SyncSchemaTables,
+} from "./schema/define-sync-schema";
+// Schema table builder (t.*)
+export {
+  type AnyColumnBuilder,
+  ColumnBuilder,
+  type ColumnKind,
+  type ColumnMeta,
+  type InferRow,
+  type PayloadValidationResult,
+  type SqliteStorageType,
+  TableBuilder,
+  type TableColumns,
+  type TableOptions,
+  t,
+} from "./schema/table-builder";
 // CRDT
 export {
   createCrdtApplyFunction,
@@ -52,6 +74,7 @@ export {
   type CrdtTableConfig,
   type CreateCrdtSchemaOptions,
   createSyncDbSchema,
+  type ReadonlyTable,
   type SyncDbSchema,
 } from "./sqlite-crdt/crdt-schema";
 export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";

@@ -1,0 +1,94 @@
+import type { Migrations } from "../migrations/migrator";
+import type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
+import type { InferRow, TableBuilder, TableColumns } from "./table-builder";
+
+export type AnyTableBuilder = TableBuilder<any, any>;
+
+export type SyncSchemaTables = Record<string, AnyTableBuilder>;
+
+type Simplify<T> = { [K in keyof T]: T[K] } & {};
+
+type RowOf<Table extends AnyTableBuilder> =
+  Table extends TableBuilder<infer Cols extends TableColumns, any> ? InferRow<Cols> : never;
+
+// Falls back to the "_" convention unless ~baseName is a string *literal* — inference can
+// resolve an omitted override to its constraint (string | undefined) rather than undefined.
+type BaseNameOf<CrdtName, Table extends AnyTableBuilder> = string extends Table["~baseName"]
+  ? `_${CrdtName & string}`
+  : [Table["~baseName"]] extends [string]
+    ? Table["~baseName"]
+    : `_${CrdtName & string}`;
+
+type ClientSchemaOf<Tables extends SyncSchemaTables> = Simplify<
+  { [K in keyof Tables]: RowOf<Tables[K]> } & {
+    [K in keyof Tables as BaseNameOf<K, Tables[K]>]: ReadonlyTable<RowOf<Tables[K]>>;
+  }
+>;
+
+type ServerSchemaOf<Tables extends SyncSchemaTables> = Simplify<
+  { [K in keyof Tables]: ReadonlyTable<RowOf<Tables[K]>> } & {
+    [K in keyof Tables as BaseNameOf<K, Tables[K]>]: ReadonlyTable<RowOf<Tables[K]>>;
+  }
+>;
+
+type MutationsSchemaOf<Tables extends SyncSchemaTables> = Simplify<{
+  [K in keyof Tables as BaseNameOf<K, Tables[K]>]: RowOf<Tables[K]>;
+}>;
+
+export interface DefinedSyncSchema<Tables extends SyncSchemaTables>
+  extends SyncDbSchema<ClientSchemaOf<Tables>, ServerSchemaOf<Tables>, MutationsSchemaOf<Tables>> {
+  /** The table builders, for type extraction (`typeof schema.tables.item.$row`) and runtime metadata. */
+  tables: Tables;
+}
+
+export type DefineSyncSchemaConfig<Tables extends SyncSchemaTables> = {
+  tables: Tables;
+  /** Full migration history (including the initial createTable version), built with `createMigrations`. */
+  migrations: Migrations;
+};
+
+/**
+ * Define a sync database schema from `t.table()` builders.
+ *
+ * Record keys are the crdt (view) table names; base table names default to the key
+ * prefixed with "_", overridable per table via `t.table(cols, { baseName })`.
+ * Compiles to the same `SyncDbSchema` shape as the `createSyncDbSchema` builder.
+ */
+export function defineSyncSchema<Tables extends SyncSchemaTables>({
+  tables,
+  migrations,
+}: DefineSyncSchemaConfig<Tables>): DefinedSyncSchema<Tables> {
+  const tablesConfig: CrdtTableConfig[] = Object.entries(tables).map(([crdtTableName, table]) => ({
+    crdtTableName,
+    baseTableName: table.baseName ?? `_${crdtTableName}`,
+  }));
+
+  const seenNames = new Set<string>();
+  for (const { crdtTableName, baseTableName } of tablesConfig) {
+    for (const name of [crdtTableName, baseTableName]) {
+      if (seenNames.has(name)) {
+        throw new Error(`Duplicate table name "${name}" in sync schema`);
+      }
+      seenNames.add(name);
+    }
+  }
+
+  return {
+    tables,
+    get tablesConfig() {
+      return tablesConfig;
+    },
+    get migrations() {
+      return migrations;
+    },
+    get "~clientSchema"(): never {
+      throw new Error("~clientSchema is type-only and cannot be accessed at runtime");
+    },
+    get "~serverSchema"(): never {
+      throw new Error("~serverSchema is type-only and cannot be accessed at runtime");
+    },
+    get "~mutationsSchema"(): never {
+      throw new Error("~mutationsSchema is type-only and cannot be accessed at runtime");
+    },
+  };
+}
