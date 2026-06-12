@@ -1,4 +1,5 @@
 import { jsonSchema, type ToolSet, tool } from "ai";
+import type { AiQueryInput, AiQueryResult } from "./db-access";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -8,11 +9,30 @@ type MaybePromise<T> = T | Promise<T>;
  */
 export type DbToolsAccess = {
   getSchemaDoc(): MaybePromise<string>;
+  query(input: AiQueryInput): MaybePromise<AiQueryResult>;
 };
 
 const emptyInputSchema = jsonSchema<Record<string, never>>({
   type: "object",
   properties: {},
+  additionalProperties: false,
+});
+
+const queryInputSchema = jsonSchema<{ sql: string; parameters?: unknown[] }>({
+  type: "object",
+  properties: {
+    sql: {
+      type: "string",
+      description:
+        "A single read-only SQLite statement starting with SELECT, WITH, or VALUES. Use ? placeholders for values.",
+    },
+    parameters: {
+      type: "array",
+      items: { type: ["string", "number", "boolean", "null"] },
+      description: "Values bound to the ? placeholders, in order.",
+    },
+  },
+  required: ["sql"],
   additionalProperties: false,
 });
 
@@ -29,6 +49,15 @@ export function createDbTools(opts: { access: () => MaybePromise<DbToolsAccess> 
       execute: async () => {
         const access = await opts.access();
         return await access.getSchemaDoc();
+      },
+    }),
+    queryDb: tool({
+      description:
+        "Run a read-only SQL query against the synced SQLite database. Only a single SELECT/WITH/VALUES statement is allowed — anything that writes is rejected. Pass values as ? placeholders via `parameters` instead of inlining them as literals. Results are capped; ask for fewer columns or add LIMIT/WHERE if `truncated` is true.",
+      inputSchema: queryInputSchema,
+      execute: async ({ sql, parameters }) => {
+        const access = await opts.access();
+        return await access.query({ sql, parameters });
       },
     }),
   };

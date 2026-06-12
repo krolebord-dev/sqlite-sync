@@ -6,7 +6,9 @@ AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) 
 
 - `createSchemaDoc` — generates a markdown schema doc by introspecting the synced database (structure from `PRAGMA table_info`, semantics from app-provided context).
 - `createAiDbAccess` — server-side access object living next to the storage; its methods double as an RPC contract for cross-Durable-Object setups.
-- `createDbTools` — AI SDK v6 `ToolSet` (currently a `getDbSchema` tool) backed by an `AiDbAccess` or a stub proxying to one.
+- `createDbTools` — AI SDK v6 `ToolSet` (`getDbSchema` and `queryDb` tools) backed by an `AiDbAccess` or a stub proxying to one.
+
+`queryDb` is strictly read-only: a single `SELECT`/`WITH`/`VALUES` statement, verified against SQLite's `EXPLAIN` bytecode for write opcodes, and executed inside a transaction that is always rolled back. Reads are **not** restricted by table — the agent can query every table in the database file (including sqlite-sync's internal event log), so don't colocate data the agent must not see. Results are capped (default 200 rows, 2000 chars per cell) and report `truncated` so the agent can narrow its query.
 
 ## Usage (Cloudflare Durable Object)
 
@@ -32,9 +34,12 @@ async onStart() {
   });
 }
 
-// RPC method for agents running elsewhere:
+// RPC methods for agents running elsewhere:
 getDbSchemaDoc() {
   return this.aiDbAccess.getSchemaDoc();
+}
+queryDb(input: AiQueryInput) {
+  return this.aiDbAccess.query(input);
 }
 ```
 
@@ -46,7 +51,10 @@ getTools() {
   return createDbTools({
     access: async () => {
       const stub = await this.getUserDbStub();
-      return { getSchemaDoc: () => stub.getDbSchemaDoc() };
+      return {
+        getSchemaDoc: () => stub.getDbSchemaDoc(),
+        query: (input) => stub.queryDb(input),
+      };
     },
   });
 }
