@@ -131,7 +131,7 @@ export function createCrdtApplyFunction({
   const applyItemCreated = ({ event }: ItemCreatedOpts) => {
     const eventPayload = JSON.parse(event.payload);
 
-    eventPayload.tombstone = false;
+    eventPayload.tombstone = 0;
     insertItem({ dataset: event.dataset, payload: eventPayload });
 
     const newUpdateLog = {} as Record<string, string>;

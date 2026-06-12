@@ -26,7 +26,9 @@ export type KyselyExecutor<TDatabase> = {
 
 export function createKyselyExecutor<TDatabase>(db: DurableObjectStorage): KyselyExecutor<TDatabase> {
   const execute = <TResult = unknown>(query: ExecuteParams): ExecuteResult<TResult> => {
-    const rows = db.sql.exec(query.sql, ...query.parameters).toArray();
+    // https://github.com/cloudflare/workers-sdk/issues/9964 - booleans are not coerced to 1/0 in DO SQL
+    const parameters = query.parameters.map((param) => (typeof param === "boolean" ? (param ? 1 : 0) : param));
+    const rows = db.sql.exec(query.sql, ...parameters).toArray();
     return { rows: rows as TResult[] };
   };
 
