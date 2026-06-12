@@ -43,12 +43,14 @@ export type TableMetadata = {
 
 export type DatabaseIntrospection = Record<string, TableMetadata>;
 
-type ColumnMetadata = {
+export type ColumnMetadata = {
   name: string;
   dataType: string;
   isNullable: boolean;
   isAutoIncrementing: boolean;
   hasDefaultValue: boolean;
+  defaultValueSql: string | null;
+  isPrimaryKey: boolean;
   comment: undefined;
 };
 
@@ -107,6 +109,8 @@ export function introspectDb<BaseDatabase>(_db: SQLiteDbWrapper<BaseDatabase>): 
             isNullable: !col.notnull,
             isAutoIncrementing: col.name === autoIncrementCol,
             hasDefaultValue: col.dflt_value != null,
+            defaultValueSql: col.dflt_value == null ? null : String(col.dflt_value),
+            isPrimaryKey: col.pk > 0,
             comment: undefined,
           })),
         },

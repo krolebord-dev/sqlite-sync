@@ -9,7 +9,7 @@ const item = t.table({
   posterUrl: t.text().nullable(),
   userRating: t.real().nullable(),
   watched: t.boolean().default(false),
-  tags: t.json<string[]>().default([]),
+  tags: t.text().default("[]"),
   status: t.enum(["idle", "pending", "done"]).default("idle"),
 });
 
@@ -25,7 +25,6 @@ describe("column metadata", () => {
     expect(item.columns.posterUrl).toMatchObject({ kind: "text", nullable: true, hasDefault: false });
     expect(item.columns.priority).toMatchObject({ kind: "integer", hasDefault: true, defaultValue: 0 });
     expect(item.columns.watched).toMatchObject({ kind: "boolean", sqlType: "integer", defaultValue: false });
-    expect(item.columns.tags).toMatchObject({ kind: "json", sqlType: "text", defaultValue: [] });
     expect(item.columns.status).toMatchObject({
       kind: "enum",
       sqlType: "text",
@@ -67,7 +66,7 @@ describe("row type inference", () => {
     expectTypeOf<Row["type"]>().toEqualTypeOf<"movie" | "tv">();
     expectTypeOf<Row["posterUrl"]>().toEqualTypeOf<string | null>();
     expectTypeOf<Row["watched"]>().toEqualTypeOf<boolean>();
-    expectTypeOf<Row["tags"]>().toEqualTypeOf<string[]>();
+    expectTypeOf<Row["tags"]>().toEqualTypeOf<string>();
     expectTypeOf<Row["status"]>().toEqualTypeOf<"idle" | "pending" | "done">();
     expectTypeOf<Row["tombstone"]>().toEqualTypeOf<boolean | undefined>();
 
@@ -125,14 +124,12 @@ describe("validatePayload", () => {
       tmdbId: 1.5,
       userRating: "high",
       watched: "yes",
-      tags: "{not json",
     });
     expect(result.success === false && result.errors).toEqual([
       'Column "tmdbId" expects an integer, got number',
       'Column "title" expects text, got number',
       'Column "userRating" expects a number, got string',
       'Column "watched" expects a boolean (true/false or 0/1), got string',
-      'Column "tags" contains invalid JSON',
     ]);
   });
 

@@ -8,6 +8,7 @@
     "dev": "pnpm --filter @sqlite-sync/example dev",
     "dev:server": "pnpm --filter @sqlite-sync/example dev:server",
     "build": "pnpm -r build",
+    "build:packages": "pnpm -r --filter './packages/**' build",
     "typecheck": "pnpm -r typecheck",
     "publish:packages": "pnpm --filter './packages/**' publish --access public --no-git-checks",
     "publish:dry": "pnpm --filter './packages/**' publish --access public --dry-run",

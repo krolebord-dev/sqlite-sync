@@ -1,34 +1,13 @@
-import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
+import { createMigrations, defineSyncSchema, t } from "@sqlite-sync/core";
 
 export type ListDbProps = {
   listId: string;
 };
 
-export type ListItem = {
-  id: string;
-  type: "movie" | "tv";
-  tmdbId: number;
-  priority: number;
-  title: string;
-  posterUrl: string | null;
-  rating: number | null;
-  overview: string | null;
-  releaseDate: number | null;
-  duration: number | null;
-  episodeCount: number | null;
-  watchedAt: number | null;
-  createdAt: number;
-  tombstone?: boolean;
-  tags: string;
-  processingStatus: "idle" | "pending" | (string & {});
-  userRating: number | null;
-  tagHighlights: string;
-};
-
 const migrations = createMigrations((b) => ({
   0: [
-    b.createTable("_item", (t) =>
-      t
+    b.createTable("_item", (table) =>
+      table
         .addColumn("id", "text", (col) => col.primaryKey().notNull())
         .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false))
         .addColumn("type", "text", (col) => col.notNull().defaultTo("movie"))
@@ -53,13 +32,32 @@ const migrations = createMigrations((b) => ({
   ],
 }));
 
+export const syncDbSchema = defineSyncSchema({
+  tables: {
+    item: t.table({
+      type: t.enum(["movie", "tv"]).default("movie"),
+      tmdbId: t.integer(),
+      priority: t.integer().default(0),
+      title: t.text(),
+      posterUrl: t.text().nullable(),
+      rating: t.integer().nullable(),
+      overview: t.text().nullable(),
+      releaseDate: t.integer().nullable(),
+      duration: t.integer().nullable(),
+      episodeCount: t.integer().nullable(),
+      watchedAt: t.integer().nullable(),
+      processingStatus: t.text().$type<"idle" | "pending" | (string & {})>().default("idle"),
+      tags: t.text().default("[]"),
+      createdAt: t.integer(),
+      userRating: t.real().nullable().default(null),
+      tagHighlights: t.text().nullable().default("{}"),
+    }),
+  },
+  migrations,
+});
+
+export type ListItem = typeof syncDbSchema.tables.item.$row;
+
 export type ListDb = (typeof syncDbSchema)["~clientSchema"];
 
 export type ListSyncDbSchema = typeof syncDbSchema;
-
-export const syncDbSchema = createSyncDbSchema({
-  migrations,
-})
-  .addTable<ListItem>()
-  .withConfig({ baseTableName: "_item", crdtTableName: "item" })
-  .build();

@@ -38,19 +38,12 @@ pnpm add @sqlite-sync/devtools
 
 ```ts
 // src/db-schema.ts
-import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
-
-type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-  tombstone?: boolean;
-};
+import { createMigrations, defineSyncSchema, t } from "@sqlite-sync/core";
 
 const migrations = createMigrations((b) => ({
   0: [
-    b.createTable("_todo", (t) =>
-      t
+    b.createTable("_todo", (table) =>
+      table
         .addColumn("id", "text", (col) => col.primaryKey().notNull())
         .addColumn("title", "text", (col) => col.notNull())
         .addColumn("completed", "boolean", (col) => col.notNull().defaultTo(false))
@@ -59,11 +52,25 @@ const migrations = createMigrations((b) => ({
   ],
 }));
 
-export const syncDbSchema = createSyncDbSchema({ migrations })
-  .addTable<Todo>()
-  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
-  .build();
+export const syncDbSchema = defineSyncSchema({
+  tables: {
+    // Queryable as "todo"; materialized base table "_todo".
+    // `id` and `tombstone` columns are added automatically.
+    todo: t.table({
+      title: t.text(),
+      completed: t.boolean().default(false),
+    }),
+  },
+  migrations,
+});
+
+// Row type inferred from the table declaration
+export type Todo = typeof syncDbSchema.tables.todo.$row;
 ```
+
+During development, pass `verifySchema: import.meta.env.DEV` to `startDbWorker` (or assert that
+`verifySyncSchema(syncDbSchema)` returns no issues in a test) to catch drift between the declared
+tables and the migration history.
 
 ```ts
 // src/db.ts
@@ -248,7 +255,7 @@ elected worker wipes the local DB on startup when the stored version no longer m
 - De-sync and schema-mismatch detection, with reload/reset recovery via `requestReload({ clean })`.
 - Forced local-DB wipes across incompatible deploys via the `storageVersion` worker option.
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.
-- Extensible CRDT schema and migrations (`createSyncDbSchema`, `createMigrations`).
+- Declarative synced tables with inferred row types and runtime column metadata (`defineSyncSchema`, `t.table`), plus explicit migrations (`createMigrations`) verified against the declared schema (`verifySyncSchema`).
 - AI agent tools via `@sqlite-sync/ai` (schema doc generation + AI SDK `ToolSet`).
 
 ## Known Constraints and Requirements

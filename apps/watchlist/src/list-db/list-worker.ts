@@ -7,6 +7,7 @@ const workerConfig = await getWorkerConfig<ListDbProps>();
 await startDbWorker({
   workerConfig,
   syncDbSchema,
+  verifySchema: import.meta.env.DEV,
   createRemoteSource: createWsRemoteSource({
     createWebSocket: () =>
       new PartySocket({

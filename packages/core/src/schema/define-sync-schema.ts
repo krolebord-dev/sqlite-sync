@@ -1,10 +1,6 @@
 import type { Migrations } from "../migrations/migrator";
 import type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
-import type { InferRow, TableBuilder, TableColumns } from "./table-builder";
-
-export type AnyTableBuilder = TableBuilder<any, any>;
-
-export type SyncSchemaTables = Record<string, AnyTableBuilder>;
+import type { AnyTableBuilder, InferRow, SyncSchemaTables, TableBuilder, TableColumns } from "./table-builder";
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 

@@ -92,7 +92,7 @@ Use `createMigrations` to define versioned DDL operations:
 
 ```ts
 // src/migrations.ts
-import { createMigrations, createSyncDbSchema } from "@sqlite-sync/core";
+import { createMigrations } from "@sqlite-sync/core";
 
 export const migrations = createMigrations((b) => ({
   // Version 0: initial schema
@@ -135,31 +135,60 @@ Migration steps automatically generate **event transformers** — when syncing e
 
 ### Building the Schema
 
-Chain `.addTable<Type>().withConfig(...)` for each CRDT table, then call `.build()`:
+Declare tables with the `t.*` column builders and tie them to the migrations with `defineSyncSchema`.
+Record keys are the CRDT (view) table names; the base table name defaults to the key with an
+underscore prefix (override per table with `t.table(cols, { baseName })`). The `id` and `tombstone`
+columns are added automatically and must not be declared.
 
 ```ts
-// Type for rows in the todo table
-export type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-  priority: number;
-  tombstone?: boolean;
-};
+import { defineSyncSchema, t } from "@sqlite-sync/core";
 
-export const syncDbSchema = createSyncDbSchema({ migrations })
-  .addTable<Todo>()
-  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
-  .build();
+export const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({
+      title: t.text(),
+      completed: t.boolean().default(false),
+      priority: t.integer().default(0),
+    }),
+    tag: t.table({
+      name: t.text(),
+    }),
+  },
+  migrations,
+});
 
-// For multiple tables:
-export const syncDbSchema = createSyncDbSchema({ migrations })
-  .addTable<Todo>()
-  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
-  .addTable<Tag>()
-  .withConfig({ baseTableName: "_tag", crdtTableName: "tag" })
-  .build();
+// Row types are inferred from the declarations:
+export type Todo = typeof syncDbSchema.tables.todo.$row;
 ```
+
+Column builders: `t.text()`, `t.integer()`, `t.real()`, `t.boolean()` (stored as INTEGER 0/1),
+and `t.enum(["a", "b"])` (TEXT, validated against the values at runtime — no SQL CHECK
+constraint). JSON values are stored as serialized TEXT via `t.text()` — parse at the call site.
+Each chains `.nullable()`, `.default(value)`,
+`.$type<Narrowed>()` (type-only narrowing, e.g. `t.text().$type<"a" | (string & {})>()`), and
+`.describe(text)` for generated schema docs.
+
+The table builders also expose runtime metadata: `syncDbSchema.tables.todo.columns` (per-column
+kind, nullability, defaults) and `validatePayload(payload, { event })` for checking CRDT event
+payloads against the declared columns.
+
+### Verifying Migrations Against the Schema
+
+Migrations are hand-written and can drift from the declared tables. `verifySyncSchema` replays the
+full migration history on a throwaway in-memory database and diffs the result against the
+declarations — missing/extra columns, type and nullability mismatches, wrong defaults, and a
+missing `id` primary key are reported as structured issues. Tables created by migrations but not
+declared (e.g. local-only caches) are ignored.
+
+```ts
+// Vitest one-liner:
+it("migrations produce the declared schema", async () => {
+  expect(await verifySyncSchema(syncDbSchema)).toEqual([]);
+});
+```
+
+In the browser, pass `verifySchema: import.meta.env.DEV` to `startDbWorker` — on mismatch the
+worker throws with the full issue list and refuses to start.
 
 The schema carries three phantom types used for type inference:
 - `~clientSchema` — Used by React hooks. Includes both base tables (read-only) and CRDT views (read-write).
@@ -234,7 +263,7 @@ export async function initDb() {
 |--------|------|-------------|
 | `dbId` | `string` | Unique database identifier. Must match `^[a-zA-Z][a-zA-Z\-0-9]{2,63}$`. Used for OPFS directory names and Web Lock keys. |
 | `worker` | `Worker` | The Web Worker instance running `startDbWorker`. |
-| `syncDbSchema` | `SyncDbSchema` | The schema built with `createSyncDbSchema`. |
+| `syncDbSchema` | `SyncDbSchema` | The schema built with `defineSyncSchema`. |
 | `workerProps` | `Props` | Extra data passed to the worker (accessible via `getWorkerConfig().props`). |
 
 To wipe the local database (e.g. during development or as a recovery path), use `syncedDb.requestReload({ clean: true })` — see [Reload and Recovery](#reload-and-recovery).
@@ -978,12 +1007,24 @@ function createSyncedDb<Database, Props = undefined>(
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `dispose()` | `() => Promise<void>` | Clean up all resources |
 
-#### `createSyncDbSchema(options)`
+#### `defineSyncSchema(config)`
 
-Creates a schema builder for defining CRDT tables.
+Defines the sync database schema from `t.table()` builders plus the migration history.
 
 ```ts
-function createSyncDbSchema(options: { migrations: Migrations }): CrdtSchemaBuilder
+function defineSyncSchema<Tables extends SyncSchemaTables>(config: {
+  tables: Tables;
+  migrations: Migrations;
+}): DefinedSyncSchema<Tables>
+```
+
+#### `verifySyncSchema(schema)`
+
+Replays the migration history on a throwaway in-memory database and diffs the result
+against the declared tables. Resolves with an empty array when they agree.
+
+```ts
+function verifySyncSchema(schema: SyncDbSchema): Promise<SchemaVerificationIssue[]>
 ```
 
 #### `createMigrations(builder)`
@@ -1013,6 +1054,8 @@ function startDbWorker(options: {
   logger?: Logger;
   workerConfig?: WorkerConfig;
   storageVersion?: string;
+  /** Dev-time drift check — throws and refuses to start on schema/migration mismatch. */
+  verifySchema?: boolean;
 }): Promise<void>
 ```
 

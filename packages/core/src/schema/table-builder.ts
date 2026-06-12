@@ -1,16 +1,14 @@
-import { jsonSafeParse } from "../utils";
-
-export type ColumnKind = "text" | "integer" | "real" | "boolean" | "json" | "enum";
+export type ColumnKind = "text" | "integer" | "real" | "boolean" | "enum";
 
 export type SqliteStorageType = "text" | "integer" | "real";
 
 export type ColumnMeta = {
   kind: ColumnKind;
-  /** Storage type used in generated DDL. Booleans store as integer 0/1, json as serialized text. */
+  /** Storage type used in generated DDL. Booleans store as integer 0/1. */
   sqlType: SqliteStorageType;
   nullable: boolean;
   hasDefault: boolean;
-  /** Declared default in JS form (booleans as booleans, json values unserialized). */
+  /** Declared default in JS form (booleans as booleans). */
   defaultValue?: unknown;
   /** Allowed values for `enum` columns. */
   enumValues?: readonly string[];
@@ -46,6 +44,10 @@ export class ColumnBuilder<Value, HasDefault extends boolean = false> {
 export type AnyColumnBuilder = ColumnBuilder<any, boolean>;
 
 export type TableColumns = Record<string, AnyColumnBuilder>;
+
+export type AnyTableBuilder = TableBuilder<any, any>;
+
+export type SyncSchemaTables = Record<string, AnyTableBuilder>;
 
 export type TableOptions<BaseName extends string | undefined = string | undefined> = {
   /** Override the materialized base table name (defaults to the crdt table name prefixed with "_"). */
@@ -183,12 +185,6 @@ function validateValue(name: string, value: unknown, meta: ColumnMeta): string |
       return typeof value === "boolean" || value === 0 || value === 1
         ? null
         : `Column "${name}" expects a boolean (true/false or 0/1), got ${describeValue(value)}`;
-    case "json": {
-      if (typeof value !== "string") {
-        return `Column "${name}" expects JSON serialized as text, got ${describeValue(value)}`;
-      }
-      return jsonSafeParse(value).success ? null : `Column "${name}" contains invalid JSON`;
-    }
     case "enum": {
       if (typeof value !== "string") {
         return `Column "${name}" expects one of ${formatEnumValues(meta)}, got ${describeValue(value)}`;
@@ -214,11 +210,6 @@ export const t = {
   real: () => column<number>("real", "real"),
   /** Stored as INTEGER 0/1; always bind booleans as 0/1 when writing raw SQL. */
   boolean: () => column<boolean>("boolean", "integer"),
-  /**
-   * JSON value stored as serialized TEXT. The row type is the decoded `Value`; the (de)serialization
-   * layer ships with `defineSyncSchema` integration — do not pair with the legacy `addTable<T>()` API yet.
-   */
-  json: <Value>() => column<Value>("json", "text"),
   /**
    * Union of string literals stored as TEXT, e.g. `t.enum(["movie", "tv"])`. Unlike `$type`, the
    * allowed values are kept as runtime metadata, so payloads are validated against them.

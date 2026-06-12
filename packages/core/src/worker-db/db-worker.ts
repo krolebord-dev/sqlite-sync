@@ -3,6 +3,7 @@ import { xxhash } from "../hash";
 import type { Logger } from "../logger";
 import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../migrations/system-schema";
+import { formatSchemaVerificationIssues, verifySyncSchema } from "../schema/verify-sync-schema";
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { type CrdtStorage, createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
@@ -47,6 +48,14 @@ const defaultLogger: Logger = (type, message, level = "info") => {
 async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const broadcastChannels = createBroadcastChannels(config.dbId);
   const logger = opts.logger ?? defaultLogger;
+
+  if (opts.verifySchema) {
+    const issues = await verifySyncSchema(opts.syncDbSchema);
+    if (issues.length > 0) {
+      throw new Error(formatSchemaVerificationIssues(issues));
+    }
+    logger("worker", "Schema verification passed: migrations match the declared schema", "info");
+  }
 
   const [sqlite3] = await Promise.all([sqlite3InitModule(), xxhash.ensureLoaded()]);
 
@@ -335,6 +344,13 @@ type WorkerOptions = {
    * cannot survive — on mismatch the elected worker wipes the local DB on startup.
    */
   storageVersion?: string;
+  /**
+   * Dev-time drift check: replays the full migration history on a throwaway
+   * in-memory database and verifies the result matches the schema declared with
+   * `defineSyncSchema`. On mismatch the worker throws and refuses to start.
+   * Enable in development only, e.g. `verifySchema: import.meta.env.DEV`.
+   */
+  verifySchema?: boolean;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {

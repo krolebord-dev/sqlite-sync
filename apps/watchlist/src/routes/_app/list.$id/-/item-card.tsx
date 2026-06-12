@@ -80,7 +80,7 @@ export const ListItemCardDisplay = ({
   const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
   const tagHighlights = useMemo(() => {
     try {
-      return JSON.parse(item.tagHighlights) as Record<string, "positive" | "negative">;
+      return JSON.parse(item.tagHighlights ?? "{}") as Record<string, "positive" | "negative">;
     } catch {
       return {} as Record<string, "positive" | "negative">;
     }

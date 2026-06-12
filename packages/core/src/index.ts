@@ -12,7 +12,7 @@ export {
   serializeHLC,
 } from "./hlc";
 // Introspection
-export { type DatabaseIntrospection, introspectDb, type TableMetadata } from "./introspection";
+export { type ColumnMetadata, type DatabaseIntrospection, introspectDb, type TableMetadata } from "./introspection";
 // Logger
 export { type Logger, type LogLevel, startPerformanceLogger } from "./logger";
 // Memory DB
@@ -43,26 +43,32 @@ export {
 } from "./migrations/system-schema";
 // Schema definition (defineSyncSchema)
 export {
-  type AnyTableBuilder,
   type DefinedSyncSchema,
   type DefineSyncSchemaConfig,
   defineSyncSchema,
-  type SyncSchemaTables,
 } from "./schema/define-sync-schema";
 // Schema table builder (t.*)
 export {
   type AnyColumnBuilder,
+  type AnyTableBuilder,
   ColumnBuilder,
   type ColumnKind,
   type ColumnMeta,
   type InferRow,
   type PayloadValidationResult,
   type SqliteStorageType,
+  type SyncSchemaTables,
   TableBuilder,
   type TableColumns,
   type TableOptions,
   t,
 } from "./schema/table-builder";
+// Schema verification (migrations ↔ declared schema drift check)
+export {
+  formatSchemaVerificationIssues,
+  type SchemaVerificationIssue,
+  verifySyncSchema,
+} from "./schema/verify-sync-schema";
 // CRDT
 export {
   createCrdtApplyFunction,
@@ -70,13 +76,7 @@ export {
   type PendingCrdtEvent,
 } from "./sqlite-crdt/apply-crdt-event";
 // CRDT Schema
-export {
-  type CrdtTableConfig,
-  type CreateCrdtSchemaOptions,
-  createSyncDbSchema,
-  type ReadonlyTable,
-  type SyncDbSchema,
-} from "./sqlite-crdt/crdt-schema";
+export type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";
 export { type CrdtStorageMutator, createCrdtStorageMutator } from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";

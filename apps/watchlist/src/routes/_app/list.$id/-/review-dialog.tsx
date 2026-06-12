@@ -68,7 +68,7 @@ function ReviewDialogContent({
   onClose: () => void;
 }) {
   const tags = useMemo(() => JSON.parse(item.tags) as string[], [item.tags]);
-  const existingHighlights = useMemo(() => parseTagHighlights(item.tagHighlights), [item.tagHighlights]);
+  const existingHighlights = useMemo(() => parseTagHighlights(item.tagHighlights ?? "{}"), [item.tagHighlights]);
 
   const [userRating, setUserRating] = useState<number | null>(item.userRating ?? null);
   const [tagHighlights, setTagHighlights] = useState<TagHighlights>(existingHighlights);

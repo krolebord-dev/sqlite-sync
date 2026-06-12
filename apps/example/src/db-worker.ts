@@ -4,6 +4,7 @@ import { syncDbSchema } from "./migrations";
 
 await startDbWorker({
   syncDbSchema,
+  verifySchema: import.meta.env.DEV,
   createRemoteSource: createWsRemoteSource({
     createWebSocket: () =>
       new PartySocket({
