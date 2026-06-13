@@ -117,17 +117,16 @@ export function registerCrdtFunctions({
     callback: (dataset: string, payloadRaw: string) => {
       const payload = JSON.parse(payloadRaw) as { id: string };
 
-      storage.applyOwnEvent(
-        {
+      storage.applyOwnEvent({
+        event: {
           type: "item-created",
           dataset,
           item_id: payload.id,
           payload: payloadRaw,
         },
-        {
-          wrapInTransaction: false,
-        },
-      );
+        wrapInTransaction: false,
+        notifyEventApplied: false,
+      });
 
       eventApplied = true;
       return undefined;
@@ -177,17 +176,16 @@ export function registerCrdtFunctions({
         return;
       }
 
-      storage.applyOwnEvent(
-        {
+      storage.applyOwnEvent({
+        event: {
           type: "item-updated",
           dataset,
           item_id: oldPayload.id,
           payload: JSON.stringify(updatePayload),
         },
-        {
-          wrapInTransaction: false,
-        },
-      );
+        wrapInTransaction: false,
+        notifyEventApplied: false,
+      });
 
       eventApplied = true;
       return undefined;
@@ -200,17 +198,16 @@ export function registerCrdtFunctions({
     directOnly: false,
     innocuous: false,
     callback: (dataset: string, itemId: string) => {
-      storage.applyOwnEvent(
-        {
+      storage.applyOwnEvent({
+        event: {
           type: "item-deleted",
           dataset,
           item_id: itemId,
           payload: "{}",
         },
-        {
-          wrapInTransaction: false,
-        },
-      );
+        wrapInTransaction: false,
+        notifyEventApplied: false,
+      });
 
       eventApplied = true;
       return undefined;

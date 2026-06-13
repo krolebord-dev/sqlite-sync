@@ -187,11 +187,21 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
   const notifyEventApplied = (event: PersistedCrdtEvent) => {
     if (event.status === "applied") {
-      storage.onEventApplied?.(event);
+      queueMicrotask(() => {
+        storage.onEventApplied?.(event);
+      });
     }
   };
 
-  const applyOwnEvent = (event: OwnCrdtEvent, { wrapInTransaction }: { wrapInTransaction?: boolean } = {}) => {
+  const applyOwnEvent = ({
+    event,
+    wrapInTransaction,
+    notifyEventApplied: shouldNotifyEventApplied,
+  }: {
+    event: OwnCrdtEvent;
+    wrapInTransaction: boolean;
+    notifyEventApplied: boolean;
+  }) => {
     const persistedEvent: PersistedCrdtEvent = {
       schema_version: storage.migrator.currentSchemaVersion,
       timestamp: serializeHLC(storage.hlc.getNextHLC()),
@@ -216,6 +226,12 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       processPersistedEvent(db, persistedEvent);
       persistEventHlcAccumulator();
     }
+
+    if (shouldNotifyEventApplied) {
+      notifyEventApplied(persistedEvent);
+    }
+
+    return persistedEvent;
   };
 
   const dispatchEventsApplied = (syncId = localSyncId) => {
