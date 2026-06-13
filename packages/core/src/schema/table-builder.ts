@@ -123,7 +123,7 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   /**
    * Validate a CRDT event payload against the declared columns.
    * `item-created` payloads must contain every column without a default (nullable columns may be omitted);
-   * `item-updated` payloads are partial and must not touch `id`.
+   * `item-updated` payloads are partial and must not touch `id` or set `tombstone` to a deleted value.
    */
   validatePayload(
     payload: Record<string, unknown>,
@@ -138,8 +138,13 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
       }
     }
 
-    if (event === "item-updated" && "id" in payload) {
-      errors.push(`Column "id" is immutable and cannot appear in an update payload`);
+    if (event === "item-updated") {
+      if ("id" in payload) {
+        errors.push(`Column "id" is immutable and cannot appear in an update payload`);
+      }
+      if (payload.tombstone === true || payload.tombstone === 1) {
+        errors.push(`Column "tombstone" cannot be set to true/1 in an update payload; use an item-deleted event`);
+      }
     }
 
     if (event === "item-created") {

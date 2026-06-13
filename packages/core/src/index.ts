@@ -63,6 +63,10 @@ export {
   type TableOptions,
   t,
 } from "./schema/table-builder";
+export {
+  type NewCrdtEventValidationResult,
+  validateNewCrdtEvent,
+} from "./schema/validate-crdt-event";
 // Schema verification (migrations ↔ declared schema drift check)
 export {
   formatSchemaVerificationIssues,

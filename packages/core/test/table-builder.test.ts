@@ -165,10 +165,23 @@ describe("validatePayload", () => {
     expect(item.validatePayload({ title: "Heat 2" }, { event: "item-updated" })).toEqual({ success: true });
   });
 
-  it("forbids id in item-updated payloads", () => {
-    const result = item.validatePayload({ id: "b2", title: "Heat 2" }, { event: "item-updated" });
+  it("forbids id and deleted tombstone values in item-updated payloads", () => {
+    const result = item.validatePayload({ id: "b2", title: "Heat 2", tombstone: true }, { event: "item-updated" });
     expect(result.success === false && result.errors).toEqual([
       'Column "id" is immutable and cannot appear in an update payload',
+      'Column "tombstone" cannot be set to true/1 in an update payload; use an item-deleted event',
+    ]);
+  });
+
+  it("allows non-deleted tombstone values in item-updated payloads", () => {
+    expect(item.validatePayload({ tombstone: false }, { event: "item-updated" })).toEqual({ success: true });
+    expect(item.validatePayload({ tombstone: 0 }, { event: "item-updated" })).toEqual({ success: true });
+  });
+
+  it("validates tombstone value kind in item-updated payloads", () => {
+    const result = item.validatePayload({ tombstone: "no" }, { event: "item-updated" });
+    expect(result.success === false && result.errors).toEqual([
+      'Column "tombstone" expects a boolean (true/false or 0/1), got string',
     ]);
   });
 });

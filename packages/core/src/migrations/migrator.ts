@@ -8,15 +8,8 @@ import type {
   Kysely,
 } from "kysely";
 import { dummyKysely } from "../dummy-kysely";
-import { type CrdtEventType, isNoOpCrdtEventPayload } from "../sqlite-crdt/crdt-table-schema";
+import { type CrdtEventType, isNoOpCrdtEventPayload, type NewCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
 import type { StoredValue } from "../sqlite-crdt/stored-value";
-
-type CrdtEvent = {
-  type: CrdtEventType;
-  dataset: string;
-  item_id: string;
-  payload: Record<string, unknown>;
-};
 
 export type MigratableEvent = {
   schema_version: number;
@@ -26,7 +19,7 @@ export type MigratableEvent = {
   payload: string;
 };
 
-type CrdtEventTransformer = (event: CrdtEvent) => CrdtEvent | null;
+type CrdtEventTransformer = (event: NewCrdtEvent) => NewCrdtEvent | null;
 
 type MigrationStepSql =
   | {
@@ -176,7 +169,7 @@ const migrationSteps = {
 };
 
 type MigrationEventTransformers = Record<string, CrdtEventTransformer>;
-type CompiledMigrationEventTransformer = (event: CrdtEvent) => CrdtEvent | null;
+type CompiledMigrationEventTransformer = (event: NewCrdtEvent) => NewCrdtEvent | null;
 
 function buildMigrationSql(steps: MigrationStep[]): MigrationSql[] {
   return steps
@@ -216,8 +209,8 @@ function buildMigrationEventTransformer(steps: MigrationStep[]): CompiledMigrati
     return undefined;
   }
 
-  return (event: CrdtEvent) => {
-    let transformedEvent: CrdtEvent | null = event;
+  return (event: NewCrdtEvent) => {
+    let transformedEvent: NewCrdtEvent | null = event;
 
     for (const [table, transformer] of transformers) {
       if (transformedEvent === null) {
@@ -341,7 +334,7 @@ export function createMigrator({
 
     const fromVersion = event.schema_version;
 
-    let crdtEvent: CrdtEvent | null = {
+    let crdtEvent: NewCrdtEvent | null = {
       dataset: event.dataset,
       item_id: event.item_id,
       type: event.type,

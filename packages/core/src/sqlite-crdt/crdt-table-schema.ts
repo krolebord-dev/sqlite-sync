@@ -1,5 +1,12 @@
 import type { SchemaModule } from "kysely";
 
+export type NewCrdtEvent = {
+  type: CrdtEventType;
+  dataset: string;
+  item_id: string;
+  payload: Record<string, unknown>;
+};
+
 export type CrdtEventType = "item-created" | "item-updated" | "item-deleted";
 
 export type CrdtEventStatus = "pending" | "applied" | "failed" | "deduped";
