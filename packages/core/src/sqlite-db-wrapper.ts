@@ -119,8 +119,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   isInTransaction() {
-    // TODO: Awaiting upstream fix: https://github.com/sqlite/sqlite-wasm/pull/143
-    return (this.sqlite3.capi as any).sqlite3_get_autocommit(this.ensureDb) === 0;
+    return this.sqlite3.capi.sqlite3_get_autocommit(this.ensureDb) === 0;
   }
 
   beginTransaction() {

@@ -76,6 +76,12 @@ export type EnqueueEventsResult = {
   processed: Promise<void>;
 };
 
+export type ApplyEventResult = {
+  event: PersistedCrdtEvent;
+  /** The event is materialized immediately, but other processing is deferred until the next event batch is processed. */
+  processed: Promise<void>;
+};
+
 export type EventUpdate = {
   status: CrdtEventStatus;
   schema_version: number;
@@ -98,7 +104,9 @@ type DbSyncerStorage = {
   onEventApplied?: (event: PersistedCrdtEvent) => void;
 };
 
-export type CrdtStorage = ReturnType<typeof createCrdtStorage>;
+export type CrdtStorage = Omit<ReturnType<typeof createCrdtStorage>, "applyOwnEvent">;
+
+export type InternalCrdtStorage = ReturnType<typeof createCrdtStorage>;
 
 type EventsAppliedPayload = {
   syncId: number;
@@ -201,7 +209,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     event: OwnCrdtEvent;
     wrapInTransaction: boolean;
     notifyEventApplied: boolean;
-  }) => {
+  }): ApplyEventResult => {
     const persistedEvent: PersistedCrdtEvent = {
       schema_version: storage.migrator.currentSchemaVersion,
       timestamp: serializeHLC(storage.hlc.getNextHLC()),
@@ -231,14 +239,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       notifyEventApplied(persistedEvent);
     }
 
-    return persistedEvent;
-  };
-
-  const dispatchEventsApplied = (syncId = localSyncId) => {
-    eventTarget.dispatchEvent("events-applied", {
-      syncId,
-      eventHlcSum: eventHlcAccumulator?.current ?? null,
-    });
+    return { event: persistedEvent, processed: processEnqueuedEvents() };
   };
 
   const hasPendingEvents = (): boolean => {
@@ -518,7 +519,10 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       });
 
       if (appliedSyncId !== null) {
-        dispatchEventsApplied(appliedSyncId);
+        eventTarget.dispatchEvent("events-applied", {
+          syncId: appliedSyncId,
+          eventHlcSum: eventHlcAccumulator?.current ?? null,
+        });
       }
 
       // A remote event was accepted by the server but could not be applied
@@ -539,7 +543,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueOwnEvents,
     enqueueRemoteEvents,
     applyOwnEvent,
-    dispatchEventsApplied,
     checkIsQuiescent,
     getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 

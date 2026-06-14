@@ -1,7 +1,7 @@
 import type { SQLiteReactiveDb } from "../memory-db/sqlite-reactive-db";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
-import type { CrdtStorage } from "./crdt-storage";
+import type { CrdtStorage, InternalCrdtStorage } from "./crdt-storage";
 
 export function makeCrdtTable({
   db,
@@ -105,7 +105,7 @@ export function registerCrdtFunctions({
   storage,
 }: {
   reactiveDb: SQLiteReactiveDb<any>;
-  storage: CrdtStorage;
+  storage: InternalCrdtStorage;
 }) {
   let eventApplied = false;
 
