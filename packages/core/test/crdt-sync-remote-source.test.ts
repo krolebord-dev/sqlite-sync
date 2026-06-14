@@ -14,8 +14,6 @@ const createStorageMock = (): CrdtStorage =>
     enqueueLocalEvents: () => ({ beforeSyncId: 0, afterSyncId: 0, processed: Promise.resolve() }),
     enqueueOwnEvents: () => ({ beforeSyncId: 0, afterSyncId: 0, processed: Promise.resolve() }),
     enqueueRemoteEvents: () => ({ beforeSyncId: 0, afterSyncId: 0, processed: Promise.resolve() }),
-    applyOwnEvent: () => {},
-    dispatchEventsApplied: () => {},
     checkIsQuiescent: () => true,
     getEventHlcAccumulator: () => null,
     addEventListener: () => ({ unsubscribe: () => {} }),

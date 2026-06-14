@@ -1,7 +1,7 @@
 import type { SQLiteReactiveDb } from "../memory-db/sqlite-reactive-db";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
-import type { CrdtStorage, InternalCrdtStorage } from "./crdt-storage";
+import type { InternalCrdtStorage } from "./crdt-storage";
 
 export function makeCrdtTable({
   db,
@@ -117,15 +117,11 @@ export function registerCrdtFunctions({
     callback: (dataset: string, payloadRaw: string) => {
       const payload = JSON.parse(payloadRaw) as { id: string };
 
-      storage.applyOwnEvent({
-        event: {
-          type: "item-created",
-          dataset,
-          item_id: payload.id,
-          payload: payloadRaw,
-        },
-        wrapInTransaction: false,
-        notifyEventApplied: false,
+      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
+        type: "item-created",
+        dataset,
+        item_id: payload.id,
+        payload: payloadRaw,
       });
 
       eventApplied = true;
@@ -176,15 +172,11 @@ export function registerCrdtFunctions({
         return;
       }
 
-      storage.applyOwnEvent({
-        event: {
-          type: "item-updated",
-          dataset,
-          item_id: oldPayload.id,
-          payload: JSON.stringify(updatePayload),
-        },
-        wrapInTransaction: false,
-        notifyEventApplied: false,
+      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
+        type: "item-updated",
+        dataset,
+        item_id: oldPayload.id,
+        payload: JSON.stringify(updatePayload),
       });
 
       eventApplied = true;
@@ -198,15 +190,11 @@ export function registerCrdtFunctions({
     directOnly: false,
     innocuous: false,
     callback: (dataset: string, itemId: string) => {
-      storage.applyOwnEvent({
-        event: {
-          type: "item-deleted",
-          dataset,
-          item_id: itemId,
-          payload: "{}",
-        },
-        wrapInTransaction: false,
-        notifyEventApplied: false,
+      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
+        type: "item-deleted",
+        dataset,
+        item_id: itemId,
+        payload: "{}",
       });
 
       eventApplied = true;
@@ -217,7 +205,7 @@ export function registerCrdtFunctions({
   reactiveDb.addEventListener("transaction-committed", () => {
     if (eventApplied) {
       eventApplied = false;
-      storage.dispatchEventsApplied();
+      void storage.internal.processEnqueuedEvents();
     }
   });
 

@@ -145,6 +145,7 @@ async function createReplica(
     nodeId,
     storage,
     db,
+    waitForProcessing,
     setTime(value: number) {
       currentTime = value;
     },
@@ -411,6 +412,206 @@ describe("CRDT convergence for parallel entity edits", () => {
       completed: false,
       tombstone: false,
     });
+  });
+
+  it("does not expose applied events after an earlier pending gap", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const remoteTimestamp = serializeHLC(new HLCCounter("remote-node", () => 2_000).getCurrentHLC());
+
+    const dispatchedSyncIds: number[] = [];
+    replica.storage.addEventListener("events-applied", (event) => {
+      dispatchedSyncIds.push(event.payload.syncId);
+    });
+
+    const remoteProcessing = replica.storage.enqueueRemoteEvents([
+      {
+        schema_version: 0,
+        timestamp: remoteTimestamp,
+        type: "item-created",
+        dataset: BASE_TABLE,
+        item_id: "remote-todo",
+        payload: JSON.stringify({
+          id: "remote-todo",
+          title: "Remote todo",
+          completed: false,
+          tombstone: false,
+        }),
+      },
+    ]).processed;
+
+    replica.db.execute({
+      sql: `
+        INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+        VALUES (?, ?, ?, ?)
+      `,
+      parameters: ["local-todo", "Local todo", 0, 0],
+    });
+
+    const beforeGapClosed = replica.storage.getEventsBatch({
+      status: "applied",
+      afterSyncId: 0,
+      limit: 100,
+      excludeOrigin: "remote",
+    });
+
+    expect(beforeGapClosed.events).toEqual([]);
+    expect(beforeGapClosed.nextSyncId).toBe(0);
+    expect(Math.max(0, ...dispatchedSyncIds)).toBe(0);
+
+    await remoteProcessing;
+
+    const afterGapClosed = replica.storage.getEventsBatch({
+      status: "applied",
+      afterSyncId: 0,
+      limit: 100,
+      excludeOrigin: "remote",
+    });
+
+    expect(afterGapClosed.events.map((event) => event.item_id)).toEqual(["local-todo"]);
+    expect(afterGapClosed.nextSyncId).toBe(2);
+    expect(Math.max(...dispatchedSyncIds)).toBe(2);
+  });
+
+  it("materializes own writes eagerly but defers bookkeeping to commit", async () => {
+    const replica = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
+
+    const dispatchedSyncIds: number[] = [];
+    replica.storage.addEventListener("events-applied", (event) => {
+      dispatchedSyncIds.push(event.payload.syncId);
+    });
+
+    const initialAccumulator = replica.getEventHlcAccumulator();
+
+    replica.db.execute({
+      sql: `
+        INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+        VALUES (?, ?, ?, ?)
+      `,
+      parameters: ["own-todo", "Own todo", 0, 0],
+    });
+
+    // Synchronous window: the row is materialized inside the writing transaction,
+    // but the event is still pending and no bookkeeping (accumulator, dispatch)
+    // has run — that is deferred to the post-commit pipeline.
+    expect(replica.getTodo("own-todo")).toEqual({
+      id: "own-todo",
+      title: "Own todo",
+      completed: false,
+      tombstone: false,
+    });
+    const pendingEvent = replica.getPersistedEvent(1);
+    expect(pendingEvent.origin).toBe("own-applied");
+    expect(pendingEvent.status).toBe("pending");
+    expect(replica.getEventHlcAccumulator()).toBe(initialAccumulator);
+    expect(dispatchedSyncIds).toEqual([]);
+
+    await replica.waitForProcessing();
+
+    // After the pipeline runs the event is finalized and folded into the accumulator.
+    expect(replica.getPersistedEvent(1).status).toBe("applied");
+    expect(replica.getEventHlcAccumulator()).not.toBe(initialAccumulator);
+    expect(dispatchedSyncIds).toEqual([1]);
+  });
+
+  it("does not leak materialization or bookkeeping when the writing transaction rolls back", async () => {
+    const replicaA = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
+
+    const dispatchedSyncIds: number[] = [];
+    replicaA.storage.addEventListener("events-applied", (event) => {
+      dispatchedSyncIds.push(event.payload.syncId);
+    });
+
+    await replicaA.createTodo({ id: "committed-1", title: "First", completed: false, tombstone: false });
+    const accumulatorAfterFirst = replicaA.getEventHlcAccumulator();
+    const dispatchedAfterFirst = [...dispatchedSyncIds];
+
+    // An own write inside a transaction that aborts.
+    expect(() =>
+      replicaA.db.executeTransaction((tx) => {
+        tx.execute({
+          sql: `
+            INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+            VALUES (?, ?, ?, ?)
+          `,
+          parameters: ["rolled-back", "Nope", 0, 0],
+        });
+        throw new Error("abort");
+      }),
+    ).toThrow("abort");
+
+    await replicaA.waitForProcessing();
+
+    // Materialization reverted with the transaction, and nothing leaked: the
+    // accumulator is unchanged, no events-applied fired, and no row persisted.
+    expect(replicaA.getTodo("rolled-back")).toBeNull();
+    expect(replicaA.getEventHlcAccumulator()).toBe(accumulatorAfterFirst);
+    expect(dispatchedSyncIds).toEqual(dispatchedAfterFirst);
+    expect(replicaA.getPersistedEvents().some((event) => event.item_id === "rolled-back")).toBe(false);
+
+    // A later write still works (it just claims a fresh sync id, leaving a gap).
+    await replicaA.createTodo({ id: "committed-2", title: "Second", completed: false, tombstone: false });
+
+    // A replica that only ever saw the committed events ends up with the same
+    // accumulator, proving the rolled-back event was never folded in.
+    const replicaB = await createReplica("node-b", 5_000, { trackEventHlcAccumulator: true });
+    await syncOneWay(replicaA, replicaB, 0);
+
+    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+    expect(replicaB.getTodo("committed-1")?.title).toBe("First");
+    expect(replicaB.getTodo("committed-2")?.title).toBe("Second");
+    expect(replicaB.getTodo("rolled-back")).toBeNull();
+  });
+
+  it("advances applied batch cursors over terminal filtered events", async () => {
+    const replica = await createReplica("node-a", 1_000, {
+      preloadedEvents: [
+        {
+          sync_id: 1,
+          schema_version: 0,
+          status: "deduped",
+          type: "item-created",
+          timestamp: "000000000001000:00000:remote-node",
+          origin: "remote",
+          source_node_id: "",
+          dataset: BASE_TABLE,
+          item_id: "deduped-todo",
+          payload: JSON.stringify({
+            id: "deduped-todo",
+            title: "Deduped todo",
+            completed: false,
+            tombstone: false,
+          }),
+        },
+        {
+          sync_id: 2,
+          schema_version: 0,
+          status: "applied",
+          type: "item-created",
+          timestamp: "000000000001001:00000:remote-node",
+          origin: "remote",
+          source_node_id: "",
+          dataset: BASE_TABLE,
+          item_id: "remote-todo",
+          payload: JSON.stringify({
+            id: "remote-todo",
+            title: "Remote todo",
+            completed: false,
+            tombstone: false,
+          }),
+        },
+      ],
+    });
+
+    const batch = replica.storage.getEventsBatch({
+      status: "applied",
+      afterSyncId: 0,
+      limit: 100,
+      excludeOrigin: "remote",
+    });
+
+    expect(batch.events).toEqual([]);
+    expect(batch.hasMore).toBe(false);
+    expect(batch.nextSyncId).toBe(2);
   });
 
   it("merges concurrent updates to different fields", async () => {

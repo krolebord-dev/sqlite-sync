@@ -18,7 +18,7 @@ export function isNoOpCrdtEventPayload(payload: string) {
   return payload === CRDT_EVENT_NO_OP_PAYLOAD;
 }
 
-export type CrdtEventOrigin = "remote" | "own" | "local";
+export type CrdtEventOrigin = "remote" | "own" | "own-applied" | "local";
 
 export type PersistedCrdtEvent = {
   schema_version: number;

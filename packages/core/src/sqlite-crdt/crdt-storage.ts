@@ -76,12 +76,6 @@ export type EnqueueEventsResult = {
   processed: Promise<void>;
 };
 
-export type ApplyEventResult = {
-  event: PersistedCrdtEvent;
-  /** The event is materialized immediately, but other processing is deferred until the next event batch is processed. */
-  processed: Promise<void>;
-};
-
 export type EventUpdate = {
   status: CrdtEventStatus;
   schema_version: number;
@@ -104,7 +98,7 @@ type DbSyncerStorage = {
   onEventApplied?: (event: PersistedCrdtEvent) => void;
 };
 
-export type CrdtStorage = Omit<ReturnType<typeof createCrdtStorage>, "applyOwnEvent">;
+export type CrdtStorage = Omit<ReturnType<typeof createCrdtStorage>, "internal">;
 
 export type InternalCrdtStorage = ReturnType<typeof createCrdtStorage>;
 
@@ -124,6 +118,25 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   const db = storage.db as InternalSQLiteWrapper<InternalDbSchema>;
 
   const crdtEventsTable = storage.dbConfig.eventsTable.fullIdentifier as "_crdt_events";
+
+  const getInitialSequentialSyncId = () => {
+    const [firstPendingEvent] = db.executePrepared(
+      "get-first-pending-event",
+      { status: "pending" as const },
+      (db, params) =>
+        db
+          .selectFrom(crdtEventsTable)
+          .select("sync_id")
+          .where("status", "=", params("status"))
+          .orderBy("sync_id", "asc")
+          .limit(sql.lit(1)),
+      { loggerLevel: "system" },
+    );
+
+    return firstPendingEvent ? firstPendingEvent.sync_id - 1 : localSyncId;
+  };
+
+  let sequentialSyncId = getInitialSequentialSyncId();
 
   const eventTarget = createTypedEventTarget<{
     "events-applied": EventsAppliedPayload;
@@ -201,45 +214,35 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
   };
 
-  const applyOwnEvent = ({
-    event,
-    wrapInTransaction,
-    notifyEventApplied: shouldNotifyEventApplied,
-  }: {
-    event: OwnCrdtEvent;
-    wrapInTransaction: boolean;
-    notifyEventApplied: boolean;
-  }): ApplyEventResult => {
+  const applyOwnEventFromTransaction = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    event: OwnCrdtEvent,
+  ) => {
     const persistedEvent: PersistedCrdtEvent = {
       schema_version: storage.migrator.currentSchemaVersion,
       timestamp: serializeHLC(storage.hlc.getNextHLC()),
       type: event.type,
       dataset: event.dataset,
       item_id: event.item_id,
-      origin: "own",
+      origin: "own-applied",
       source_node_id: storage.nodeId,
       payload: event.payload,
       sync_id: ++localSyncId,
       status: "pending",
     };
 
-    if (wrapInTransaction) {
-      db.executeTransaction((tx) => {
-        persistEvent(tx, persistedEvent);
-        processPersistedEvent(tx, persistedEvent);
-        persistEventHlcAccumulator();
-      });
-    } else {
-      persistEvent(db, persistedEvent);
-      processPersistedEvent(db, persistedEvent);
-      persistEventHlcAccumulator();
-    }
+    persistEvent(tx, persistedEvent);
+    applyCrdtEvent(persistedEvent);
+  };
 
-    if (shouldNotifyEventApplied) {
-      notifyEventApplied(persistedEvent);
+  const dispatchEventsApplied = (previousSequentialSyncId: number) => {
+    if (sequentialSyncId <= previousSequentialSyncId) {
+      return;
     }
-
-    return { event: persistedEvent, processed: processEnqueuedEvents() };
+    eventTarget.dispatchEvent("events-applied", {
+      syncId: sequentialSyncId,
+      eventHlcSum: sequentialSyncId === localSyncId ? (eventHlcAccumulator?.current ?? null) : null,
+    });
   };
 
   const hasPendingEvents = (): boolean => {
@@ -262,6 +265,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       afterSyncId: options.afterSyncId ?? null,
       excludeOrigin: options.excludeOrigin ?? null,
       excludeNodeId: options.excludeNodeId ?? null,
+      maxSyncId: options.status === "applied" ? sequentialSyncId : localSyncId,
     };
 
     const filterKeys = [
@@ -276,6 +280,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         db
           .selectFrom(crdtEventsTable)
           .where("sync_id", ">", params("afterSyncId"))
+          .where("sync_id", "<=", params("maxSyncId"))
           .where("status", "=", params("status"))
           .$if(!!queryParams.excludeNodeId, (qb) => qb.where("source_node_id", "!=", params("excludeNodeId")))
           .$if(!!queryParams.excludeOrigin, (qb) => qb.where("origin", "!=", params("excludeOrigin")))
@@ -289,10 +294,17 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     if (hasMore) {
       events.pop();
     }
+
+    const lastReturnedSyncId = events[events.length - 1]?.sync_id ?? options.afterSyncId ?? 0;
+    let nextSyncId = lastReturnedSyncId;
+    if (!hasMore && options.status === "applied") {
+      nextSyncId = Math.max(lastReturnedSyncId, queryParams.maxSyncId);
+    }
+
     return {
       events,
       hasMore,
-      nextSyncId: events[events.length - 1]?.sync_id ?? options.afterSyncId ?? 0,
+      nextSyncId,
     };
   };
 
@@ -408,6 +420,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     try {
+      if (event.origin === "own-applied") {
+        event.status = "applied";
+        return event;
+      }
+
       if (hasAcceptedEventWithTimestamp(tx, event)) {
         event.status = "deduped";
         return event;
@@ -421,7 +438,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       if (isNoOpCrdtEventPayload(event.payload)) {
         applyCrdtEvent(event);
         event.status = "applied";
-        eventHlcAccumulator?.add(event.timestamp);
         return event;
       }
 
@@ -434,7 +450,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
         applyCrdtEvent(event);
         event.status = "applied";
-        eventHlcAccumulator?.add(event.timestamp);
         return event;
       }
 
@@ -446,7 +461,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       applyCrdtEvent(event);
       event.status = "applied";
-      eventHlcAccumulator?.add(event.timestamp);
     } catch (error) {
       console.error("Error applying enqueued CRDT event", error);
       event.status = "failed";
@@ -498,32 +512,31 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         events.pop();
       }
 
+      const previousSequentialSyncId = sequentialSyncId;
       if (events.length === 0) {
+        sequentialSyncId = localSyncId;
+        dispatchEventsApplied(previousSequentialSyncId);
         break;
       }
 
-      let appliedSyncId: number | null = null;
       const failedRemoteSyncIds: number[] = [];
 
       db.executeTransaction((tx) => {
         for (const event of events) {
           processPersistedEvent(tx, event);
-          notifyEventApplied(event);
           if (event.status === "applied") {
-            appliedSyncId = event.sync_id;
-          } else if (event.status === "failed" && event.origin === "remote") {
+            eventHlcAccumulator?.add(event.timestamp);
+          }
+          notifyEventApplied(event);
+          if (event.status === "failed" && event.origin === "remote") {
             failedRemoteSyncIds.push(event.sync_id);
           }
         }
         persistEventHlcAccumulator();
       });
 
-      if (appliedSyncId !== null) {
-        eventTarget.dispatchEvent("events-applied", {
-          syncId: appliedSyncId,
-          eventHlcSum: eventHlcAccumulator?.current ?? null,
-        });
-      }
+      sequentialSyncId = hasMore ? (events[events.length - 1]?.sync_id ?? sequentialSyncId) : localSyncId;
+      dispatchEventsApplied(previousSequentialSyncId);
 
       // A remote event was accepted by the server but could not be applied
       // locally, which means our local state has diverged from the server.
@@ -542,11 +555,15 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueLocalEvents,
     enqueueOwnEvents,
     enqueueRemoteEvents,
-    applyOwnEvent,
     checkIsQuiescent,
     getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
+
+    internal: {
+      applyOwnEventFromTransaction,
+      processEnqueuedEvents,
+    },
   };
 }
