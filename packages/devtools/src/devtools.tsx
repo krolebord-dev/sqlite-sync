@@ -1,5 +1,5 @@
 import type { SharedLiveQuerySnapshot } from "@sqlite-sync/core";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   getOrCreateSQLiteSyncDevtoolsRegistry,
@@ -40,10 +40,113 @@ type QueryState =
       };
     };
 
+const TRIGGER_POSITION_STORAGE_KEY = "sqlite-sync-devtools.trigger-position";
+const DRAG_THRESHOLD_PX = 4;
+const VIEWPORT_MARGIN_PX = 8;
+
+type TriggerPosition = { x: number; y: number };
+
+function readStoredTriggerPosition(): TriggerPosition | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(TRIGGER_POSITION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<TriggerPosition>;
+    if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {}
+  return null;
+}
+
+function useDraggableTrigger() {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [position, setPosition] = useState<TriggerPosition | null>(readStoredTriggerPosition);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+  } | null>(null);
+  // pointerup clears dragRef before the click event fires, so the moved flag is
+  // stashed here to suppress the click that a drag gesture would otherwise emit.
+  const suppressClickRef = useRef(false);
+
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const button = buttonRef.current;
+    if (!button || event.button !== 0) return;
+    suppressClickRef.current = false;
+    const rect = button.getBoundingClientRect();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      moved: false,
+    };
+    button.setPointerCapture(event.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    const button = buttonRef.current;
+    if (!drag || !button || drag.pointerId !== event.pointerId) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < DRAG_THRESHOLD_PX) {
+      return;
+    }
+    drag.moved = true;
+    const maxX = window.innerWidth - button.offsetWidth - VIEWPORT_MARGIN_PX;
+    const maxY = window.innerHeight - button.offsetHeight - VIEWPORT_MARGIN_PX;
+    setPosition({
+      x: Math.max(VIEWPORT_MARGIN_PX, Math.min(event.clientX - drag.offsetX, maxX)),
+      y: Math.max(VIEWPORT_MARGIN_PX, Math.min(event.clientY - drag.offsetY, maxY)),
+    });
+  }, []);
+
+  const endDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    buttonRef.current?.releasePointerCapture(event.pointerId);
+    if (!drag.moved) return;
+    suppressClickRef.current = true;
+    setPosition((current) => {
+      if (current && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(TRIGGER_POSITION_STORAGE_KEY, JSON.stringify(current));
+        } catch {}
+      }
+      return current;
+    });
+  }, []);
+
+  const consumeDragClick = useCallback(() => {
+    if (!suppressClickRef.current) return false;
+    suppressClickRef.current = false;
+    return true;
+  }, []);
+
+  const positionStyle: CSSProperties = position
+    ? { left: position.x, top: position.y, right: "auto", bottom: "auto" }
+    : {};
+
+  return {
+    buttonRef,
+    positionStyle,
+    triggerHandlers: { onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag },
+    consumeDragClick,
+  };
+}
+
 export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
   const registry = getOrCreateSQLiteSyncDevtoolsRegistry();
   const snapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot, getEmptySnapshot);
   const instances = snapshot.instances;
+
+  const { buttonRef, positionStyle, triggerHandlers, consumeDragClick } = useDraggableTrigger();
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DevtoolsTab>("overview");
@@ -160,7 +263,17 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
   return (
     <>
       <div style={floatingRootStyles}>
-        <button type="button" style={triggerButtonStyles} onClick={() => setIsOpen(true)} title="SQLite Sync Devtools">
+        <button
+          ref={buttonRef}
+          type="button"
+          style={{ ...triggerButtonStyles, ...positionStyle }}
+          onClick={() => {
+            if (consumeDragClick()) return;
+            setIsOpen(true);
+          }}
+          title="SQLite Sync Devtools"
+          {...triggerHandlers}
+        >
           <span style={triggerIconStyles}>◈</span>
           <span style={triggerCountStyles}>{instances.length}</span>
         </button>
@@ -1163,7 +1276,9 @@ const triggerButtonStyles: CSSProperties = {
   background: C.bgPanel,
   color: C.text,
   boxShadow: `0 0 0 1px ${C.border}, 0 4px 16px rgba(0,0,0,0.5)`,
-  cursor: "pointer",
+  cursor: "grab",
+  touchAction: "none",
+  userSelect: "none",
   pointerEvents: "auto",
 };
 
