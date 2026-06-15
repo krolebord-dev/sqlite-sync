@@ -2,7 +2,7 @@ import { xxhash } from "../hash";
 import type { HLCCounter } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../migrations/system-schema";
-import type { CrdtTableConfig } from "../sqlite-crdt/crdt-schema";
+import type { CrdtTableConfig, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { makeCrdtTable, registerCrdtFunctions } from "../sqlite-crdt/make-crdt-table";
 import type { StoredValue } from "../sqlite-crdt/stored-value";
@@ -18,6 +18,7 @@ type MemoryDbOptions<Database> = {
   initializeSchema?: boolean;
   initialSyncId?: number;
   eventHlcAccumulator?: StoredValue<string>;
+  syncDbSchema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
 };
 
 export async function createMemoryDb<Database>({
@@ -29,6 +30,7 @@ export async function createMemoryDb<Database>({
   initializeSchema = true,
   initialSyncId,
   eventHlcAccumulator,
+  syncDbSchema,
 }: MemoryDbOptions<Database>) {
   await xxhash.ensureLoaded();
 
@@ -54,6 +56,7 @@ export async function createMemoryDb<Database>({
     db,
     dbConfig: memoryDbConfig,
     eventHlcAccumulator,
+    schema: syncDbSchema,
   });
 
   registerCrdtFunctions({

@@ -4,6 +4,8 @@ import { createMemoryDb } from "../src/memory-db/memory-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { applyMemoryDbSchema } from "../src/migrations/system-schema";
+import { t } from "../src/schema/table-builder";
+import { CrdtEventValidationError } from "../src/schema/validate-crdt-event";
 import {
   CRDT_EVENT_NO_OP_PAYLOAD,
   type CrdtUpdateLogItem,
@@ -14,6 +16,16 @@ import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 
 const BASE_TABLE = "todo";
 const CRDT_TABLE = "_todo";
+
+const todoSyncSchema = {
+  tablesConfig: [{ baseTableName: BASE_TABLE, crdtTableName: CRDT_TABLE }],
+  tables: {
+    [CRDT_TABLE]: t.table({
+      title: t.text(),
+      completed: t.boolean(),
+    }),
+  },
+};
 
 type TodoRow = {
   id: string;
@@ -118,6 +130,7 @@ async function createReplica(
     reactiveDb,
     hlcCounter: new HLCCounter(nodeId, () => currentTime),
     crdtTables: [{ baseTableName: BASE_TABLE, crdtTableName: CRDT_TABLE }],
+    syncDbSchema: todoSyncSchema,
     initializeSchema: false,
     eventHlcAccumulator: opts.trackEventHlcAccumulator
       ? createStoredValue({
@@ -612,6 +625,104 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(batch.events).toEqual([]);
     expect(batch.hasMore).toBe(false);
     expect(batch.nextSyncId).toBe(2);
+  });
+
+  it("applies a validated batch of own events", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    replica.storage.applyOwnEvents([
+      {
+        type: "item-created",
+        dataset: CRDT_TABLE,
+        item_id: "todo-1",
+        payload: JSON.stringify({ id: "todo-1", title: "First", completed: false }),
+      },
+      {
+        type: "item-updated",
+        dataset: CRDT_TABLE,
+        item_id: "todo-1",
+        payload: JSON.stringify({ completed: true }),
+      },
+    ]);
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")).toEqual({
+      id: "todo-1",
+      title: "First",
+      completed: true,
+      tombstone: false,
+    });
+
+    const events = replica.getPersistedEvents();
+    expect(events.map((event) => [event.origin, event.status, event.dataset])).toEqual([
+      ["own-applied", "applied", BASE_TABLE],
+      ["own-applied", "applied", BASE_TABLE],
+    ]);
+  });
+
+  it("rejects an invalid batch without mutating state or consuming sync ids", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    expect(() =>
+      replica.storage.applyOwnEvents([
+        {
+          type: "item-created",
+          dataset: CRDT_TABLE,
+          item_id: "todo-1",
+          payload: JSON.stringify({ id: "todo-1", title: "First", completed: false }),
+        },
+        {
+          type: "item-created",
+          dataset: CRDT_TABLE,
+          item_id: "todo-2",
+          payload: JSON.stringify({ id: "todo-2", title: "Second", completed: "nope", bogus: 1 }),
+        },
+      ]),
+    ).toThrow(CrdtEventValidationError);
+
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")).toBeNull();
+    expect(replica.getTodo("todo-2")).toBeNull();
+    expect(replica.getPersistedEvents()).toEqual([]);
+
+    replica.storage.applyOwnEvents([
+      {
+        type: "item-created",
+        dataset: CRDT_TABLE,
+        item_id: "todo-3",
+        payload: JSON.stringify({ id: "todo-3", title: "Third", completed: false }),
+      },
+    ]);
+    await replica.waitForProcessing();
+
+    expect(replica.getPersistedEvent(1)?.item_id).toBe("todo-3");
+  });
+
+  it("rolls the whole batch back when materializing a later event fails", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    expect(() =>
+      replica.storage.applyOwnEvents([
+        {
+          type: "item-created",
+          dataset: CRDT_TABLE,
+          item_id: "todo-1",
+          payload: JSON.stringify({ id: "todo-1", title: "First", completed: false }),
+        },
+        {
+          type: "item-updated",
+          dataset: CRDT_TABLE,
+          item_id: "missing",
+          payload: JSON.stringify({ completed: true }),
+        },
+      ]),
+    ).toThrow();
+
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")).toBeNull();
+    expect(replica.getPersistedEvents().some((event) => event.item_id === "todo-1")).toBe(false);
   });
 
   it("merges concurrent updates to different fields", async () => {

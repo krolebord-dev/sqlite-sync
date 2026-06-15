@@ -8,6 +8,7 @@ import {
   quoteId,
   type SQLiteDbWrapper,
   SQLiteReactiveDb,
+  type SyncDbSchema,
   serializeHLC,
 } from "@sqlite-sync/core";
 import { createMemoryDb } from "../../../packages/core/src/memory-db/memory-db";
@@ -99,6 +100,7 @@ export async function createSyncBenchmarkHarness({ snapshot }: { snapshot?: Uint
     hlcCounter: new HLCCounter("bench-node", () => Date.now()),
     crdtTables: [{ baseTableName: "_benchmark", crdtTableName: "benchmark" }],
     initializeSchema: !snapshot,
+    syncDbSchema: undefined as unknown as Pick<SyncDbSchema, "tables" | "tablesConfig">,
   });
 
   return {

@@ -197,4 +197,34 @@ describe("validateNewCrdtEvent", () => {
       'Unknown dataset "_missing"',
     ]);
   });
+
+  it("accepts a JSON string payload and returns it parsed", () => {
+    const result = validateNewCrdtEvent(schema, {
+      type: "item-created",
+      dataset: "_item",
+      item_id: "item-1",
+      payload: JSON.stringify({ id: "item-1", title: "Heat" }),
+    });
+
+    expect(result).toEqual({
+      success: true,
+      event: {
+        type: "item-created",
+        dataset: "_item",
+        item_id: "item-1",
+        payload: { id: "item-1", title: "Heat" },
+      },
+    });
+  });
+
+  it("reports a single error for an unparseable string payload", () => {
+    const result = validateNewCrdtEvent(schema, {
+      type: "item-created",
+      dataset: "_item",
+      item_id: "item-1",
+      payload: "{not json",
+    });
+
+    expect(result.success === false && result.errors).toEqual(["Event payload is not valid JSON"]);
+  });
 });

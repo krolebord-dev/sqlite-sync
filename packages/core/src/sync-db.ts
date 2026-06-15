@@ -93,6 +93,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     reactiveDb: reactiveDb,
     hlcCounter,
     crdtTables: options.syncDbSchema.tablesConfig,
+    syncDbSchema: options.syncDbSchema,
   });
 
   const pullSyncId = createStoredValue({

@@ -2,9 +2,11 @@ import { sql } from "kysely";
 import { deserializeHLC, type HLCCounter, serializeHLC } from "../hlc";
 import type { SyncDbMigrator } from "../migrations/migrator";
 import type { SystemDbConfig } from "../migrations/system-schema";
+import { CrdtEventValidationError, validateNewCrdtEvent } from "../schema/validate-crdt-event";
 import type { InternalSQLiteTransactionWrapper, InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
 import { createSQLiteCrdtApplyFunction } from "./apply-crdt-event";
+import type { SyncDbSchema } from "./crdt-schema";
 import {
   CRDT_EVENT_NO_OP_PAYLOAD,
   type CrdtEventOrigin,
@@ -12,6 +14,7 @@ import {
   type CrdtEventType,
   type CrdtUpdateLogItem,
   isNoOpCrdtEventPayload,
+  type NewCrdtEvent,
   type PersistedCrdtEvent,
 } from "./crdt-table-schema";
 import { createEventHlcAccumulator } from "./event-consistency";
@@ -96,6 +99,7 @@ type DbSyncerStorage = {
   hlc: StorageHLC;
   eventHlcAccumulator?: StoredValue<string>;
   onEventApplied?: (event: PersistedCrdtEvent) => void;
+  schema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
 };
 
 export type CrdtStorage = Omit<ReturnType<typeof createCrdtStorage>, "internal">;
@@ -212,6 +216,58 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         storage.onEventApplied?.(event);
       });
     }
+  };
+
+  const applyOwnEvents = (events: OwnCrdtEvent[]) => {
+    const schema = storage.schema;
+    if (!schema) {
+      throw new Error("applyOwnEvents requires a sync schema; none was provided to createCrdtStorage");
+    }
+
+    const validatedEvents: NewCrdtEvent[] = [];
+    const errors: string[] = [];
+
+    for (const [index, event] of events.entries()) {
+      const result = validateNewCrdtEvent(schema, {
+        type: event.type,
+        dataset: event.dataset,
+        item_id: event.item_id,
+        payload: event.payload,
+      });
+
+      if (!result.success) {
+        errors.push(...result.errors.map((error) => `[${index}] ${error}`));
+        continue;
+      }
+
+      validatedEvents.push(result.event);
+    }
+
+    if (errors.length > 0) {
+      throw new CrdtEventValidationError(errors);
+    }
+
+    db.executeTransaction((tx) => {
+      for (const event of validatedEvents) {
+        const persistedEvent: PersistedCrdtEvent = {
+          schema_version: storage.migrator.currentSchemaVersion,
+          timestamp: serializeHLC(storage.hlc.getNextHLC()),
+          type: event.type,
+          dataset: event.dataset,
+          item_id: event.item_id,
+          origin: "own-applied",
+          source_node_id: storage.nodeId,
+          payload: JSON.stringify(event.payload),
+          sync_id: ++localSyncId,
+          status: "pending",
+        };
+
+        persistEvent(tx, persistedEvent);
+        applyCrdtEvent(persistedEvent);
+      }
+    });
+
+    void processEnqueuedEvents();
   };
 
   const applyOwnEventFromTransaction = (
@@ -555,6 +611,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueLocalEvents,
     enqueueOwnEvents,
     enqueueRemoteEvents,
+    applyOwnEvents,
     checkIsQuiescent,
     getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 

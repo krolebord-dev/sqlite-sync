@@ -129,6 +129,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
         eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
       });
     },
+    schema: syncDbSchema,
   });
 
   const remoteHandler = createDurableObjectRemoteHandler({

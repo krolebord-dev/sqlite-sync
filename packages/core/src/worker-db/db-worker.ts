@@ -142,6 +142,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     db,
     dbConfig: workerDbConfig,
     eventHlcAccumulator: kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", ""),
+    schema: opts.syncDbSchema,
   });
 
   createCrdtSyncProducer({

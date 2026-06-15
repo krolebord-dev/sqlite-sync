@@ -6,6 +6,13 @@ export type NewCrdtEventValidationResult =
   | { success: true; event: NewCrdtEvent }
   | { success: false; errors: string[] };
 
+export class CrdtEventValidationError extends Error {
+  constructor(readonly errors: string[]) {
+    super(`Invalid CRDT events: ${errors.join("; ")}`);
+    this.name = "CrdtEventValidationError";
+  }
+}
+
 const crdtEventTypes = ["item-created", "item-updated", "item-deleted"] as const;
 
 export function validateNewCrdtEvent(
@@ -21,7 +28,17 @@ export function validateNewCrdtEvent(
   const type = input.type;
   const dataset = input.dataset;
   const itemId = input.item_id;
-  const payload = input.payload;
+
+  let payload = input.payload;
+  let payloadParseFailed = false;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      payloadParseFailed = true;
+      errors.push(`Event payload is not valid JSON`);
+    }
+  }
 
   if (!isCrdtEventType(type)) {
     errors.push(`Invalid event type "${String(type)}"`);
@@ -32,7 +49,7 @@ export function validateNewCrdtEvent(
   if (typeof itemId !== "string") {
     errors.push(`Event item_id must be a string`);
   }
-  if (!isRecord(payload)) {
+  if (!payloadParseFailed && !isRecord(payload)) {
     errors.push(`Event payload must be an object`);
   }
 

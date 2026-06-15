@@ -64,6 +64,7 @@ export {
   t,
 } from "./schema/table-builder";
 export {
+  CrdtEventValidationError,
   type NewCrdtEventValidationResult,
   validateNewCrdtEvent,
 } from "./schema/validate-crdt-event";
