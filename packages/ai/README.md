@@ -1,14 +1,16 @@
 # @sqlite-sync/ai
 
-AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) databases. Gives an AI SDK agent safe, read-only access to a synced SQLite database.
+AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) databases. Gives an AI SDK agent safe, read-only access to a synced SQLite database by default, with an explicit opt-in CRDT mutation tool.
 
 ## What's included
 
 - `createSchemaDoc` — generates a markdown schema doc from the declared sync schema (structure from the `t.table()` builders, semantics from `.describe()` and app-provided context). No database access needed.
 - `createAiDbAccess` — server-side access object living next to the storage; its methods double as an RPC contract for cross-Durable-Object setups.
-- `createDbTools` — AI SDK v6 `ToolSet` (`getDbSchema` and `queryDb` tools) backed by an `AiDbAccess` or a stub proxying to one.
+- `createDbTools` — AI SDK v6 `ToolSet` (`getDbSchema` and `queryDb` tools, plus optional `mutateDb`) backed by an `AiDbAccess` or a stub proxying to one.
 
 `queryDb` is strictly read-only: a single `SELECT`/`WITH`/`VALUES` statement, verified against SQLite's `EXPLAIN` bytecode for write opcodes, and executed inside a transaction that is always rolled back. Reads are **not** restricted by table — the agent can query every table in the database file (including sqlite-sync's internal event log), so don't colocate data the agent must not see. Results are capped (default 200 rows, 2000 chars per cell) and report `truncated` so the agent can narrow its query.
+
+`mutateDb` is opt-in. It applies `item-created`, `item-updated`, and `item-deleted` CRDT events through sqlite-sync's own-event path, so writes are validated, persisted to the event log, applied locally, and synced normally. It does not run arbitrary write SQL. For `item-created` events, omit `item_id` and `payload.id`; the tool generates ids, injects them into the CRDT events, and returns them as `createdIds`.
 
 ## Usage (Cloudflare Durable Object)
 
@@ -18,9 +20,10 @@ import { createKyselyExecutor, durableObjectAdapter } from "@sqlite-sync/cloudfl
 
 // In the DO that owns the synced database:
 async onStart() {
-  await durableObjectAdapter.createCrdtStorage({ syncDbSchema, storage: this.ctx.storage, /* ... */ });
+  const { syncDb } = await durableObjectAdapter.createCrdtStorage({ syncDbSchema, storage: this.ctx.storage, /* ... */ });
   this.aiDbAccess = createAiDbAccess({
     executor: createKyselyExecutor(this.ctx.storage),
+    storage: syncDb, // optional; enables mutate() on the access object
     syncDbSchema,
     context: {
       overview: "# My app's database\n\nA todo app for a single user.",
@@ -35,6 +38,9 @@ getDbSchemaDoc() {
 queryDb(input: AiQueryInput) {
   return this.aiDbAccess.query(input);
 }
+mutateDb(input: AiMutationInput) {
+  return this.aiDbAccess.mutate?.(input) ?? { error: "Database mutations are not enabled." };
+}
 ```
 
 ```ts
@@ -48,8 +54,10 @@ getTools() {
       return {
         getSchemaDoc: () => stub.getDbSchemaDoc(),
         query: (input) => stub.queryDb(input),
+        mutate: (input) => stub.mutateDb(input),
       };
     },
+    mutations: true,
   });
 }
 ```

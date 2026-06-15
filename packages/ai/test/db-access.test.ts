@@ -1,4 +1,11 @@
-import { createMigrations, defineSyncSchema, SQLiteReactiveDb, t } from "@sqlite-sync/core";
+import {
+  CrdtEventValidationError,
+  createMigrations,
+  defineSyncSchema,
+  type OwnCrdtEvent,
+  SQLiteReactiveDb,
+  t,
+} from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type AiDbExecutor, createAiDbAccess } from "../src/db-access";
 
@@ -47,6 +54,84 @@ describe("createAiDbAccess", () => {
         "- `title` TEXT NOT NULL",
       ].join("\n"),
     );
+  });
+
+  it("exposes mutate when storage is provided and applies CRDT own events with generated create ids", () => {
+    const { executor } = createFakeExecutor();
+    const applied: OwnCrdtEvent[] = [];
+    const access = createAiDbAccess({
+      executor,
+      storage: {
+        applyOwnEvents: (events) => {
+          applied.push(...events);
+        },
+      },
+      syncDbSchema,
+    });
+
+    expect(access.mutate).toBeTypeOf("function");
+    const result = access.mutate?.({
+      events: [{ type: "item-created", dataset: "item", payload: { title: "first" } }],
+    });
+
+    expect(result).toEqual({ applied: true, eventCount: 1, createdIds: [expect.any(String)] });
+    if (!result || "error" in result) {
+      throw new Error("mutation should have succeeded");
+    }
+    expect(applied).toHaveLength(1);
+    expect(applied[0]?.type).toBe("item-created");
+    expect(applied[0]?.dataset).toBe("item");
+    expect(applied[0]?.item_id).toBe(result.createdIds[0]);
+    expect(JSON.parse(applied[0]?.payload ?? "{}")).toEqual({ id: result.createdIds[0], title: "first" });
+  });
+
+  it("rejects create events when the caller provides an id", () => {
+    const { executor } = createFakeExecutor();
+    const applied: unknown[] = [];
+    const access = createAiDbAccess({
+      executor,
+      storage: {
+        applyOwnEvents: (events) => {
+          applied.push(...events);
+        },
+      },
+      syncDbSchema,
+    });
+
+    expect(
+      access.mutate?.({
+        events: [
+          { type: "item-created", dataset: "item", item_id: "1", payload: { title: "first" } },
+          { type: "item-created", dataset: "item", payload: { id: "2", title: "second" } },
+        ],
+      } as unknown as Parameters<NonNullable<typeof access.mutate>>[0]),
+    ).toEqual({
+      error:
+        "Invalid mutation events: [0] item-created events must omit item_id; an id is generated automatically; [1] item-created payload must omit id; an id is generated automatically",
+      errors: [
+        "[0] item-created events must omit item_id; an id is generated automatically",
+        "[1] item-created payload must omit id; an id is generated automatically",
+      ],
+    });
+    expect(applied).toEqual([]);
+  });
+
+  it("returns validation errors from CRDT storage as mutation results", () => {
+    const { executor } = createFakeExecutor();
+    const access = createAiDbAccess({
+      executor,
+      storage: {
+        applyOwnEvents: () => {
+          throw new CrdtEventValidationError(['[0] Unknown dataset "missing"']);
+        },
+      },
+      syncDbSchema,
+    });
+
+    expect(access.mutate?.({ events: [{ type: "item-deleted", dataset: "missing", item_id: "1" }] })).toEqual({
+      error: 'Invalid CRDT events: [0] Unknown dataset "missing"',
+      errors: ['[0] Unknown dataset "missing"'],
+    });
   });
 });
 

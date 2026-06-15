@@ -1,4 +1,11 @@
-import type { SyncDbSchema } from "@sqlite-sync/core";
+import {
+  type CrdtEventType,
+  CrdtEventValidationError,
+  type CrdtStorage,
+  generateId,
+  type OwnCrdtEvent,
+  type SyncDbSchema,
+} from "@sqlite-sync/core";
 import { createQueryGuard, QueryGuardError } from "./query-guard";
 import { createSchemaDoc, type SchemaDocContext } from "./schema-doc";
 
@@ -31,18 +38,51 @@ export type AiQueryResult =
       error: string;
     };
 
+export type AiMutationEvent =
+  | {
+      type: "item-created";
+      dataset: string;
+      item_id?: never;
+      payload?: Record<string, unknown>;
+    }
+  | {
+      type: Exclude<CrdtEventType, "item-created">;
+      dataset: string;
+      item_id: string;
+      payload?: Record<string, unknown>;
+    };
+
+export type AiMutationInput = {
+  events: AiMutationEvent[];
+};
+
+export type AiMutationResult =
+  | {
+      applied: true;
+      eventCount: number;
+      createdIds: string[];
+    }
+  | {
+      error: string;
+      errors?: string[];
+    };
+
 /**
- * Read-only AI access to a synced database. Lives where the storage lives; its method names
+ * AI access to a synced database. Lives where the storage lives; its method names
  * are the RPC contract, so a DO stub proxying to these methods exposes the same surface
  * (promise-wrapped) and satisfies the tool layer's `DbToolsAccess`.
  *
  * `query` enforces read-only (single SELECT/WITH/VALUES statement, no write opcodes, executed
  * in a forced-rollback transaction) but reads are not restricted by table — the whole database
  * file is in scope for the agent, so don't colocate data the agent must not see.
+ *
+ * `mutate` is only present when `createAiDbAccess` receives a CRDT storage. Mutations are CRDT
+ * events applied through sqlite-sync's normal own-event path, never direct SQL writes.
  */
 export type AiDbAccess = {
   getSchemaDoc(): string;
   query(input: AiQueryInput): AiQueryResult;
+  mutate?(input: AiMutationInput): AiMutationResult;
 };
 
 function toBase64(bytes: Uint8Array): string {
@@ -55,6 +95,7 @@ function toBase64(bytes: Uint8Array): string {
 
 export function createAiDbAccess(opts: {
   executor: AiDbExecutor;
+  storage?: Pick<CrdtStorage, "applyOwnEvents">;
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext;
   limits?: { maxRows?: number; maxCellChars?: number };
@@ -64,7 +105,7 @@ export function createAiDbAccess(opts: {
   const maxRows = opts.limits?.maxRows ?? 200;
   const maxCellChars = opts.limits?.maxCellChars ?? 2000;
 
-  return {
+  const access: AiDbAccess = {
     getSchemaDoc() {
       return schemaDoc;
     },
@@ -104,4 +145,63 @@ export function createAiDbAccess(opts: {
       return { rows, rowCount: resultRows.length, truncated };
     },
   };
+
+  const storage = opts.storage;
+  if (storage) {
+    access.mutate = (input) => {
+      const errors: string[] = [];
+      const createdIds: string[] = [];
+      const events: OwnCrdtEvent[] = [];
+
+      for (const [index, event] of input.events.entries()) {
+        if (event.type === "item-created") {
+          const looseEvent = event as { item_id?: unknown };
+          const payload = event.payload ?? {};
+          if (looseEvent.item_id !== undefined) {
+            errors.push(`[${index}] item-created events must omit item_id; an id is generated automatically`);
+          }
+          if ("id" in payload) {
+            errors.push(`[${index}] item-created payload must omit id; an id is generated automatically`);
+          }
+          if (looseEvent.item_id !== undefined || "id" in payload) {
+            continue;
+          }
+
+          const id = generateId();
+          createdIds.push(id);
+          events.push({
+            type: "item-created",
+            dataset: event.dataset,
+            item_id: id,
+            payload: JSON.stringify({ ...payload, id }),
+          });
+          continue;
+        }
+
+        events.push({
+          type: event.type,
+          dataset: event.dataset,
+          item_id: event.item_id,
+          payload: JSON.stringify(event.payload ?? {}),
+        });
+      }
+
+      if (errors.length > 0) {
+        return { error: `Invalid mutation events: ${errors.join("; ")}`, errors };
+      }
+
+      try {
+        storage.applyOwnEvents(events);
+      } catch (error) {
+        if (error instanceof CrdtEventValidationError) {
+          return { error: error.message, errors: error.errors };
+        }
+        throw error;
+      }
+
+      return { applied: true, eventCount: events.length, createdIds };
+    };
+  }
+
+  return access;
 }

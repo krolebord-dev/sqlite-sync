@@ -213,6 +213,26 @@ describe("verifySyncSchema", () => {
     await expect(verifySyncSchema(schema)).resolves.toEqual([]);
   });
 
+  it("accepts a declared null default against a migration with no DEFAULT clause", async () => {
+    const migrations = createMigrations((b) => ({
+      0: [
+        b.createTable("_item", (table) =>
+          table
+            .addColumn("id", "text", (col) => col.primaryKey().notNull())
+            .addColumn("title", "text", (col) => col.notNull())
+            .addColumn("score", "real")
+            .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false)),
+        ),
+      ],
+    }));
+    const schema = defineSyncSchema({
+      tables: { item: t.table({ title: t.text(), score: t.real().nullable().default(null) }) },
+      migrations,
+    });
+
+    await expect(verifySyncSchema(schema)).resolves.toEqual([]);
+  });
+
   it("catches a boolean default written as a string literal", async () => {
     const migrations = createMigrations((b) => ({
       0: [

@@ -167,7 +167,9 @@ function verifyDefault(
   defaultValueSql: string | null,
   issues: SchemaVerificationIssue[],
 ) {
-  if (meta.hasDefault && defaultValueSql === null) {
+  // A declared `null` default and an absent DEFAULT clause are equivalent in SQLite
+  // (a column with no DEFAULT defaults to NULL), so don't flag that pairing.
+  if (meta.hasDefault && meta.defaultValue !== null && defaultValueSql === null) {
     issues.push({
       table,
       column,

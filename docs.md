@@ -942,7 +942,21 @@ const aiDbAccess = createAiDbAccess({
 const tools = createDbTools({ access: () => aiDbAccess });
 ```
 
-The schema doc is generated from the declared sync schema's table builders (including table/column `.describe()` descriptions and enum values) plus the app-provided `context.overview` — no database access involved. For cross-Durable-Object setups, `AiDbAccess` method names double as the RPC contract — a stub proxying `getSchemaDoc()` and `query()` satisfies `createDbTools`. The `ToolSet` contains `getDbSchema` and `queryDb`.
+The schema doc is generated from the declared sync schema's table builders (including table/column `.describe()` descriptions and enum values) plus the app-provided `context.overview` — no database access involved. For cross-Durable-Object setups, `AiDbAccess` method names double as the RPC contract — a stub proxying `getSchemaDoc()` and `query()` satisfies `createDbTools`. The default `ToolSet` contains `getDbSchema` and `queryDb`.
+
+To allow AI writes, pass the CRDT storage to `createAiDbAccess` and opt in when creating tools:
+
+```ts
+const aiDbAccess = createAiDbAccess({
+  executor: createKyselyExecutor(this.ctx.storage),
+  storage: crdtStorage,
+  syncDbSchema,
+});
+
+const tools = createDbTools({ access: () => aiDbAccess, mutations: true });
+```
+
+This adds `mutateDb`, which accepts `item-created`, `item-updated`, and `item-deleted` CRDT events. It applies them through sqlite-sync's own-event path, not arbitrary write SQL, so writes are validated, persisted to the event log, applied locally, and synced normally. For `item-created` events, omit `item_id` and `payload.id`; the tool generates ids, injects them into the CRDT events, and returns them as `createdIds`.
 
 ---
 
@@ -1152,6 +1166,7 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 | `executeKysely(factory)` | Execute a typed Kysely query |
 | `enqueueEvent(event)` | Write a single CRDT event |
 | `enqueueEvents(events)` | Write multiple CRDT events |
+| `applyOwnEvents(events)` | Validate, persist, and immediately apply own CRDT events |
 | `createEvent(event)` | Type helper — returns the event as-is |
 | `addEventListener("event-applied", handler)` | Listen for applied events |
 
@@ -1188,14 +1203,15 @@ function createMigrator(
 
 #### `createAiDbAccess(options)`
 
-Creates read-only AI access to a synced database. Lives where the storage lives; the schema doc is generated once from the declared schema.
+Creates AI access to a synced database. Query access is read-only; mutation access is present only when a CRDT storage is provided. Lives where the storage lives; the schema doc is generated once from the declared schema.
 
 ```ts
 function createAiDbAccess(options: {
   executor: AiDbExecutor; // satisfied by createKyselyExecutor from @sqlite-sync/cloudflare
+  storage?: Pick<CrdtStorage, "applyOwnEvents">; // enables mutate(input)
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext; // overview/app-level notes
-}): AiDbAccess // { getSchemaDoc(): string; query(input): AiQueryResult }
+}): AiDbAccess // { getSchemaDoc(): string; query(input): AiQueryResult; mutate?(input): AiMutationResult }
 ```
 
 #### `createDbTools(options)`
@@ -1204,7 +1220,8 @@ Builds an AI SDK v6 `ToolSet` backed by an `AiDbAccess` (or a stub proxying to o
 
 ```ts
 function createDbTools(options: {
-  access: () => DbToolsAccess | Promise<DbToolsAccess>
+  access: () => DbToolsAccess | Promise<DbToolsAccess>;
+  mutations?: boolean; // expose mutateDb
 }): ToolSet
 ```
 

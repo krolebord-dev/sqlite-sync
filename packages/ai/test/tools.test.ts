@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AiQueryInput, AiQueryResult } from "../src/db-access";
+import type { AiMutationInput, AiMutationResult, AiQueryInput, AiQueryResult } from "../src/db-access";
 import { createDbTools } from "../src/tools";
 
 const emptyResult: AiQueryResult = { rows: [], rowCount: 0, truncated: false };
@@ -10,6 +10,21 @@ describe("createDbTools", () => {
     expect(Object.keys(tools)).toEqual(["getDbSchema", "queryDb"]);
     expect(tools.getDbSchema?.description).toBeTruthy();
     expect(tools.queryDb?.description).toBeTruthy();
+    expect(tools.mutateDb).toBeUndefined();
+  });
+
+  it("exposes mutateDb only when mutations are enabled", () => {
+    const tools = createDbTools({
+      access: () => ({
+        getSchemaDoc: () => "doc",
+        query: () => emptyResult,
+        mutate: () => ({ applied: true, eventCount: 0, createdIds: [] }),
+      }),
+      mutations: true,
+    });
+
+    expect(Object.keys(tools)).toEqual(["getDbSchema", "queryDb", "mutateDb"]);
+    expect(tools.mutateDb?.description).toBeTruthy();
   });
 
   it("resolves the access factory on every call and awaits async docs", async () => {
@@ -49,5 +64,47 @@ describe("createDbTools", () => {
       execute({ sql: "SELECT id FROM items WHERE id = ?", parameters: ["1"] }, { toolCallId: "call-1", messages: [] }),
     ).resolves.toEqual(result);
     expect(seen).toEqual([{ sql: "SELECT id FROM items WHERE id = ?", parameters: ["1"] }]);
+  });
+
+  it("mutateDb forwards CRDT events and returns the access result", async () => {
+    const seen: AiMutationInput[] = [];
+    const result: AiMutationResult = { applied: true, eventCount: 1, createdIds: ["created-id"] };
+    const tools = createDbTools({
+      access: () => ({
+        getSchemaDoc: () => "doc",
+        query: () => emptyResult,
+        mutate: (input) => {
+          seen.push(input);
+          return result;
+        },
+      }),
+      mutations: true,
+    });
+
+    const execute = tools.mutateDb?.execute;
+    if (!execute) throw new Error("mutateDb tool must be executable");
+
+    const input: AiMutationInput = {
+      events: [{ type: "item-updated", dataset: "item", item_id: "1", payload: { title: "updated" } }],
+    };
+    await expect(execute(input, { toolCallId: "call-1", messages: [] })).resolves.toEqual(result);
+    expect(seen).toEqual([input]);
+  });
+
+  it("mutateDb returns an error when enabled without a mutate access method", async () => {
+    const tools = createDbTools({
+      access: () => ({ getSchemaDoc: () => "doc", query: () => emptyResult }),
+      mutations: true,
+    });
+
+    const execute = tools.mutateDb?.execute;
+    if (!execute) throw new Error("mutateDb tool must be executable");
+
+    await expect(
+      execute(
+        { events: [{ type: "item-deleted", dataset: "item", item_id: "1" }] },
+        { toolCallId: "call-1", messages: [] },
+      ),
+    ).resolves.toEqual({ error: "Database mutations are not enabled for this access object." });
   });
 });

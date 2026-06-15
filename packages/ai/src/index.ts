@@ -2,6 +2,9 @@ export {
   type AiDbAccess,
   type AiDbExecuteParams,
   type AiDbExecutor,
+  type AiMutationEvent,
+  type AiMutationInput,
+  type AiMutationResult,
   type AiQueryInput,
   type AiQueryResult,
   createAiDbAccess,
@@ -16,4 +19,4 @@ export {
   runWithForcedRollback,
 } from "./query-guard";
 export { createSchemaDoc, type SchemaDocContext } from "./schema-doc";
-export { createDbTools, type DbToolsAccess } from "./tools";
+export { type CreateDbToolsOptions, createDbTools, type DbToolsAccess } from "./tools";

@@ -58,6 +58,7 @@ export type ServerSyncDb<Schema extends SyncDbSchema> = Pick<
   KyselyExecutor<Schema[`~serverSchema`]>,
   "execute" | "executeKysely"
 > &
+  Pick<CrdtStorage, "applyOwnEvents"> &
   CrdtStorageMutator<Schema[`~mutationsSchema`]> &
   Pick<TypedEventTarget<ServerSyncDbEvents<Schema>>, "addEventListener" | "removeEventListener">;
 
@@ -146,6 +147,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   const syncDb: ServerSyncDb<Schema> = {
     ...syncDbExecutor,
     ...syncDbMutator,
+    applyOwnEvents: crdtStorage.applyOwnEvents,
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
   };

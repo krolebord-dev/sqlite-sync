@@ -82,7 +82,7 @@ export {
 } from "./sqlite-crdt/apply-crdt-event";
 // CRDT Schema
 export type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "./sqlite-crdt/crdt-schema";
-export { type CrdtStorage, createCrdtStorage } from "./sqlite-crdt/crdt-storage";
+export { type CrdtStorage, createCrdtStorage, type OwnCrdtEvent } from "./sqlite-crdt/crdt-storage";
 export { type CrdtStorageMutator, createCrdtStorageMutator } from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {
