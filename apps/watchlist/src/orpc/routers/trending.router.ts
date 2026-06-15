@@ -1,6 +1,6 @@
 import type { Movie, TV } from "tmdb-ts";
 import z from "zod";
-import { tmdb } from "@/lib/tmdb";
+import { getTmdb, getTmdbErrorMessage } from "@/lib/tmdb";
 import { protectedProcedure } from "../common/procedure";
 
 type MovieOrTv = Movie | TV | (Movie & { media_type: "movie" }) | (TV & { media_type: "tv" });
@@ -13,18 +13,24 @@ const getTrending = protectedProcedure
       page: z.number().min(1).max(500).default(1),
     }),
   )
-  .handler(async ({ input }) => {
-    const results = await tmdb.trending.trending(input.mediaType, input.timeWindow, { page: input.page });
-    const filtered = results.results.filter((result): result is MovieOrTv => {
-      const mediaType = "media_type" in result ? (result as any).media_type : input.mediaType;
-      return mediaType === "movie" || mediaType === "tv";
-    });
-    return {
-      page: results.page,
-      totalPages: results.total_pages,
-      totalResults: results.total_results,
-      results: filtered.map((result) => adaptTrendingResult(result, input.mediaType)),
-    };
+  .handler(async ({ input, errors }) => {
+    try {
+      const results = await getTmdb().trending.trending(input.mediaType, input.timeWindow, { page: input.page });
+      const filtered = results.results.filter((result): result is MovieOrTv => {
+        const mediaType = "media_type" in result ? (result as any).media_type : input.mediaType;
+        return mediaType === "movie" || mediaType === "tv";
+      });
+      return {
+        page: results.page,
+        totalPages: results.total_pages,
+        totalResults: results.total_results,
+        results: filtered.map((result) => adaptTrendingResult(result, input.mediaType)),
+      };
+    } catch (error) {
+      throw errors.TMDB_UNAVAILABLE({
+        message: getTmdbErrorMessage(error),
+      });
+    }
   });
 
 function adaptTrendingResult(result: MovieOrTv, requestedMediaType: string) {

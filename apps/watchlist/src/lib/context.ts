@@ -11,6 +11,7 @@ const envSchema = z.object({
   AUTH_SECRET: z.string(),
   MODE: z.enum(["development", "production"]),
   VITE_APP_URL: z.string(),
+  TMDB_READ_ACCESS_TOKEN: z.string().min(1),
   RESEND_API_KEY: z.string().optional(),
 });
 envSchema.parse(env);

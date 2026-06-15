@@ -8,6 +8,9 @@ export const orpcErrors = {
   NOT_FOUND: {},
   BAD_REQUEST: {},
   LIST_NOT_FOUND: {},
+  TMDB_UNAVAILABLE: {
+    message: "TMDB is unavailable",
+  },
 } as const;
 
 export const osBase = os.$context<ORPCContext>().errors(orpcErrors);

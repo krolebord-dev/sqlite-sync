@@ -1,3 +1,4 @@
+import { isDefinedError } from "@orpc/client";
 import { generateId } from "@sqlite-sync/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router";
@@ -634,7 +635,12 @@ function TmdbSearchResults() {
     },
   );
 
-  const { data: searchResults, isLoading } = useQuery(
+  const {
+    data: searchResults,
+    isLoading,
+    isError,
+    error,
+  } = useQuery(
     orpc.search.search.queryOptions({
       input: { q: throttledQuery },
       enabled: !!throttledQuery,
@@ -650,7 +656,7 @@ function TmdbSearchResults() {
         type: item.type,
         title: item.title,
         posterUrl: item.posterUrl,
-        releaseDate: new Date(item.releaseDate).getTime(),
+        releaseDate: item.releaseDate ? new Date(item.releaseDate).getTime() : null,
         priority: 0,
         overview: item.overview,
         rating: item.voteAverage,
@@ -671,6 +677,20 @@ function TmdbSearchResults() {
     return null;
   }
 
+  if (isError) {
+    return (
+      <div className="flex w-full flex-col items-center border-border border-t bg-muted/30 pt-4">
+        <div className="w-full max-w-7xl px-4 pb-8">
+          <p className="text-center text-destructive text-sm">
+            {isDefinedError(error) && error.code === "TMDB_UNAVAILABLE"
+              ? error.message
+              : "Could not search TMDB. Please try again later."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!searchResults || (searchResults.length === 0 && !isLoading)) {
     return null;
   }
@@ -681,10 +701,10 @@ function TmdbSearchResults() {
         <h2 className="mb-4 font-medium text-muted-foreground text-sm">Add from TMDB</h2>
         <div className="flex w-full flex-wrap justify-center gap-4 pb-8 md:grid md:grid-cols-2 xl:grid-cols-3">
           {searchResults.map((item) => {
-            const alreadyAdded = alreadyAddedTmdbIds.has(item.tmdbId);
+            const alreadyAdded = alreadyAddedTmdbIds?.has(item.tmdbId) ?? false;
             return (
               <TmdbSearchResultCard
-                alreadyAdded={alreadyAddedTmdbIds.has(item.tmdbId)}
+                alreadyAdded={alreadyAdded}
                 key={item.tmdbId}
                 item={item}
                 onClick={() => (alreadyAdded ? removeItem(item.tmdbId) : addItem(item))}

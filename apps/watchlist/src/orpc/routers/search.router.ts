@@ -1,14 +1,20 @@
 import type { MovieWithMediaType, TVWithMediaType } from "tmdb-ts";
 import z from "zod";
-import { tmdb } from "@/lib/tmdb";
+import { getTmdb, getTmdbErrorMessage } from "@/lib/tmdb";
 import { protectedProcedure } from "../common/procedure";
 
-const search = protectedProcedure.input(z.object({ q: z.string() })).handler(async ({ input }) => {
-  const results = (await tmdb.search.multi({ query: input.q, include_adult: false })).results;
-  return results
-    .filter((result) => result.media_type === "movie" || result.media_type === "tv")
-    .filter((result) => result.vote_count > 5)
-    .map(adaptSearchResult);
+const search = protectedProcedure.input(z.object({ q: z.string().min(1) })).handler(async ({ input, errors }) => {
+  try {
+    const results = (await getTmdb().search.multi({ query: input.q, include_adult: false })).results;
+    return results
+      .filter((result) => result.media_type === "movie" || result.media_type === "tv")
+      .filter((result) => result.vote_count > 5)
+      .map(adaptSearchResult);
+  } catch (error) {
+    throw errors.TMDB_UNAVAILABLE({
+      message: getTmdbErrorMessage(error),
+    });
+  }
 });
 
 function adaptSearchResult(result: MovieWithMediaType | TVWithMediaType) {

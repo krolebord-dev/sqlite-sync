@@ -1,3 +1,4 @@
+import { isDefinedError } from "@orpc/client";
 import { generateId } from "@sqlite-sync/core";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -115,7 +116,7 @@ type TrendingResultsProps = {
 function TrendingResults({ mediaType, timeWindow, page, onPageChange }: TrendingResultsProps) {
   const db = useDb();
 
-  const { data, isLoading } = useQuery(
+  const { data, isLoading, isError, error } = useQuery(
     orpc.trending.getTrending.queryOptions({
       input: { mediaType, timeWindow, page },
       placeholderData: keepPreviousData,
@@ -170,6 +171,16 @@ function TrendingResults({ mediaType, timeWindow, page, onPageChange }: Trending
     return <TrendingSkeletons />;
   }
 
+  if (isError && !data) {
+    return (
+      <p className="py-12 text-center text-destructive text-sm">
+        {isDefinedError(error) && error.code === "TMDB_UNAVAILABLE"
+          ? error.message
+          : "Could not load trending items. Please try again later."}
+      </p>
+    );
+  }
+
   if (!data || data.results.length === 0) {
     return <p className="py-12 text-center text-muted-foreground">No trending items found.</p>;
   }
@@ -178,7 +189,7 @@ function TrendingResults({ mediaType, timeWindow, page, onPageChange }: Trending
     <>
       <div className="grid gap-4 pb-4 sm:grid-cols-2 xl:grid-cols-3">
         {data.results.map((item) => {
-          const alreadyAdded = existingTmdbIds.has(item.tmdbId) || sessionAddedIds.has(item.tmdbId);
+          const alreadyAdded = (existingTmdbIds?.has(item.tmdbId) ?? false) || sessionAddedIds.has(item.tmdbId);
           return (
             <TrendingItemCard
               key={item.tmdbId}
