@@ -73,7 +73,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.0.2",
     "tailwindcss": "^4.1.18",
-    "tmdb-ts": "^2.2.0",
+    "tmdb-ts": "^2.3.0",
     "tw-animate-css": "^1.3.6",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.5",

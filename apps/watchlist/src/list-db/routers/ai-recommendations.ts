@@ -1,7 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { MovieWithMediaType, TVWithMediaType } from "tmdb-ts";
-import { TMDB } from "tmdb-ts";
 import z from "zod";
+import { createTmdb } from "@/lib/tmdb";
 import { recommendItems } from "../../ai/recommend-items";
 import { listProcedure } from "./orpc-base";
 
@@ -142,7 +142,7 @@ const getRecommendations = listProcedure
 
     const aiResult = await recommendItems({ tasteProfile, model, customPrompt: input.customPrompt });
 
-    const tmdb = new TMDB(context.env.TMDB_READ_ACCESS_TOKEN);
+    const tmdb = createTmdb(context.env.TMDB_READ_ACCESS_TOKEN);
     const existingTmdbIds = new Set([...items.map((i) => i.tmdbId), ...(input.excludeTmdbIds ?? [])]);
 
     const enriched = await Promise.allSettled(

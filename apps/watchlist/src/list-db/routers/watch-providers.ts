@@ -1,5 +1,5 @@
-import { TMDB } from "tmdb-ts";
 import { z } from "zod";
+import { createTmdb } from "@/lib/tmdb";
 import { listProcedure } from "./orpc-base";
 
 const WATCH_PROVIDER_REGION_KEY = "settings:watch-provider-region";
@@ -21,7 +21,7 @@ const getItemWatchProviders = listProcedure
       };
     }
 
-    const tmdb = new TMDB(context.env.TMDB_READ_ACCESS_TOKEN);
+    const tmdb = createTmdb(context.env.TMDB_READ_ACCESS_TOKEN);
     const data =
       input.type === "movie"
         ? await tmdb.movies.watchProviders(input.tmdbId)
