@@ -19,6 +19,7 @@ const link = new RPCLink<ORPCClientContext>({
   url: () => {
     return `${import.meta.env.VITE_APP_URL}/rpc`;
   },
+  fetch: (request, init) => fetch(request, { ...init, credentials: "include" }),
 });
 
 const orpcClient: BaseORPCClient = createORPCClient(link);

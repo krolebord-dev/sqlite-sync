@@ -17,6 +17,7 @@ export function getListDbOrpc(listId: string): ListDbORPCUtils {
 
   const link = new RPCLink({
     url: () => `${import.meta.env.VITE_APP_URL}/list-db/list-db-server/list-${listId}/rpc`,
+    fetch: (request, init) => fetch(request, { ...init, credentials: "include" }),
   });
   const client: ListDbORPCClient = createORPCClient(link);
   const utils = createTanstackQueryUtils(client);
