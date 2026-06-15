@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/cloudflare",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Cloudflare utilities for @sqlite-sync/core",
   "type": "module",
   "license": "MIT",
@@ -47,7 +47,7 @@
   },
   "peerDependencies": {
     "@cloudflare/workers-types": "^4.0.0",
-    "@sqlite-sync/core": "^0.6.0",
+    "@sqlite-sync/core": "^0.7.0",
     "kysely": "^0.28.0 || ^0.29.0"
   },
   "devDependencies": {
