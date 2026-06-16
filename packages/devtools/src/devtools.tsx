@@ -1,4 +1,4 @@
-import type { SharedLiveQuerySnapshot } from "@sqlite-sync/core";
+import type { SharedLiveQuerySnapshot, SyncedDbExport } from "@sqlite-sync/core";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -554,7 +554,88 @@ function OverviewTab({
         </div>
       </div>
 
+      <DataSection
+        key={selectedInstance.instanceId}
+        dbId={selectedInstance.dbId}
+        instance={selectedInstance.instance}
+      />
+
       <ResetSection dbId={selectedInstance.dbId} instance={selectedInstance.instance} />
+    </div>
+  );
+}
+
+function DataSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDevtoolsInstance["instance"] }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [status, setStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  const handleExport = () => {
+    try {
+      const data = instance.exportData();
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${dbId}-${data.exportedAt.replace(/[:.]/g, "-")}.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      const rowCount = Object.values(data.tables).reduce((sum, rows) => sum + rows.length, 0);
+      setStatus({ kind: "success", message: `Exported ${rowCount} row${rowCount === 1 ? "" : "s"}.` });
+    } catch (error) {
+      setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    setIsImporting(true);
+    setStatus(null);
+    try {
+      const data = JSON.parse(await file.text()) as SyncedDbExport;
+      const result = instance.importData(data);
+      setStatus({ kind: "success", message: `Imported ${result.imported} row${result.imported === 1 ? "" : "s"}.` });
+    } catch (error) {
+      setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  return (
+    <div style={overviewSectionStyles}>
+      <div style={overviewSectionTitleStyles}>Backup &amp; Restore</div>
+      <div style={dangerZoneDescStyles}>
+        Export the active rows of every CRDT table as JSON, or import a dump to seed/restore. Import overwrites rows
+        with matching ids and is propagated to the server.
+      </div>
+      <div style={dataActionsStyles}>
+        <button type="button" style={dataButtonStyles} onClick={handleExport}>
+          ↓ Export JSON
+        </button>
+        <button
+          type="button"
+          style={dataButtonStyles}
+          disabled={isImporting}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {isImporting ? "Importing…" : "↑ Import JSON"}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: "none" }}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void handleImportFile(file);
+          }}
+        />
+      </div>
+      {status && (
+        <div style={status.kind === "error" ? dataStatusErrorStyles : dataStatusSuccessStyles}>{status.message}</div>
+      )}
     </div>
   );
 }
@@ -1672,6 +1753,34 @@ const permissionIconStyles: CSSProperties = {
 
 const permissionTextStyles: CSSProperties = {
   color: C.textDim,
+};
+
+const dataActionsStyles: CSSProperties = {
+  display: "flex",
+  gap: "0.4rem",
+};
+
+const dataButtonStyles: CSSProperties = {
+  border: `1px solid ${C.border}`,
+  borderRadius: "7px",
+  padding: "0.4rem 0.8rem",
+  backgroundColor: "transparent",
+  color: C.teal,
+  fontSize: "0.78rem",
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const dataStatusSuccessStyles: CSSProperties = {
+  fontSize: "0.75rem",
+  color: C.success,
+};
+
+const dataStatusErrorStyles: CSSProperties = {
+  fontSize: "0.75rem",
+  color: C.error,
+  wordBreak: "break-word",
 };
 
 const dangerZoneStyles: CSSProperties = {
