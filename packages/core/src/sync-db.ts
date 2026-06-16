@@ -1,5 +1,6 @@
 import { validateDbId } from "./db-id";
 import { getOrCreateSQLiteSyncDevtoolsRegistry } from "./devtools-registry";
+import { createExportImport } from "./export-import";
 import { HLCCounter } from "./hlc";
 import { type Logger, startPerformanceLogger } from "./logger";
 import { createMemoryDb } from "./memory-db/memory-db";
@@ -131,6 +132,13 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 
+  const { exportData, importData } = createExportImport({
+    reactiveDb,
+    crdtStorage,
+    tablesConfig: options.syncDbSchema.tablesConfig,
+    schemaVersion: workerClientSnapshot.schemaVersion,
+  });
+
   let isDisposed = false;
   let unregisterDevtools: (() => void) | undefined;
   const dispose = async () => {
@@ -183,6 +191,8 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       setTimeout(() => globalThis.location?.reload(), 250);
     },
     subscribe: workerClient.subscribe,
+    exportData,
+    importData,
     dispose,
     _internal: {
       executeAsync: workerClient.execute.bind(workerClient),

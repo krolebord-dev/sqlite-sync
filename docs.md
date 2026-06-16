@@ -13,6 +13,7 @@
 - [Server Setup](#server-setup)
 - [Queries](#queries)
 - [Mutations](#mutations)
+- [Backup and Restore](#backup-and-restore)
 - [Sync State](#sync-state)
 - [Migrations](#migrations)
 - [Server-Side Mutations](#server-side-mutations)
@@ -530,6 +531,46 @@ db.execute({
 // Or as a simple string (no parameters)
 db.execute("DELETE FROM todo WHERE completed = 1");
 ```
+
+---
+
+## Backup and Restore
+
+`syncedDb.exportData()` and `syncedDb.importData()` move the database's current
+data in and out as a portable JSON envelope. This is for **backup, seed, and
+restore** — distinct from a raw SQLite snapshot, the export carries no event
+history, just the current active rows of every synced table.
+
+```ts
+const dump = syncedDb.exportData();
+// {
+//   schemaVersion: 3,
+//   exportedAt: "2026-06-16T12:00:00.000Z",
+//   tables: { todo: [{ id: "1", title: "buy milk", completed: 0 }, ...] },
+// }
+
+// later, on a fresh or different database:
+const { imported } = syncedDb.importData(dump);
+```
+
+`exportData(opts?)` dumps every active (`tombstone = 0`) row from each synced
+table, keyed by table name. Each row keeps its `id` and drops the internal
+`tombstone` column. Pass `{ tables: ["todo"] }` to export a subset. The data is
+read from the local in-memory database — the state the current tab sees.
+
+`importData(data, opts?)` replays each row as an `item-created` CRDT event,
+seeding it into local state and propagating to the server like any other write.
+Because the generated events get fresh timestamps:
+
+- **New ids are inserted; existing ids are overwritten** field-by-field under
+  last-write-wins. Rows not present in the dump are left untouched.
+- It is a restore/seed, **not a CRDT merge** — original timestamps are not
+  preserved, so imported data always wins against pre-existing local state.
+
+Import rejects a dump whose `schemaVersion` differs from the current database
+(no cross-version migration); pass `{ validate: false }` to skip that check. Row
+payloads are always validated against the schema and the import is atomic — an
+invalid row throws `CrdtEventValidationError` and applies nothing.
 
 ---
 
