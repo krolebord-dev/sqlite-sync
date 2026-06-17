@@ -380,6 +380,12 @@ export const createCrdtSyncRemoteSource = ({
         return;
       }
 
+      if (!response.ok) {
+        console.error("Remote rejected pushed events. Going offline.");
+        goOffline("REMOTE_PUSH_ERROR");
+        return;
+      }
+
       pushSyncId.current = eventsBatch.nextSyncId;
 
       // Fast-forward the pull cursor: the remote assigns sync ids for the pushed
@@ -388,7 +394,6 @@ export const createCrdtSyncRemoteSource = ({
       // range (pullSyncId, afterSyncId] contains only our own events, so there is
       // nothing to pull up to afterSyncId.
       if (
-        response.ok &&
         response.beforeSyncId !== undefined &&
         response.afterSyncId !== undefined &&
         response.beforeSyncId <= pullSyncId.current &&

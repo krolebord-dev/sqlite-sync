@@ -1110,10 +1110,14 @@ function startDbWorker(options: {
   storageVersion?: string;
   /** Dev-time drift check — throws and refuses to start on schema/migration mismatch. */
   verifySchema?: boolean;
+  /** Local worker event-log garbage collection. Disabled by default. */
+  eventLogGc?: boolean;
 }): Promise<void>
 ```
 
 `storageVersion` is an app-provided storage version, combined with the library's internal storage version. Bump it when deploying a code change that old persisted local DBs cannot survive — on mismatch, the elected worker wipes the local DB on startup (a full re-sync follows, like `requestReload({ clean: true })`).
+
+`eventLogGc` controls startup-only worker event-log garbage collection. It is disabled by default. GC keeps at least the latest 100 applied/deduped event rows, never deletes pending rows, and never deletes local rows that have not been pushed to the remote. Set `eventLogGc: true` to enable it.
 
 #### `getWorkerConfig<Props>()`
 

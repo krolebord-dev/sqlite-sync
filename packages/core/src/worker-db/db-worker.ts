@@ -12,6 +12,7 @@ import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise } from "../utils";
+import { runWorkerEventLogGc } from "./event-log-gc";
 import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
 import { createStorageVersionStore } from "./storage-version";
 import {
@@ -117,6 +118,10 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
   db.invalidateDbSchema();
 
+  const pullSyncId = kvStore.createNumberStoredValue("pull-sync-id", -1);
+  const pushSyncId = kvStore.createNumberStoredValue("push-sync-id", -1);
+  const eventHlcAccumulator = kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", "");
+
   // Record the applied reset epoch / storage version only after the wiped DB
   // initialized successfully, so a failed init can be retried by a later
   // elected worker, while a later election does not wipe again.
@@ -125,6 +130,16 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   }
   if (isVersionMismatch) {
     await storageVersion.markCurrentVersionApplied();
+  }
+
+  if (opts.eventLogGc === true) {
+    runWorkerEventLogGc({
+      db,
+      dbConfig: workerDbConfig,
+      pushSyncId,
+      eventHlcAccumulator,
+      logger,
+    });
   }
 
   const crdtStorage = createCrdtStorage({
@@ -141,7 +156,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     },
     db,
     dbConfig: workerDbConfig,
-    eventHlcAccumulator: kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", ""),
+    eventHlcAccumulator,
     schema: opts.syncDbSchema,
   });
 
@@ -157,10 +172,11 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const remoteSource = createRemoteSource({
-    kvStore,
     crdtStorage,
     migrator,
     clientId: config.clientId,
+    pullSyncId,
+    pushSyncId,
     remoteFactory: opts.createRemoteSource,
   });
   remoteSource.goOnline();
@@ -291,18 +307,26 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 }
 
 type InitRemoteOptions = {
-  kvStore: KvStore;
   clientId: string;
   crdtStorage: CrdtStorage;
   migrator: SyncDbMigrator;
+  pullSyncId: ReturnType<KvStore["createNumberStoredValue"]>;
+  pushSyncId: ReturnType<KvStore["createNumberStoredValue"]>;
   remoteFactory?: CreateRemoteSourceFactory;
 };
 
-function createRemoteSource({ kvStore, clientId, crdtStorage, migrator, remoteFactory }: InitRemoteOptions) {
+function createRemoteSource({
+  clientId,
+  crdtStorage,
+  migrator,
+  pullSyncId,
+  pushSyncId,
+  remoteFactory,
+}: InitRemoteOptions) {
   return createCrdtSyncRemoteSource({
     bufferSize: 50,
-    pullSyncId: kvStore.createNumberStoredValue("pull-sync-id", -1),
-    pushSyncId: kvStore.createNumberStoredValue("push-sync-id", -1),
+    pullSyncId,
+    pushSyncId,
     nodeId: clientId,
     storage: crdtStorage,
     migrator,
@@ -352,6 +376,12 @@ type WorkerOptions = {
    * Enable in development only, e.g. `verifySchema: import.meta.env.DEV`.
    */
   verifySchema?: boolean;
+  /**
+   * Runs local worker event-log garbage collection on startup. Disabled by default;
+   * set `eventLogGc: true` to enable. GC keeps the latest event rows and never removes
+   * pending events or local rows that have not been pushed to the remote.
+   */
+  eventLogGc?: boolean;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {
