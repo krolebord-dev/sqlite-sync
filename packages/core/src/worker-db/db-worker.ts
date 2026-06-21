@@ -220,7 +220,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       };
     },
     importData: createImportData({
-      schemaVersion: migrator.currentSchemaVersion,
+      migrator,
       applyEvents: async (events) => {
         crdtStorage.applyOwnEvents(events);
         await crdtStorage.internal.processEnqueuedEvents();

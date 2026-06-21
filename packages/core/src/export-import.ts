@@ -1,5 +1,6 @@
+import type { MigratableEvent, SyncDbMigrator } from "./migrations/migrator";
 import type { CrdtTableConfig } from "./sqlite-crdt/crdt-schema";
-import type { CrdtStorage, OwnCrdtEvent } from "./sqlite-crdt/crdt-storage";
+import type { OwnCrdtEvent } from "./sqlite-crdt/crdt-storage";
 import type { ExecuteResult } from "./sqlite-db-wrapper";
 import { quoteId } from "./utils";
 
@@ -24,23 +25,30 @@ type ExportImportReactiveDb = {
 
 type ApplyImportEvents = (events: OwnCrdtEvent[]) => void | Promise<void>;
 
-type CreateExportImportOptions = {
+type ImportMigrator = Pick<SyncDbMigrator, "currentSchemaVersion" | "migrateEvents">;
+
+type CreateExportDataOptions = {
   reactiveDb: ExportImportReactiveDb;
-  crdtStorage: CrdtStorage;
   tablesConfig: CrdtTableConfig[];
   schemaVersion: number;
-  importData?: (data: SyncedDbExport, opts?: ImportDataOptions) => ImportDataResult | Promise<ImportDataResult>;
 };
 
 type CreateImportDataOptions = {
-  schemaVersion: number;
+  migrator: ImportMigrator;
   applyEvents: ApplyImportEvents;
 };
 
-export function createImportData({ schemaVersion, applyEvents }: CreateImportDataOptions) {
+export function createImportData({ migrator, applyEvents }: CreateImportDataOptions) {
   /**
    * Replay an export as a sequence of `item-created` CRDT events, seeding the
    * rows through the provided CRDT event applicator.
+   *
+   * Schema migration: a dump exported at an older schema version is forward-
+   * migrated up to the DB's current version (running the same event transformers
+   * remote events go through) before being authored — so an old backup can be
+   * restored into an upgraded app. Rows in tables removed by a later migration
+   * are dropped. The reverse (a dump from a *newer* version than this DB) cannot
+   * be down-migrated and is rejected.
    *
    * Overwrite-by-default: because the generated events carry fresh (newest) HLC
    * timestamps, importing a row whose `id` already exists overwrites every field
@@ -48,22 +56,25 @@ export function createImportData({ schemaVersion, applyEvents }: CreateImportDat
    * the dump are never touched. This is a restore/seed, not a CRDT merge —
    * original timestamps are not preserved.
    *
-   * @param opts.validate When `false`, skip the schema-version match check. Per-row
-   *   payload validation always runs (it is intrinsic to applying own events).
+   * @param opts.validate When `false`, skip the too-new guard and author the rows
+   *   as-is at the current version (footgun — payloads are not down-migrated).
+   *   Forward migration and per-row payload validation always run regardless.
    */
   return (data: SyncedDbExport, opts?: ImportDataOptions): ImportDataResult | Promise<ImportDataResult> => {
     const validate = opts?.validate ?? true;
+    const currentVersion = migrator.currentSchemaVersion;
 
-    if (validate && data.schemaVersion !== schemaVersion) {
+    if (validate && data.schemaVersion > currentVersion) {
       throw new Error(
-        `Cannot import data from schema version ${data.schemaVersion} into a database at schema version ${schemaVersion}.`,
+        `Cannot import data from schema version ${data.schemaVersion} into a database at older schema version ${currentVersion}. Exports migrate forward to newer schema versions, not backward.`,
       );
     }
 
-    const events: OwnCrdtEvent[] = [];
+    const sourceEvents: MigratableEvent[] = [];
     for (const [crdtTableName, rows] of Object.entries(data.tables)) {
       for (const row of rows) {
-        events.push({
+        sourceEvents.push({
+          schema_version: data.schemaVersion,
           type: "item-created",
           dataset: crdtTableName,
           item_id: row.id as string,
@@ -71,6 +82,15 @@ export function createImportData({ schemaVersion, applyEvents }: CreateImportDat
         });
       }
     }
+
+    // Forward-migrate the historical export up to the current schema version
+    // before authoring it: own events are always written at the current version.
+    const events: OwnCrdtEvent[] = migrator.migrateEvents(sourceEvents, currentVersion).map((event) => ({
+      type: event.type,
+      dataset: event.dataset,
+      item_id: event.item_id,
+      payload: event.payload,
+    }));
 
     const applied = applyEvents(events);
     if (applied instanceof Promise) {
@@ -81,13 +101,7 @@ export function createImportData({ schemaVersion, applyEvents }: CreateImportDat
   };
 }
 
-export function createExportImport({
-  reactiveDb,
-  crdtStorage,
-  tablesConfig,
-  schemaVersion,
-  importData: importDataOverride,
-}: CreateExportImportOptions) {
+export function createExportData({ reactiveDb, tablesConfig, schemaVersion }: CreateExportDataOptions) {
   const crdtTableNames = tablesConfig.map((config) => config.crdtTableName);
 
   const resolveTables = (requested: string[] | undefined): string[] => {
@@ -109,7 +123,7 @@ export function createExportImport({
    * which may differ slightly from the worker's authoritative DB while local
    * writes are in flight.
    */
-  const exportData = (opts?: { tables?: string[] }): SyncedDbExport => {
+  return (opts?: { tables?: string[] }): SyncedDbExport => {
     const tables: Record<string, Array<Record<string, unknown>>> = {};
 
     for (const crdtTableName of resolveTables(opts?.tables)) {
@@ -125,13 +139,4 @@ export function createExportImport({
       tables,
     };
   };
-
-  const importData =
-    importDataOverride ??
-    createImportData({
-      schemaVersion,
-      applyEvents: (events) => crdtStorage.applyOwnEvents(events),
-    });
-
-  return { exportData, importData };
 }

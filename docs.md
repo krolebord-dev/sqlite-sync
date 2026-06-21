@@ -567,10 +567,15 @@ Because the generated events get fresh timestamps:
 - It is a restore/seed, **not a CRDT merge** — original timestamps are not
   preserved, so imported data always wins against pre-existing local state.
 
-Import rejects a dump whose `schemaVersion` differs from the current database
-(no cross-version migration); pass `{ validate: false }` to skip that check. Row
-payloads are always validated against the schema and the import is atomic — an
-invalid row throws `CrdtEventValidationError` and applies nothing.
+A dump from an **older** `schemaVersion` is forward-migrated up to the current
+database version before being applied — the same event transformers used during
+sync run here, so an old backup restores cleanly into an upgraded app (new-column
+defaults are filled, rows in dropped tables are discarded). A dump from a **newer**
+version cannot be down-migrated and is rejected; pass `{ validate: false }` to
+author it as-is at the current version anyway (footgun — payloads are not
+down-migrated). Row payloads are always validated against the schema and the
+import is atomic — an invalid row throws `CrdtEventValidationError` and applies
+nothing.
 
 ---
 

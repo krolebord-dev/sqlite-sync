@@ -3,7 +3,7 @@
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
 export {
-  createExportImport,
+  createExportData,
   createImportData,
   type ImportDataOptions,
   type ImportDataResult,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createExportImport, type SyncedDbExport } from "../src/export-import";
+import { createExportData, createImportData, type SyncedDbExport } from "../src/export-import";
 import { HLCCounter } from "../src/hlc";
 import { createMemoryDb } from "../src/memory-db/memory-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
@@ -56,12 +56,13 @@ async function createReplica(nodeId: string) {
   applyMemoryDbSchema(db);
   makeCrdtTable({ db, baseTableName: BASE_TABLE, crdtTableName: CRDT_TABLE });
 
+  const migrator = createMigrator({
+    migrations: createMigrations(() => ({ 0: [] })),
+    schemaVersion: { current: SCHEMA_VERSION },
+  });
   const { crdtStorage } = await createMemoryDb({
     nodeId,
-    migrator: createMigrator({
-      migrations: createMigrations(() => ({ 0: [] })),
-      schemaVersion: { current: SCHEMA_VERSION },
-    }),
+    migrator,
     reactiveDb,
     hlcCounter: new HLCCounter(nodeId, () => 1),
     crdtTables: todoSyncSchema.tablesConfig,
@@ -82,12 +83,12 @@ async function createReplica(nodeId: string) {
     throw new Error(`Replica ${nodeId} still has pending events after waiting`);
   };
 
-  const { exportData, importData } = createExportImport({
+  const exportData = createExportData({
     reactiveDb,
-    crdtStorage,
     tablesConfig: todoSyncSchema.tablesConfig,
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: migrator.currentSchemaVersion,
   });
+  const importData = createImportData({ migrator, applyEvents: (events) => crdtStorage.applyOwnEvents(events) });
 
   return {
     db,
@@ -203,5 +204,76 @@ describe("export/import", () => {
 
     expect(() => replica.importData(dump)).toThrow(CrdtEventValidationError);
     expect(replica.activeTodos()).toEqual([]);
+  });
+
+  it("forward-migrates an older export into a newer schema, applying new column defaults", async () => {
+    const BASE = "_note";
+    const CRDT = "note";
+
+    const reactiveDb = await createSQLiteReactiveDb<{
+      [BASE]: { id: string; title: string; priority: number; tombstone: number };
+      [CRDT]: { id: string; title: string; priority: number; tombstone: number };
+      persisted_crdt_events: PersistedCrdtEvent;
+      crdt_update_log: CrdtUpdateLogItem;
+    }>({ snapshot: new Uint8Array(), logger: noopLogger });
+    const db = reactiveDb.db;
+
+    // The DB is at schema version 1: `priority` was added by migration 1.
+    db.execute(`
+      CREATE TABLE "${BASE}" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "title" TEXT NOT NULL,
+        "priority" INTEGER NOT NULL DEFAULT 0,
+        "tombstone" INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+    applyMemoryDbSchema(db);
+    makeCrdtTable({ db, baseTableName: BASE, crdtTableName: CRDT });
+
+    const syncSchema = {
+      tablesConfig: [{ baseTableName: BASE, crdtTableName: CRDT }],
+      tables: { [CRDT]: t.table({ title: t.text(), priority: t.integer() }) },
+    };
+
+    const migrator = createMigrator({
+      migrations: createMigrations((steps) => ({
+        0: [],
+        1: [steps.addColumn({ table: CRDT, column: "priority", type: "integer", defaultValue: 0 })],
+      })),
+      schemaVersion: { current: 1 },
+    });
+
+    const { crdtStorage } = await createMemoryDb({
+      nodeId: "v1",
+      migrator,
+      reactiveDb,
+      hlcCounter: new HLCCounter("v1", () => 1),
+      crdtTables: syncSchema.tablesConfig,
+      syncDbSchema: syncSchema,
+      initializeSchema: false,
+    });
+
+    const importData = createImportData({ migrator, applyEvents: (events) => crdtStorage.applyOwnEvents(events) });
+
+    // A dump produced by an older build at schema version 0, before `priority` existed.
+    const result = importData({
+      schemaVersion: 0,
+      exportedAt: "2026-01-01T00:00:00.000Z",
+      tables: { [CRDT]: [{ id: "1", title: "older" }] },
+    });
+    expect(result).toEqual({ imported: 1 });
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const [{ pendingCount }] = db.execute<{ pendingCount: number }>(
+        `SELECT count(*) AS pendingCount FROM "persisted_crdt_events" WHERE "status" = 'pending'`,
+      ).rows;
+      if (pendingCount === 0) break;
+      await Promise.resolve();
+    }
+
+    const [row] = db.execute<{ id: string; title: string; priority: number }>(
+      `SELECT "id", "title", "priority" FROM "${CRDT}"`,
+    ).rows;
+    expect(row).toEqual({ id: "1", title: "older", priority: 0 });
   });
 });
