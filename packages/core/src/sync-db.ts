@@ -137,6 +137,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     crdtStorage,
     tablesConfig: options.syncDbSchema.tablesConfig,
     schemaVersion: workerClientSnapshot.schemaVersion,
+    importData: (data, opts) => workerClient.importData(data, opts),
   });
 
   let isDisposed = false;

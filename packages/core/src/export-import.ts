@@ -15,22 +15,78 @@ export type SyncedDbExport = {
   tables: Record<string, Array<Record<string, unknown>>>;
 };
 
+export type ImportDataOptions = { validate?: boolean };
+export type ImportDataResult = { imported: number };
+
 type ExportImportReactiveDb = {
   db: { execute<T>(sql: string, meta: { loggerLevel: "system" }): ExecuteResult<T> };
 };
+
+type ApplyImportEvents = (events: OwnCrdtEvent[]) => void | Promise<void>;
 
 type CreateExportImportOptions = {
   reactiveDb: ExportImportReactiveDb;
   crdtStorage: CrdtStorage;
   tablesConfig: CrdtTableConfig[];
   schemaVersion: number;
+  importData?: (data: SyncedDbExport, opts?: ImportDataOptions) => ImportDataResult | Promise<ImportDataResult>;
 };
+
+type CreateImportDataOptions = {
+  schemaVersion: number;
+  applyEvents: ApplyImportEvents;
+};
+
+export function createImportData({ schemaVersion, applyEvents }: CreateImportDataOptions) {
+  /**
+   * Replay an export as a sequence of `item-created` CRDT events, seeding the
+   * rows through the provided CRDT event applicator.
+   *
+   * Overwrite-by-default: because the generated events carry fresh (newest) HLC
+   * timestamps, importing a row whose `id` already exists overwrites every field
+   * under last-write-wins, while new ids are inserted. Existing rows absent from
+   * the dump are never touched. This is a restore/seed, not a CRDT merge —
+   * original timestamps are not preserved.
+   *
+   * @param opts.validate When `false`, skip the schema-version match check. Per-row
+   *   payload validation always runs (it is intrinsic to applying own events).
+   */
+  return (data: SyncedDbExport, opts?: ImportDataOptions): ImportDataResult | Promise<ImportDataResult> => {
+    const validate = opts?.validate ?? true;
+
+    if (validate && data.schemaVersion !== schemaVersion) {
+      throw new Error(
+        `Cannot import data from schema version ${data.schemaVersion} into a database at schema version ${schemaVersion}.`,
+      );
+    }
+
+    const events: OwnCrdtEvent[] = [];
+    for (const [crdtTableName, rows] of Object.entries(data.tables)) {
+      for (const row of rows) {
+        events.push({
+          type: "item-created",
+          dataset: crdtTableName,
+          item_id: row.id as string,
+          payload: JSON.stringify(row),
+        });
+      }
+    }
+
+    const applied = applyEvents(events);
+    if (applied instanceof Promise) {
+      return applied.then(() => ({ imported: events.length }));
+    }
+
+    return { imported: events.length };
+  };
+}
 
 export function createExportImport({
   reactiveDb,
   crdtStorage,
   tablesConfig,
   schemaVersion,
+  importData: importDataOverride,
 }: CreateExportImportOptions) {
   const crdtTableNames = tablesConfig.map((config) => config.crdtTableName);
 
@@ -70,44 +126,12 @@ export function createExportImport({
     };
   };
 
-  /**
-   * Replay an export as a sequence of `item-created` CRDT events, seeding the
-   * rows into local state and propagating them to the server like any other write.
-   *
-   * Overwrite-by-default: because the generated events carry fresh (newest) HLC
-   * timestamps, importing a row whose `id` already exists overwrites every field
-   * under last-write-wins, while new ids are inserted. Existing rows absent from
-   * the dump are never touched. This is a restore/seed, not a CRDT merge —
-   * original timestamps are not preserved.
-   *
-   * @param opts.validate When `false`, skip the schema-version match check. Per-row
-   *   payload validation always runs (it is intrinsic to applying own events).
-   */
-  const importData = (data: SyncedDbExport, opts?: { validate?: boolean }): { imported: number } => {
-    const validate = opts?.validate ?? true;
-
-    if (validate && data.schemaVersion !== schemaVersion) {
-      throw new Error(
-        `Cannot import data from schema version ${data.schemaVersion} into a database at schema version ${schemaVersion}.`,
-      );
-    }
-
-    const events: OwnCrdtEvent[] = [];
-    for (const [crdtTableName, rows] of Object.entries(data.tables)) {
-      for (const row of rows) {
-        events.push({
-          type: "item-created",
-          dataset: crdtTableName,
-          item_id: row.id as string,
-          payload: JSON.stringify(row),
-        });
-      }
-    }
-
-    crdtStorage.applyOwnEvents(events);
-
-    return { imported: events.length };
-  };
+  const importData =
+    importDataOverride ??
+    createImportData({
+      schemaVersion,
+      applyEvents: (events) => crdtStorage.applyOwnEvents(events),
+    });
 
   return { exportData, importData };
 }

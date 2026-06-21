@@ -2,7 +2,13 @@
 
 // Dummy Kysely for query compilation
 export { dummyKysely } from "./dummy-kysely";
-export { createExportImport, type SyncedDbExport } from "./export-import";
+export {
+  createExportImport,
+  createImportData,
+  type ImportDataOptions,
+  type ImportDataResult,
+  type SyncedDbExport,
+} from "./export-import";
 export { xxhash } from "./hash";
 // HLC (Hybrid Logical Clock)
 export {

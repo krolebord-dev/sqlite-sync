@@ -1,5 +1,7 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
+import { createImportData } from "../export-import";
 import { xxhash } from "../hash";
+import { HLCCounter } from "../hlc";
 import type { Logger } from "../logger";
 import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../migrations/system-schema";
@@ -146,14 +148,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     nodeId: config.clientId,
     initialLocalSyncId: getMaxSyncId(db, "none"),
     migrator,
-    hlc: {
-      getNextHLC() {
-        throw new Error("Worker DB should not call getNextHLC");
-      },
-      mergeHLC() {
-        return;
-      },
-    },
+    hlc: new HLCCounter(config.clientId, () => Date.now()),
     db,
     dbConfig: workerDbConfig,
     eventHlcAccumulator,
@@ -224,6 +219,13 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         schemaVersion: migrator.currentSchemaVersion,
       };
     },
+    importData: createImportData({
+      schemaVersion: migrator.currentSchemaVersion,
+      applyEvents: async (events) => {
+        crdtStorage.applyOwnEvents(events);
+        await crdtStorage.internal.processEnqueuedEvents();
+      },
+    }),
     postState,
     pushTabEvents: (request) => {
       const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(request.events, request.nodeId);

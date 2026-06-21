@@ -550,7 +550,7 @@ const dump = syncedDb.exportData();
 // }
 
 // later, on a fresh or different database:
-const { imported } = syncedDb.importData(dump);
+const { imported } = await syncedDb.importData(dump);
 ```
 
 `exportData(opts?)` dumps every active (`tombstone = 0`) row from each synced
@@ -559,7 +559,7 @@ table, keyed by table name. Each row keeps its `id` and drops the internal
 read from the local in-memory database — the state the current tab sees.
 
 `importData(data, opts?)` replays each row as an `item-created` CRDT event,
-seeding it into local state and propagating to the server like any other write.
+seeding it through the worker and propagating to the server like any other write.
 Because the generated events get fresh timestamps:
 
 - **New ids are inserted; existing ids are overwritten** field-by-field under

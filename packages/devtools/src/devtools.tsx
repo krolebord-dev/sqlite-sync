@@ -593,7 +593,7 @@ function DataSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDev
     setStatus(null);
     try {
       const data = JSON.parse(await file.text()) as SyncedDbExport;
-      const result = instance.importData(data);
+      const result = await instance.importData(data);
       setStatus({ kind: "success", message: `Imported ${result.imported} row${result.imported === 1 ? "" : "s"}.` });
     } catch (error) {
       setStatus({ kind: "error", message: error instanceof Error ? error.message : String(error) });

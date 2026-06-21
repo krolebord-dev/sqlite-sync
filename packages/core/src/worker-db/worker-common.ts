@@ -1,3 +1,4 @@
+import type { ImportDataOptions, ImportDataResult, SyncedDbExport } from "../export-import";
 import type {
   DeSyncDetectedReason,
   EventsPullRequest,
@@ -64,6 +65,7 @@ export type EventsPullResponse = {
 
 export interface WorkerRpc {
   getSnapshot: () => GetSnapshotResponse;
+  importData: (data: SyncedDbExport, opts?: ImportDataOptions) => ImportDataResult | Promise<ImportDataResult>;
   pushTabEvents: (request: EventsPushRequest) => EventsPushResponse;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
   pullEvents: (params: EventsPullRequest) => EventsPullResponse;

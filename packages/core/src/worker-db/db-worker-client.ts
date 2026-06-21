@@ -98,6 +98,7 @@ export const createWorkerDbClient = async ({
   const rpc: AsyncRpc<WorkerRpc> = {
     execute: (query) => queryWorker("execute", [query]),
     getSnapshot: () => queryWorker("getSnapshot", []),
+    importData: (data, opts) => queryWorker("importData", [data, opts]),
     pushTabEvents: (request) => queryWorker("pushTabEvents", [request]),
     pullEvents: (params) => queryWorker("pullEvents", [params]),
     postState: () => queryWorker("postState", []),
