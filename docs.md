@@ -546,7 +546,7 @@ const dump = syncedDb.exportData();
 // {
 //   schemaVersion: 3,
 //   exportedAt: "2026-06-16T12:00:00.000Z",
-//   tables: { todo: [{ id: "1", title: "buy milk", completed: 0 }, ...] },
+//   tables: { _todo: [{ id: "1", title: "buy milk", completed: 0 }, ...] },
 // }
 
 // later, on a fresh or different database:
@@ -554,9 +554,11 @@ const { imported } = await syncedDb.importData(dump);
 ```
 
 `exportData(opts?)` dumps every active (`tombstone = 0`) row from each synced
-table, keyed by table name. Each row keeps its `id` and drops the internal
-`tombstone` column. Pass `{ tables: ["todo"] }` to export a subset. The data is
-read from the local in-memory database — the state the current tab sees.
+table, keyed by its base table name (`_todo` for the `todo` table). Each row
+keeps its `id` and drops the internal `tombstone` column. Pass `{ tables: ["todo"] }`
+to export a subset — the filter accepts either the public or the base table
+name. The data is read from the local in-memory database — the state the current
+tab sees.
 
 `importData(data, opts?)` replays each row as an `item-created` CRDT event,
 seeding it through the worker and propagating to the server like any other write.

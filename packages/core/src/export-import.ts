@@ -12,7 +12,7 @@ import { quoteId } from "./utils";
 export type SyncedDbExport = {
   schemaVersion: number;
   exportedAt: string;
-  /** crdt table name -> active rows (each includes `id`, excludes `tombstone`). */
+  /** base table name -> active rows (each includes `id`, excludes `tombstone`). */
   tables: Record<string, Array<Record<string, unknown>>>;
 };
 
@@ -35,10 +35,22 @@ type CreateExportDataOptions = {
 
 type CreateImportDataOptions = {
   migrator: ImportMigrator;
+  tablesConfig?: CrdtTableConfig[];
   applyEvents: ApplyImportEvents;
 };
 
-export function createImportData({ migrator, applyEvents }: CreateImportDataOptions) {
+function createTableNameNormalizer(tablesConfig: CrdtTableConfig[] | undefined) {
+  const baseNamesByAlias = new Map<string, string>();
+  for (const { baseTableName, crdtTableName } of tablesConfig ?? []) {
+    baseNamesByAlias.set(baseTableName, baseTableName);
+    baseNamesByAlias.set(crdtTableName, baseTableName);
+  }
+  return (tableName: string) => baseNamesByAlias.get(tableName) ?? tableName;
+}
+
+export function createImportData({ migrator, tablesConfig, applyEvents }: CreateImportDataOptions) {
+  const normalizeTableName = createTableNameNormalizer(tablesConfig);
+
   /**
    * Replay an export as a sequence of `item-created` CRDT events, seeding the
    * rows through the provided CRDT event applicator.
@@ -71,12 +83,12 @@ export function createImportData({ migrator, applyEvents }: CreateImportDataOpti
     }
 
     const sourceEvents: MigratableEvent[] = [];
-    for (const [crdtTableName, rows] of Object.entries(data.tables)) {
+    for (const [tableName, rows] of Object.entries(data.tables)) {
       for (const row of rows) {
         sourceEvents.push({
           schema_version: data.schemaVersion,
           type: "item-created",
-          dataset: crdtTableName,
+          dataset: normalizeTableName(tableName),
           item_id: row.id as string,
           payload: JSON.stringify(row),
         });
@@ -102,18 +114,28 @@ export function createImportData({ migrator, applyEvents }: CreateImportDataOpti
 }
 
 export function createExportData({ reactiveDb, tablesConfig, schemaVersion }: CreateExportDataOptions) {
-  const crdtTableNames = tablesConfig.map((config) => config.crdtTableName);
+  const tableNames = tablesConfig.flatMap((config) => [config.crdtTableName, config.baseTableName]);
 
-  const resolveTables = (requested: string[] | undefined): string[] => {
+  const resolveTables = (requested: string[] | undefined): CrdtTableConfig[] => {
     if (!requested) {
-      return crdtTableNames;
+      return tablesConfig;
     }
+
+    const seenBaseTableNames = new Set<string>();
+    const resolved: CrdtTableConfig[] = [];
     for (const name of requested) {
-      if (!crdtTableNames.includes(name)) {
-        throw new Error(`Unknown table "${name}". Known synced tables: ${crdtTableNames.join(", ")}`);
+      const config = tablesConfig.find(
+        (tableConfig) => tableConfig.crdtTableName === name || tableConfig.baseTableName === name,
+      );
+      if (!config) {
+        throw new Error(`Unknown table "${name}". Known synced tables: ${tableNames.join(", ")}`);
+      }
+      if (!seenBaseTableNames.has(config.baseTableName)) {
+        seenBaseTableNames.add(config.baseTableName);
+        resolved.push(config);
       }
     }
-    return requested;
+    return resolved;
   };
 
   /**
@@ -126,11 +148,11 @@ export function createExportData({ reactiveDb, tablesConfig, schemaVersion }: Cr
   return (opts?: { tables?: string[] }): SyncedDbExport => {
     const tables: Record<string, Array<Record<string, unknown>>> = {};
 
-    for (const crdtTableName of resolveTables(opts?.tables)) {
+    for (const { baseTableName, crdtTableName } of resolveTables(opts?.tables)) {
       const { rows } = reactiveDb.db.execute<Record<string, unknown>>(`select * from ${quoteId(crdtTableName)}`, {
         loggerLevel: "system",
       });
-      tables[crdtTableName] = rows.map(({ tombstone: _tombstone, ...rest }) => rest);
+      tables[baseTableName] = rows.map(({ tombstone: _tombstone, ...rest }) => rest);
     }
 
     return {

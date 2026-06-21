@@ -88,7 +88,11 @@ async function createReplica(nodeId: string) {
     tablesConfig: todoSyncSchema.tablesConfig,
     schemaVersion: migrator.currentSchemaVersion,
   });
-  const importData = createImportData({ migrator, applyEvents: (events) => crdtStorage.applyOwnEvents(events) });
+  const importData = createImportData({
+    migrator,
+    tablesConfig: todoSyncSchema.tablesConfig,
+    applyEvents: (events) => crdtStorage.applyOwnEvents(events),
+  });
 
   return {
     db,
@@ -125,11 +129,12 @@ describe("export/import", () => {
 
     expect(dump.schemaVersion).toBe(SCHEMA_VERSION);
     expect(typeof dump.exportedAt).toBe("string");
-    expect(dump.tables[CRDT_TABLE]).toEqual([
+    expect(dump.tables[BASE_TABLE]).toEqual([
       { id: "1", title: "buy milk", completed: 0 },
       { id: "2", title: "walk dog", completed: 1 },
     ]);
-    for (const row of dump.tables[CRDT_TABLE]) {
+    expect(dump.tables[CRDT_TABLE]).toBeUndefined();
+    for (const row of dump.tables[BASE_TABLE]) {
       expect(row).not.toHaveProperty("tombstone");
     }
   });
@@ -142,7 +147,7 @@ describe("export/import", () => {
 
     const dump = replica.exportData();
 
-    expect(dump.tables[CRDT_TABLE].map((row) => row.id)).toEqual(["1"]);
+    expect(dump.tables[BASE_TABLE].map((row) => row.id)).toEqual(["1"]);
   });
 
   it("round-trips into a fresh replica (booleans included)", async () => {
@@ -167,6 +172,7 @@ describe("export/import", () => {
     const replica = await createReplica("a");
     await replica.createTodo({ id: "1", title: "old", completed: false });
 
+    // Older exports used the public CRDT table name; imports still accept and normalize it.
     replica.importData({
       schemaVersion: SCHEMA_VERSION,
       exportedAt: "2026-01-01T00:00:00.000Z",
@@ -238,7 +244,7 @@ describe("export/import", () => {
     const migrator = createMigrator({
       migrations: createMigrations((steps) => ({
         0: [],
-        1: [steps.addColumn({ table: CRDT, column: "priority", type: "integer", defaultValue: 0 })],
+        1: [steps.addColumn({ table: BASE, column: "priority", type: "integer", defaultValue: 0 })],
       })),
       schemaVersion: { current: 1 },
     });
@@ -253,9 +259,14 @@ describe("export/import", () => {
       initializeSchema: false,
     });
 
-    const importData = createImportData({ migrator, applyEvents: (events) => crdtStorage.applyOwnEvents(events) });
+    const importData = createImportData({
+      migrator,
+      tablesConfig: syncSchema.tablesConfig,
+      applyEvents: (events) => crdtStorage.applyOwnEvents(events),
+    });
 
-    // A dump produced by an older build at schema version 0, before `priority` existed.
+    // A dump produced by an older build at schema version 0, before `priority`
+    // existed, and before exports were keyed by base table name.
     const result = importData({
       schemaVersion: 0,
       exportedAt: "2026-01-01T00:00:00.000Z",
