@@ -84,12 +84,18 @@ export const createSQLiteCrdtApplyFunction = ({
       );
     },
     insertItem(opts) {
+      // Key by the sorted column set, not just the dataset: executePrepared caches
+      // the compiled INSERT forever, freezing its column list. A later create event
+      // omitting a column would otherwise bind undefined (-> NULL) against the stale
+      // statement, bypassing the table DEFAULT. Sorting makes the key canonical so
+      // events with the same columns in any order share one statement.
+      const keys = Object.keys(opts.payload).sort();
       const insertPayload = {} as Record<string, unknown>;
-      for (const key of Object.keys(opts.payload)) {
+      for (const key of keys) {
         insertPayload[key] = key;
       }
       db.executePrepared(
-        `crdt-insert-item-${opts.dataset}`,
+        `crdt-insert-item-${opts.dataset}-${keys.join("-")}`,
         opts.payload,
         (db) => db.insertInto(opts.dataset).values(insertPayload),
         { loggerLevel: "system" },
