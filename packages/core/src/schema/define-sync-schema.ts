@@ -4,6 +4,16 @@ import type { AnyTableBuilder, InferRow, SyncSchemaTables, TableBuilder, TableCo
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
+// Names sqlite-sync uses for its own tables/views, so a user schema can't shadow them.
+const RESERVED_TABLE_NAMES = new Set<string>([
+  "change_history",
+  "crdt_events",
+  "worker.crdt_events",
+  "persisted_crdt_events",
+  "crdt_update_log",
+  "worker.kv",
+]);
+
 type RowOf<Table extends AnyTableBuilder> =
   Table extends TableBuilder<infer Cols extends TableColumns, any> ? InferRow<Cols> : never;
 
@@ -61,6 +71,9 @@ export function defineSyncSchema<Tables extends SyncSchemaTables>({
   const seenNames = new Set<string>();
   for (const { crdtTableName, baseTableName } of tablesConfig) {
     for (const name of [crdtTableName, baseTableName]) {
+      if (RESERVED_TABLE_NAMES.has(name)) {
+        throw new Error(`Table name "${name}" is reserved by sqlite-sync and cannot be used in a sync schema`);
+      }
       if (seenNames.has(name)) {
         throw new Error(`Duplicate table name "${name}" in sync schema`);
       }

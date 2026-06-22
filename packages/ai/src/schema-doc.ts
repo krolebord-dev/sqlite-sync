@@ -58,5 +58,28 @@ export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: Sc
     sections.push(lines.join("\n"));
   }
 
+  sections.push(CHANGE_HISTORY_DOC);
+
   return sections.join("\n\n");
 }
+
+// Documents the curated `change_history` view created over the sync event log. Unlike the table
+// views above, it is NOT tombstone-filtered — it intentionally surfaces the full change log,
+// including the contents of since-deleted items.
+const CHANGE_HISTORY_DOC = [
+  "## change_history",
+  "",
+  "A read-only, append-only log of every change across all tables, one row per sync event.",
+  "Query it like any other view. Unlike the tables above, soft-delete filtering does NOT apply",
+  "here — it includes changes to items that were later deleted, so treat it as an audit log.",
+  "",
+  "Columns:",
+  "- `seq` INTEGER NOT NULL — monotonic sequence number; **order history by this** (ascending = oldest first)",
+  "- `dataset` TEXT NOT NULL — which table the change applies to (matches a table name above)",
+  "- `item_id` TEXT NOT NULL — the `id` of the affected row",
+  '- `change_type` TEXT NOT NULL (one of "item-created" | "item-updated" | "item-deleted")',
+  '- `status` TEXT NOT NULL (one of "applied" | "pending" | "failed" | "deduped") — "applied" took effect; "failed" did not; filter to `status = \'applied\'` for the effective history',
+  '- `origin` TEXT NOT NULL — where the change came from (e.g. "own", "remote", "local")',
+  "- `timestamp` TEXT NOT NULL — opaque hybrid-logical-clock string; do NOT parse it as a date, order by `seq` instead",
+  "- `changes` TEXT NOT NULL — JSON of what the change set: the changed columns only for item-updated, the full initial row for item-created, `{}` for item-deleted. Use `json_extract(changes, '$.column')` to read a field.",
+].join("\n");

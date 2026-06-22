@@ -109,7 +109,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     dbConfig.updateLogTable.fullIdentifier,
   );
   migrator.migrateDbToLatest();
-  createReadOnlyCrdtViews(sqlExecutor, syncDbSchema);
+  createReadOnlyCrdtViews(sqlExecutor, syncDbSchema, dbConfig.eventsTable.fullIdentifier);
 
   const truncatedNodeId = nodeId.slice(0, 12);
   const hlc = new HLCCounter(truncatedNodeId, () => Date.now());
@@ -271,7 +271,11 @@ function getLatestSyncId(executor: KyselyExecutor<any>) {
   return result.rows[0]?.sync_id ?? 0;
 }
 
-function createReadOnlyCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: SyncDbSchema) {
+function createReadOnlyCrdtViews(
+  executor: KyselyExecutor<any>,
+  syncDbSchema: SyncDbSchema,
+  eventsTableIdentifier: string,
+) {
   executor.transaction((tx) => {
     for (const { baseTableName, crdtTableName } of syncDbSchema.tablesConfig) {
       tx.execute({
@@ -283,6 +287,30 @@ function createReadOnlyCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: Sy
         parameters: [],
       });
     }
+
+    // Curated change log over the event table for read-only history queries. `timestamp` is the
+    // raw HLC string (opaque — sort by `seq`); `changes` is the event payload (a diff for updates,
+    // the full row for creates, {} for deletes). `status`/`origin` are exposed so the agent can see
+    // failed/pending events, not just applied ones. Includes contents of since-deleted items.
+    // Only the no-op sentinel (migration-dropped events) is filtered out as pure noise.
+    tx.execute({
+      sql: `DROP VIEW IF EXISTS ${quoteId("change_history")}`,
+      parameters: [],
+    });
+    tx.execute({
+      sql: `CREATE VIEW ${quoteId("change_history")} AS SELECT
+        "sync_id" AS seq,
+        "dataset" AS dataset,
+        "item_id" AS item_id,
+        "type" AS change_type,
+        "status" AS status,
+        "origin" AS origin,
+        "timestamp" AS timestamp,
+        "payload" AS changes
+      FROM ${eventsTableIdentifier}
+      WHERE "payload" != 'no-op'`,
+      parameters: [],
+    });
   });
 }
 
