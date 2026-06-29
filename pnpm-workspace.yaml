@@ -2,6 +2,11 @@ packages:
   - packages/*
   - apps/*
 
+# Pin a single `ai` version so ToolSet types unify across @sqlite-sync/ai, @cloudflare/think,
+# and the apps (duplicate installs otherwise produce incompatible structural types).
+overrides:
+  ai: 6.0.214
+
 catalog:
   '@sqlite.org/sqlite-wasm': 3.53.0-build1
   kysely: ^0.28.10

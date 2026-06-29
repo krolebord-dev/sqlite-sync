@@ -1,9 +1,23 @@
 import { createRouterClient, type RouterClient } from "@orpc/server";
-import { durableObjectAdapter, type RemoteHandler, type TypedPersistedCrdtEvent } from "@sqlite-sync/cloudflare";
+import {
+  type AiDbAccess,
+  type AiMutationInput,
+  type AiMutationResult,
+  type AiQueryInput,
+  type AiQueryResult,
+  createAiDbAccess,
+} from "@sqlite-sync/ai";
+import {
+  createKyselyExecutor,
+  durableObjectAdapter,
+  type RemoteHandler,
+  type TypedPersistedCrdtEvent,
+} from "@sqlite-sync/cloudflare";
 import { type Connection, Server } from "partyserver";
 import { listDbOrpcRouter, listOrpcHandler } from "./list-db-router";
 import { syncDbSchema } from "./migrations";
 import type { ORPCContext } from "./routers/orpc-base";
+import { listDbSchemaDocContext } from "./schema-doc";
 
 export class ListDbServer extends Server<Env> {
   static options = {
@@ -16,6 +30,8 @@ export class ListDbServer extends Server<Env> {
   private context: ORPCContext = null!;
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private orpc: RouterClient<typeof listDbOrpcRouter> = null!;
+  // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
+  private aiDbAccess: AiDbAccess = null!;
 
   async onStart() {
     const { syncDb, remoteHandler } = await durableObjectAdapter.createCrdtStorage({
@@ -38,11 +54,32 @@ export class ListDbServer extends Server<Env> {
       context: this.context,
     });
 
+    this.aiDbAccess = createAiDbAccess({
+      executor: createKyselyExecutor(this.ctx.storage),
+      storage: syncDb,
+      syncDbSchema,
+      context: listDbSchemaDocContext,
+    });
+
     syncDb.addEventListener("event-applied", (event) => {
       this.onEventApplied(event.payload).catch((error) => {
         console.error("Error applying event", event, error);
       });
     });
+  }
+
+  // RPC surface for the ChatAgent (resolved via getServerByName). Method names match
+  // @sqlite-sync/ai's DbToolsAccess so the agent's createDbTools can call them directly.
+  getSchemaDoc(): string {
+    return this.aiDbAccess.getSchemaDoc();
+  }
+
+  query(input: AiQueryInput): AiQueryResult {
+    return this.aiDbAccess.query(input);
+  }
+
+  mutate(input: AiMutationInput): AiMutationResult {
+    return this.aiDbAccess.mutate?.(input) ?? { error: "Database mutations are not enabled." };
   }
 
   onMessage(connection: Connection, message: string) {

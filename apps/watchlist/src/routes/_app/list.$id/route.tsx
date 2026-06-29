@@ -4,6 +4,7 @@ import { DbProvider, initListDb } from "@/list-db/list-db";
 import { ListDbOrpcProvider } from "@/list-db/list-orpc-context";
 import type { ListDb } from "@/list-db/migrations";
 import { orpc } from "@/orpc/orpc-client";
+import { ListChat } from "./-/list-chat";
 import { SyncStatusMonitor } from "./-/sync-status-monitor";
 
 const dbs = new Map<string, SyncedDb<ListDb>>();
@@ -33,6 +34,7 @@ function ListLayoutComponent() {
       <SyncStatusMonitor />
       <ListDbOrpcProvider listId={list.id}>
         <Outlet />
+        <ListChat listId={list.id} />
       </ListDbOrpcProvider>
     </DbProvider>
   );

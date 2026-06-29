@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @source "./**/*.{ts,tsx,js,jsx}";
+@source "../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
