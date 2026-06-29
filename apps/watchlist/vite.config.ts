@@ -23,7 +23,10 @@ const config = defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ["@sqlite.org/sqlite-wasm"],
+    // sqlite-wasm can't be pre-bundled (WASM). The packages that import it must
+    // also be excluded, otherwise Vite pre-bundles them with a bare
+    // "@sqlite.org/sqlite-wasm" import it can't resolve from .vite/deps.
+    exclude: ["@sqlite.org/sqlite-wasm", "@sqlite-sync/core"],
   },
   worker: { format: "es" },
 });
