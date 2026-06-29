@@ -68,7 +68,6 @@ import {
   selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
-import { RecommendationsDialog } from "./-/recommendations-dialog";
 import { ReviewDialog } from "./-/review-dialog";
 
 export const Route = createFileRoute("/_app/list/$id/")({
@@ -98,7 +97,6 @@ function ListPage() {
       <AppHeader>
         <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           <ProjectSelector compact />
-          <RecommendationsDialog />
           <TrendingLink />
           <ListSettings />
         </div>
