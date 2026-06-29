@@ -63,7 +63,9 @@ export function ProjectSelector({ showCreate = true, compact = false, className 
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link to="/">Create new list</Link>
+              <Link to="/" search={{ select: true }}>
+                Create new list
+              </Link>
             </DropdownMenuItem>
           </>
         )}

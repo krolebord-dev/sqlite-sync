@@ -1,5 +1,6 @@
 import type { SyncedDb } from "@sqlite-sync/core";
 import { createFileRoute, Outlet, useLoaderData } from "@tanstack/react-router";
+import { lastOpenedList } from "@/lib/utils/last-opened-list";
 import { DbProvider, initListDb } from "@/list-db/list-db";
 import { ListDbOrpcProvider } from "@/list-db/list-orpc-context";
 import type { ListDb } from "@/list-db/migrations";
@@ -13,6 +14,8 @@ export const Route = createFileRoute("/_app/list/$id")({
   component: ListLayoutComponent,
   shouldReload: false,
   loader: async ({ params, context }) => {
+    lastOpenedList.set(params.id);
+
     const list = await context.queryClient.ensureQueryData(
       orpc.list.getList.queryOptions({ input: { listId: params.id } }),
     );

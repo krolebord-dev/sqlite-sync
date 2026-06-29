@@ -1,18 +1,34 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
 import { useForm } from "react-hook-form";
 import z from "zod";
 import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { lastOpenedList } from "@/lib/utils/last-opened-list";
 import { orpc } from "@/orpc/orpc-client";
+
+const indexSearchSchema = z.object({
+  select: z.boolean().optional(),
+});
 
 export const Route = createFileRoute("/_app/")({
   component: RouteComponent,
-  loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(orpc.list.getLists.queryOptions());
+  validateSearch: indexSearchSchema,
+  loader: async ({ context, location }) => {
+    const lists = await context.queryClient.ensureQueryData(orpc.list.getLists.queryOptions());
+
+    const search = indexSearchSchema.parse(location.search);
+    if (search.select) {
+      return;
+    }
+
+    const lastOpenedId = lastOpenedList.get();
+    if (lastOpenedId && lists.some((list) => list.id === lastOpenedId)) {
+      throw redirect({ to: "/list/$id", params: { id: lastOpenedId } });
+    }
   },
 });
 
