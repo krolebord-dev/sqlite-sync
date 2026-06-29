@@ -21,10 +21,6 @@ const config = defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"),
     },
-    // Keep Vite's default conditions (notably `browser`) alongside the workspace-source
-    // condition. Listing only `@sqlite-sync/source` would drop `browser`, so deps like
-    // @vercel/oidc (pulled in via `ai`) resolve to their Node build and crash in the browser.
-    conditions: ["@sqlite-sync/source", "module", "browser", "development|production"],
   },
   optimizeDeps: {
     exclude: ["@sqlite.org/sqlite-wasm"],
