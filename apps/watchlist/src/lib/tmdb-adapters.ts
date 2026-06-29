@@ -1,5 +1,4 @@
-import type { Movie, MovieWithMediaType, TV, TVWithMediaType } from "tmdb-ts";
-import type { TMDB } from "tmdb-ts";
+import type { Movie, MovieWithMediaType, TMDB, TV, TVWithMediaType } from "tmdb-ts";
 
 export type TmdbMediaResult = {
   type: "movie" | "tv";
@@ -64,10 +63,7 @@ export function adaptSearchResult(result: MovieWithMediaType | TVWithMediaType):
   };
 }
 
-export function adaptTrendingResult(
-  result: MovieOrTv,
-  requestedMediaType: "movie" | "tv" | "all",
-): TmdbMediaResult {
+export function adaptTrendingResult(result: MovieOrTv, requestedMediaType: "movie" | "tv" | "all"): TmdbMediaResult {
   const mediaType = "media_type" in result ? result.media_type : requestedMediaType;
 
   if (mediaType === "tv") {

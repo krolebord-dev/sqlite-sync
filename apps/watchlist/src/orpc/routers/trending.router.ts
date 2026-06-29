@@ -1,7 +1,7 @@
 import type { Movie, TV } from "tmdb-ts";
 import z from "zod";
-import { adaptTrendingResult } from "@/lib/tmdb-adapters";
 import { tmdb } from "@/lib/tmdb";
+import { adaptTrendingResult } from "@/lib/tmdb-adapters";
 import { protectedProcedure } from "../common/procedure";
 
 type MovieOrTv = Movie | TV | (Movie & { media_type: "movie" }) | (TV & { media_type: "tv" });

@@ -15,7 +15,6 @@ import {
   HashIcon,
   LoaderCircleIcon,
   MinusIcon,
-  PencilIcon,
   PlusIcon,
   SkullIcon,
   StarIcon,
@@ -43,7 +42,6 @@ import { useDb } from "@/list-db/list-db";
 import { useListOrpc } from "@/list-db/list-orpc-context";
 import type { ListDb, ListItem } from "@/list-db/migrations";
 import {
-  editItemAtom,
   type ItemWatchProviders,
   isItemSelectedAtom,
   isRandomizedItemAtom,
@@ -242,7 +240,6 @@ const ListItemMenuContent = memo(({ type, item }: ListItemMenuContentProps) => {
   return (
     <DynamicMenuContent type={type}>
       <ToggleItemSelectionMenuItem item={item} />
-      <EditMenuItem item={item} />
       <DeleteMenuItem item={item} />
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
@@ -449,17 +446,6 @@ export function PriorityBadge({ priority, className }: { priority: number; class
     >
       {icon}
     </p>
-  );
-}
-
-function EditMenuItem({ item }: ItemMenuActioProps) {
-  const setEditItemId = useSetAtom(editItemAtom);
-
-  return (
-    <DynamicMenuItem onClick={() => setEditItemId(item.id)}>
-      <PencilIcon />
-      Edit
-    </DynamicMenuItem>
   );
 }
 

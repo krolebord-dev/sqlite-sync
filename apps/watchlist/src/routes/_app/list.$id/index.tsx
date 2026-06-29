@@ -642,9 +642,7 @@ function TmdbSearchResults() {
   );
 
   const addItem = (item: SearchResultItem) => {
-    db.db.executeKysely((db) =>
-      db.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }),
-    );
+    db.db.executeKysely((db) => db.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }));
   };
 
   const removeItem = (tmdbId: number) => {

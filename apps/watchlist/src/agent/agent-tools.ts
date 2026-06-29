@@ -1,8 +1,8 @@
 import { type ToolSet, tool } from "ai";
 import { getServerByName } from "partyserver";
 import { z } from "zod";
-import { getTmdbTrending, searchTmdbTitles, tmdbResultToItemPayload } from "@/lib/tmdb-adapters";
 import { createTmdb } from "@/lib/tmdb";
+import { getTmdbTrending, searchTmdbTitles, tmdbResultToItemPayload } from "@/lib/tmdb-adapters";
 
 // TMDB-backed tools for the ChatAgent. Context (env + the list's sync-DO name) is captured here
 // rather than threaded through an RPC/auth layer, since the agent already holds it.

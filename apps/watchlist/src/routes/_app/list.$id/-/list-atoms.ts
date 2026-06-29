@@ -18,7 +18,6 @@ export const dbAtom = atom<SyncedDb<ListDb>>(null!);
 
 export const selectedItemsAtom = atom<string[]>([]);
 export const randomizedItemAtom = atom<string | null>(null);
-export const editItemAtom = atom<string | null>(null);
 export const reviewItemAtom = atom<string | null>(null);
 export const searchQueryAtom = atom<string>("");
 

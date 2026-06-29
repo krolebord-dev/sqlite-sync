@@ -132,9 +132,7 @@ function TrendingResults({ mediaType, timeWindow, page, onPageChange }: Trending
 
   const addItem = useCallback(
     (item: TrendingItem) => {
-      db.db.executeKysely((qb) =>
-        qb.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }),
-      );
+      db.db.executeKysely((qb) => qb.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }));
       setSessionAddedIds((prev) => new Set(prev).add(item.tmdbId));
     },
     [db],
