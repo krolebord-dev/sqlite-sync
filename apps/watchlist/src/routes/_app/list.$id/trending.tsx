@@ -18,6 +18,7 @@ import { AppHeader, ProjectSelector, UserAvatarDropdown } from "@/components/app
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { tmdbResultToItemPayload } from "@/lib/tmdb-adapters";
 import { useListId } from "@/lib/use-list";
 import { useDb, useDbQuery } from "@/list-db/list-db";
 import { type ORPCOutputs, orpc } from "@/orpc/orpc-client";
@@ -132,22 +133,7 @@ function TrendingResults({ mediaType, timeWindow, page, onPageChange }: Trending
   const addItem = useCallback(
     (item: TrendingItem) => {
       db.db.executeKysely((qb) =>
-        qb.insertInto("item").values({
-          id: generateId(),
-          tmdbId: item.tmdbId,
-          type: item.type,
-          title: item.title,
-          posterUrl: item.posterUrl,
-          releaseDate: item.releaseDate ? new Date(item.releaseDate).getTime() : null,
-          priority: 0,
-          overview: item.overview,
-          rating: item.voteAverage,
-          createdAt: Date.now(),
-          tags: "[]",
-          processingStatus: "idle",
-          userRating: null,
-          tagHighlights: "{}",
-        }),
+        qb.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }),
       );
       setSessionAddedIds((prev) => new Set(prev).add(item.tmdbId));
     },

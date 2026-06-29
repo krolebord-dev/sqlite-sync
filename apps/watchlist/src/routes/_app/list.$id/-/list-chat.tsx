@@ -1,8 +1,9 @@
-import { MessageCircle, Sparkles } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { Component, lazy, type ReactNode, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
+import { ChatSheetHeader } from "./chat-header";
 
 // The chat pane pulls in the agent/AI-SDK runtime and suspends while connecting, so load it
 // lazily and keep its loading/error states contained inside the sheet.
@@ -22,16 +23,23 @@ export function ListChat({ listId }: { listId: string }) {
           <MessageCircle className="size-5" />
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" aria-describedby={undefined} className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
-        <SheetHeader className="border-b pr-12">
-          <SheetTitle className="flex items-center gap-2">
-            <Sparkles className="size-4" /> List assistant
-          </SheetTitle>
-        </SheetHeader>
+      <SheetContent
+        side="right"
+        aria-describedby={undefined}
+        showCloseButton={false}
+        className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
+      >
         {/* Remount the chat per list so messages and the agent connection don't leak across lists. */}
         {open ? (
           <ChatBoundary key={listId}>
-            <Suspense fallback={<ChatStatus>Connecting to the assistant…</ChatStatus>}>
+            <Suspense
+              fallback={
+                <>
+                  <ChatSheetHeader />
+                  <ChatStatus>Connecting to the assistant…</ChatStatus>
+                </>
+              }
+            >
               <ChatPane listId={listId} />
             </Suspense>
           </ChatBoundary>

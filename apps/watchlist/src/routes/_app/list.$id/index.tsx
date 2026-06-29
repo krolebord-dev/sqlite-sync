@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { tmdbResultToItemPayload } from "@/lib/tmdb-adapters";
 import { useListId } from "@/lib/use-list";
 import { cn } from "@/lib/utils";
 import { useThrottle } from "@/lib/utils/use-throttle";
@@ -642,22 +643,7 @@ function TmdbSearchResults() {
 
   const addItem = (item: SearchResultItem) => {
     db.db.executeKysely((db) =>
-      db.insertInto("item").values({
-        id: generateId(),
-        tmdbId: item.tmdbId,
-        type: item.type,
-        title: item.title,
-        posterUrl: item.posterUrl,
-        releaseDate: new Date(item.releaseDate).getTime(),
-        priority: 0,
-        overview: item.overview,
-        rating: item.voteAverage,
-        createdAt: Date.now(),
-        tags: "[]",
-        processingStatus: "idle",
-        userRating: null,
-        tagHighlights: "{}",
-      }),
+      db.insertInto("item").values({ id: generateId(), ...tmdbResultToItemPayload(item) }),
     );
   };
 

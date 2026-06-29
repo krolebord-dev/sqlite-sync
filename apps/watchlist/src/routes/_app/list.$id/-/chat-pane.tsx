@@ -7,11 +7,16 @@ import { Streamdown } from "streamdown";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ChatSheetHeader } from "./chat-header";
 
 const TOOL_LABELS: Record<string, string> = {
   getDbSchema: "Reading your list's structure",
   queryDb: "Looking through your list",
   mutateDb: "Updating your list",
+  searchTitles: "Searching TMDB",
+  getTrending: "Checking what's trending",
+  getWatchProviders: "Finding where to watch",
 };
 
 function toolLabel(name: string): string {
@@ -50,6 +55,27 @@ export default function ChatPane({ listId }: { listId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <ChatSheetHeader
+        actions={
+          messages.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => clearHistory()}
+                  disabled={isWorking}
+                  aria-label="Clear chat"
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent sideOffset={6}>Clear chat</TooltipContent>
+            </Tooltip>
+          ) : null
+        }
+      />
       <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.map((message) => (
           <ChatMessage key={message.id} message={message} />
@@ -62,19 +88,6 @@ export default function ChatPane({ listId }: { listId: string }) {
         {error ? <p className="text-destructive text-sm">Something went wrong. Try again.</p> : null}
       </div>
       <div className="border-t p-3">
-        {messages.length > 0 ? (
-          <div className="mb-2 flex justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-muted-foreground"
-              onClick={() => clearHistory()}
-              disabled={isWorking}
-            >
-              <Trash2 className="size-3.5" /> Clear chat
-            </Button>
-          </div>
-        ) : null}
         <div className="flex items-end gap-2">
           <Textarea
             value={input}

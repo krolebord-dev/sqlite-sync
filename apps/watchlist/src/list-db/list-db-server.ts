@@ -82,6 +82,12 @@ export class ListDbServer extends Server<Env> {
     return this.aiDbAccess.mutate?.(input) ?? { error: "Database mutations are not enabled." };
   }
 
+  // Streaming availability for the ChatAgent's getWatchProviders tool — reuses the existing
+  // list handler so the user's region/filter settings (in this DO's kv) apply.
+  getWatchProviders(input: { tmdbId: number; type: "movie" | "tv" }) {
+    return this.orpc.watchProviders.getItemWatchProviders(input);
+  }
+
   onMessage(connection: Connection, message: string) {
     const messageResult = this.remoteHandler.handleMessage(message);
 
