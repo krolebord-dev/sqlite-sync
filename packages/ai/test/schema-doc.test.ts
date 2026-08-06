@@ -4,6 +4,12 @@ import { createSchemaDoc } from "../src/schema-doc";
 
 const migrations = createMigrations(() => ({ 0: [] }));
 
+function declaredTablesDoc(doc: string): string {
+  const changeHistoryHeading = "\n\n## change_history";
+  expect(doc).toContain(changeHistoryHeading);
+  return doc.slice(0, doc.indexOf(changeHistoryHeading));
+}
+
 describe("createSchemaDoc", () => {
   it("renders declared tables under view names with schema descriptions and context overview", () => {
     const syncDbSchema = defineSyncSchema({
@@ -31,7 +37,7 @@ describe("createSchemaDoc", () => {
       },
     });
 
-    expect(doc).toBe(
+    expect(declaredTablesDoc(doc)).toBe(
       [
         "# Test database",
         "",
@@ -75,7 +81,7 @@ describe("createSchemaDoc", () => {
 
     const doc = createSchemaDoc({ syncDbSchema });
 
-    expect(doc).toBe(
+    expect(declaredTablesDoc(doc)).toBe(
       [
         "This is a synced SQLite database — data replicates automatically between the user's devices.",
         "All writes go through a sync event log, which is why the tables listed below are exposed as",
@@ -90,6 +96,30 @@ describe("createSchemaDoc", () => {
       ].join("\n"),
     );
     expect(doc).not.toContain("- `tombstone`");
+  });
+
+  it("documents the change history audit view", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: { tags: t.table({ name: t.text() }) },
+      migrations,
+    });
+
+    const changeHistoryDoc = createSchemaDoc({ syncDbSchema }).split("## change_history\n\n")[1];
+
+    expect(changeHistoryDoc).toBeDefined();
+    expect(changeHistoryDoc).toContain("read-only, append-only log");
+    expect(changeHistoryDoc).toContain("soft-delete filtering does NOT apply");
+    expect(changeHistoryDoc).toContain("order by `seq` instead");
+    expect(Array.from(changeHistoryDoc?.matchAll(/^- `([^`]+)`/gm) ?? [], (match) => match[1])).toEqual([
+      "seq",
+      "dataset",
+      "item_id",
+      "change_type",
+      "status",
+      "origin",
+      "timestamp",
+      "changes",
+    ]);
   });
 
   it("renders enum values and builder descriptions", () => {
