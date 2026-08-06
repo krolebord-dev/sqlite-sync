@@ -26,7 +26,6 @@
     "@typescript/native-preview": "7.0.0-dev.20260324.1",
     "globals": "^16.5.0",
     "lefthook": "^2.1.1",
-    "tsup": "^8.5.1",
     "typescript": "~5.9.3"
   }
 }

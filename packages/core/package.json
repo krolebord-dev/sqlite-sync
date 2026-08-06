@@ -59,8 +59,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "test": "vitest run",
     "typecheck": "tsgo --noEmit",
     "prepublishOnly": "pnpm build"
@@ -77,7 +77,7 @@
   "devDependencies": {
     "@types/node": "^22.10.2",
     "kysely": "catalog:",
-    "tsup": "^8.3.5",
+    "tsdown": "0.22.14",
     "typescript": "~6.0.3",
     "vitest": "^4.1.8"
   }

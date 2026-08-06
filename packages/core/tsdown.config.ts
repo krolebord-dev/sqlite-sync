@@ -1,4 +1,4 @@
-import { defineConfig } from "tsup";
+import { defineConfig } from "tsdown";
 
 export default defineConfig({
   entry: {
@@ -7,8 +7,14 @@ export default defineConfig({
     server: "src/server/index.ts",
   },
   format: ["esm"],
-  dts: true,
+  target: "es2022",
+  fixedExtension: false,
+  dts: {
+    sourcemap: false,
+  },
   clean: true,
   sourcemap: true,
-  external: ["@sqlite.org/sqlite-wasm"],
+  deps: {
+    neverBundle: ["@sqlite.org/sqlite-wasm"],
+  },
 });

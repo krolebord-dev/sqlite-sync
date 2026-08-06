@@ -40,8 +40,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "test": "vitest run --environment jsdom",
     "typecheck": "tsgo --noEmit",
     "prepublishOnly": "pnpm build"
@@ -60,7 +60,7 @@
     "kysely": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "tsup": "^8.3.5",
+    "tsdown": "0.22.14",
     "typescript": "~6.0.3",
     "vitest": "^4.1.8"
   }

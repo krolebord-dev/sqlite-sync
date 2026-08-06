@@ -40,8 +40,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsgo --noEmit",
     "prepublishOnly": "pnpm build"
   },
@@ -54,7 +54,7 @@
     "@cloudflare/workers-types": "^4.20260609.1",
     "@sqlite-sync/core": "workspace:*",
     "kysely": "catalog:",
-    "tsup": "^8.3.5",
+    "tsdown": "0.22.14",
     "typescript": "~6.0.3"
   }
 }
