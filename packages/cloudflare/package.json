@@ -42,7 +42,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
@@ -55,6 +55,6 @@
     "@sqlite-sync/core": "workspace:*",
     "kysely": "catalog:",
     "tsdown": "0.22.14",
-    "typescript": "~6.0.3"
+    "typescript": "catalog:"
   }
 }

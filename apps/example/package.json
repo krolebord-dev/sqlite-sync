@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "wrangler dev",
-    "build": "tsgo --noEmit && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cf-typegen": "wrangler types",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@sqlite-sync/cloudflare": "workspace:*",
@@ -29,7 +29,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react-swc": "^4.2.2",
-    "typescript": "~5.9.3",
+    "typescript": "catalog:",
     "vite": "^7.3.1",
     "wrangler": "^4.60.0"
   }

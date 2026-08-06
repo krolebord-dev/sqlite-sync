@@ -6,6 +6,7 @@ export default defineConfig({
   target: "es2022",
   fixedExtension: false,
   dts: {
+    generator: "tsc",
     sourcemap: false,
   },
   clean: true,

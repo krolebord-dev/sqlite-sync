@@ -14,7 +14,7 @@
     "db:new-migration": "echo 'Enter migration name: ' && read MIGRATION_NAME && wrangler d1 migrations create watchlist-admin $MIGRATION_NAME",
     "generate:types:db": "DB_PATH=$(find ./.wrangler/state/v3/d1/miniflare-D1DatabaseObject -type f -name \"*.sqlite\" -print -quit) && kysely-codegen --dialect=sqlite --url=$DB_PATH --out-file=src/lib/db-types.ts --exclude-pattern=\"_cf_METADATA\"",
     "generate:types:env": "wrangler types",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.210",
@@ -98,7 +98,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "jsdom": "^27.0.0",
     "kysely-codegen": "^0.19.0",
-    "typescript": "^5.7.2",
+    "typescript": "catalog:",
     "vite": "^8.1.0",
     "vitest": "^4.1.9",
     "web-vitals": "^5.1.0",

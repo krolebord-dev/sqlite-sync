@@ -44,7 +44,7 @@
     "build": "tsdown",
     "dev": "tsdown --watch",
     "test": "vitest run",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
@@ -55,7 +55,7 @@
     "@sqlite-sync/core": "workspace:*",
     "ai": "^6.0.201",
     "tsdown": "0.22.14",
-    "typescript": "~6.0.3",
+    "typescript": "catalog:",
     "vitest": "^4.1.8"
   }
 }

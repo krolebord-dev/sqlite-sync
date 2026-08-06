@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsgo --noEmit && vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "benchmark:crdt-event-throughput": "node ./scripts/run-crdt-event-throughput.mjs",
     "benchmark:sqlite-kv-store-rowid": "node ./scripts/run-sqlite-kv-store-rowid.mjs",
     "playwright:install": "playwright install chromium"
@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "playwright": "^1.60.0",
-    "typescript": "~6.0.3",
+    "typescript": "catalog:",
     "vite": "^8.0.16"
   }
 }
