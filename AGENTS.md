@@ -9,7 +9,7 @@ The project is a **pnpm monorepo** containing published packages and application
 ## App-Specific Docs
 
 - [Library docs](docs.md) - full docs for using @sqlite-sync in apps
-- [Watchlist App](apps/watchlist/CLAUDE.md) — production app with TanStack Router, oRPC, Cloudflare D1, and per-list CRDT sync
+- [Watchlist App](apps/watchlist/AGENTS.md) — production app with TanStack Router, oRPC, Cloudflare D1, and per-list CRDT sync
 
 ## Repository Structure
 
