@@ -64,6 +64,15 @@ describe("defineSyncSchema", () => {
     ).toThrowError('Duplicate table name "todo"');
   });
 
+  it("reserves the CRDT change-intent table name", () => {
+    expect(() =>
+      defineSyncSchema({
+        tables: { crdt_change_intents: t.table({ title: t.text() }) },
+        migrations,
+      }),
+    ).toThrowError('Table name "crdt_change_intents" is reserved by sqlite-sync');
+  });
+
   it("throws when type-only schemas are accessed at runtime", () => {
     const schema = defineSyncSchema({ tables, migrations });
 

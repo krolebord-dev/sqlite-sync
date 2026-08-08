@@ -11,6 +11,7 @@ const RESERVED_TABLE_NAMES = new Set<string>([
   "worker.crdt_events",
   "persisted_crdt_events",
   "crdt_update_log",
+  "crdt_change_intents",
   "worker.kv",
 ]);
 

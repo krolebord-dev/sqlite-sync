@@ -8,6 +8,7 @@ type ExecuteParams = {
 
 type ExecuteResult<T> = {
   rows: T[];
+  rowsWritten: number;
 };
 
 type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
@@ -28,8 +29,9 @@ export function createKyselyExecutor<TDatabase>(db: DurableObjectStorage): Kysel
   const execute = <TResult = unknown>(query: ExecuteParams): ExecuteResult<TResult> => {
     // https://github.com/cloudflare/workers-sdk/issues/9964 - booleans are not coerced to 1/0 in DO SQL
     const parameters = query.parameters.map((param) => (typeof param === "boolean" ? (param ? 1 : 0) : param));
-    const rows = db.sql.exec(query.sql, ...parameters).toArray();
-    return { rows: rows as TResult[] };
+    const cursor = db.sql.exec(query.sql, ...parameters);
+    const rows = cursor.toArray();
+    return { rows: rows as TResult[], rowsWritten: cursor.rowsWritten };
   };
 
   const executeKysely = <TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(

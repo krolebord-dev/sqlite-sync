@@ -89,7 +89,12 @@ export {
 } from "./sqlite-crdt/apply-crdt-event";
 // CRDT Schema
 export type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "./sqlite-crdt/crdt-schema";
-export { type CrdtStorage, createCrdtStorage, type OwnCrdtEvent } from "./sqlite-crdt/crdt-storage";
+export {
+  type CrdtChangeIntent,
+  type CrdtStorage,
+  createCrdtStorage,
+  type OwnCrdtEvent,
+} from "./sqlite-crdt/crdt-storage";
 export { type CrdtStorageMutator, createCrdtStorageMutator } from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {
@@ -109,7 +114,12 @@ export {
   isNoOpCrdtEventPayload,
   type PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
-export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
+export {
+  CRDT_CHANGE_INTENTS_TABLE,
+  createCrdtViewStatements,
+  drainCrdtChangeIntents,
+  makeCrdtTable,
+} from "./sqlite-crdt/make-crdt-table";
 export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // SQLite Wrapper
 export {

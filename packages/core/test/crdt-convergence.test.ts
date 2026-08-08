@@ -11,7 +11,7 @@ import {
   type CrdtUpdateLogItem,
   type PersistedCrdtEvent,
 } from "../src/sqlite-crdt/crdt-table-schema";
-import { makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
+import { CRDT_CHANGE_INTENTS_TABLE, makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
 import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 
 const BASE_TABLE = "todo";
@@ -524,6 +524,145 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replica.getPersistedEvent(1).status).toBe("applied");
     expect(replica.getEventHlcAccumulator()).not.toBe(initialAccumulator);
     expect(dispatchedSyncIds).toEqual([1]);
+  });
+
+  it("drains ordered row intents before the next statement in a transaction", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    replica.db.executeTransaction((tx) => {
+      tx.execute({
+        sql: `
+          INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+          VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+        `,
+        parameters: ["todo-1", "First", 0, 0, "todo-2", "Second", 0, 0],
+      });
+
+      const rows = tx.execute<RawTodoRow>({
+        sql: `SELECT * FROM "${BASE_TABLE}" ORDER BY "id"`,
+        parameters: [],
+      }).rows;
+      const intents = tx.execute<{ count: number }>({
+        sql: `SELECT count(*) AS count FROM "${CRDT_CHANGE_INTENTS_TABLE}"`,
+        parameters: [],
+      }).rows;
+      const events = tx.execute<PersistedCrdtEvent>({
+        sql: `SELECT * FROM "persisted_crdt_events" ORDER BY "sync_id"`,
+        parameters: [],
+      }).rows;
+
+      expect(rows.map((row) => row.id)).toEqual(["todo-1", "todo-2"]);
+      expect(intents[0]?.count).toBe(0);
+      expect(events.map((event) => event.item_id)).toEqual(["todo-1", "todo-2"]);
+      expect(events.map((event) => event.status)).toEqual(["pending", "pending"]);
+    });
+
+    await replica.waitForProcessing();
+    expect(replica.getPersistedEvents().map((event) => event.status)).toEqual(["applied", "applied"]);
+  });
+
+  it("persists sparse update payloads produced by the update trigger", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    await replica.createTodo({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: false,
+    });
+    await replica.updateTodo("todo-1", { title: `It's "updated", safely` });
+
+    expect(replica.getPersistedEvent(2)?.payload).toBe(`{"title":"It's \\"updated\\", safely"}`);
+  });
+
+  it("skips empty update payloads produced by the update trigger", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    await replica.createTodo({
+      id: "todo-1",
+      title: "Unchanged",
+      completed: false,
+      tombstone: false,
+    });
+    replica.db.execute(`UPDATE "${CRDT_TABLE}" SET "title" = "title" WHERE "id" = 'todo-1'`);
+    await replica.waitForProcessing();
+
+    expect(replica.getPersistedEvents()).toHaveLength(1);
+  });
+
+  it("rejects primary-key updates without parsing an update payload", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    await replica.createTodo({
+      id: "todo-1",
+      title: "Initial title",
+      completed: false,
+      tombstone: false,
+    });
+
+    expect(() => replica.db.execute(`UPDATE "${CRDT_TABLE}" SET "id" = 'todo-2' WHERE "id" = 'todo-1'`)).toThrowError(
+      `Cannot update the "id" column of an item`,
+    );
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")?.title).toBe("Initial title");
+    expect(replica.getTodo("todo-2")).toBeNull();
+    expect(replica.getPersistedEvents()).toHaveLength(1);
+  });
+
+  it("executes only the first statement in an execute call", async () => {
+    const replica = await createReplica("node-a", 1_000);
+
+    replica.db.execute(`
+      INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+      VALUES ('first', 'First; valid title', 0, 0);
+      INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+      VALUES ('second', 'Second', 0, 0);
+    `);
+
+    await replica.waitForProcessing();
+    expect(replica.getTodo("first")?.title).toBe("First; valid title");
+    expect(replica.getTodo("second")).toBeNull();
+    expect(replica.getPersistedEvents().map((event) => event.item_id)).toEqual(["first"]);
+  });
+
+  it("rolls back the whole user statement when draining one of its intents fails", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    let statementError: unknown;
+
+    replica.db.executeTransaction((tx) => {
+      try {
+        tx.execute({
+          sql: `
+            INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+            VALUES (?, ?, ?, ?), (?, ?, ?, ?)
+          `,
+          parameters: ["rolled-back-1", "Valid", 0, 0, "rolled-back-2", null, 0, 0],
+        });
+      } catch (error) {
+        statementError = error;
+      }
+
+      tx.execute({
+        sql: `
+          INSERT INTO "${CRDT_TABLE}" ("id", "title", "completed", "tombstone")
+          VALUES (?, ?, ?, ?)
+        `,
+        parameters: ["committed", "Still works", 0, 0],
+      });
+    });
+
+    expect(statementError).toBeInstanceOf(Error);
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("rolled-back-1")).toBeNull();
+    expect(replica.getTodo("rolled-back-2")).toBeNull();
+    expect(replica.getTodo("committed")?.title).toBe("Still works");
+    expect(replica.getPersistedEvents().map((event) => event.item_id)).toEqual(["committed"]);
+    expect(
+      replica.db.execute<{ count: number }>(`SELECT count(*) AS count FROM "${CRDT_CHANGE_INTENTS_TABLE}"`).rows[0]
+        ?.count,
+    ).toBe(0);
   });
 
   it("does not leak materialization or bookkeeping when the writing transaction rolls back", async () => {

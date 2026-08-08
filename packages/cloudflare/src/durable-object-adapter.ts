@@ -9,9 +9,12 @@ import {
   createCrdtStorage,
   createCrdtStorageMutator,
   createCrdtSyncProducer,
+  createCrdtViewStatements,
   createStoredValue,
   createSystemDbConfig,
   createTypedEventTarget,
+  drainCrdtChangeIntents,
+  dummyKysely,
   HLCCounter,
   jsonSafeParse,
   type PersistedCrdtEvent,
@@ -27,6 +30,7 @@ import {
   type SyncServerRequest,
   syncServerZodSchema,
 } from "@sqlite-sync/core/server";
+import type { Kysely } from "kysely";
 import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
 import { createMigrator } from "./migrator";
 
@@ -55,7 +59,7 @@ type ServerSyncDbEvents<Schema extends SyncDbSchema> = {
 };
 
 export type ServerSyncDb<Schema extends SyncDbSchema> = Pick<
-  KyselyExecutor<Schema[`~serverSchema`]>,
+  KyselyExecutor<Schema[`~clientSchema`]>,
   "execute" | "executeKysely"
 > &
   Pick<CrdtStorage, "applyOwnEvents"> &
@@ -109,7 +113,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     dbConfig.updateLogTable.fullIdentifier,
   );
   migrator.migrateDbToLatest();
-  createReadOnlyCrdtViews(sqlExecutor, syncDbSchema, dbConfig.eventsTable.fullIdentifier);
+  createCrdtViews(sqlExecutor, syncDbSchema, dbConfig.eventsTable.fullIdentifier);
 
   const truncatedNodeId = nodeId.slice(0, 12);
   const hlc = new HLCCounter(truncatedNodeId, () => Date.now());
@@ -143,7 +147,31 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     storage: crdtStorage,
   });
 
-  const syncDbExecutor = sqlExecutor as unknown as KyselyExecutor<Schema[`~serverSchema`]>;
+  const executeAndDrain = <Result extends { rowsWritten: number }>(execute: () => Result): Result => {
+    let result: Result | undefined;
+    let appliedIntent = false;
+    sqlExecutor.transaction(() => {
+      result = execute();
+      if (result.rowsWritten > 0) {
+        appliedIntent = drainCrdtChangeIntents({
+          tx: crdtStorageDb,
+          storage: crdtStorage,
+        });
+      }
+    });
+    if (appliedIntent) {
+      void crdtStorage.internal.processEnqueuedEvents();
+    }
+    return result as Result;
+  };
+  const userSqlExecutor = sqlExecutor as unknown as KyselyExecutor<Schema[`~clientSchema`]>;
+  const syncDbExecutor: Pick<KyselyExecutor<Schema[`~clientSchema`]>, "execute" | "executeKysely"> = {
+    execute: (query) => executeAndDrain(() => userSqlExecutor.execute(query)),
+    executeKysely: (factory) => {
+      const query = factory(dummyKysely as unknown as Kysely<Schema[`~clientSchema`]>).compile();
+      return executeAndDrain(() => userSqlExecutor.execute(query));
+    },
+  };
   const syncDb: ServerSyncDb<Schema> = {
     ...syncDbExecutor,
     ...syncDbMutator,
@@ -271,21 +299,24 @@ function getLatestSyncId(executor: KyselyExecutor<any>) {
   return result.rows[0]?.sync_id ?? 0;
 }
 
-function createReadOnlyCrdtViews(
-  executor: KyselyExecutor<any>,
-  syncDbSchema: SyncDbSchema,
-  eventsTableIdentifier: string,
-) {
+function createCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: SyncDbSchema, eventsTableIdentifier: string) {
   executor.transaction((tx) => {
     for (const { baseTableName, crdtTableName } of syncDbSchema.tablesConfig) {
       tx.execute({
         sql: `DROP VIEW IF EXISTS ${quoteId(crdtTableName)}`,
         parameters: [],
       });
-      tx.execute({
-        sql: `CREATE VIEW ${quoteId(crdtTableName)} AS SELECT * FROM ${quoteId(baseTableName)} WHERE "tombstone" = 0`,
-        parameters: [],
-      });
+      const table = syncDbSchema.tables[crdtTableName];
+      if (!table) {
+        throw new Error(`Schema not found for CRDT table: ${crdtTableName}`);
+      }
+      for (const sql of createCrdtViewStatements({
+        baseTableName,
+        crdtTableName,
+        columnNames: Object.keys(table.columns),
+      })) {
+        tx.execute({ sql, parameters: [] });
+      }
     }
 
     // Curated change log over the event table for read-only history queries. `timestamp` is the

@@ -532,6 +532,8 @@ db.execute({
 db.execute("DELETE FROM todo WHERE completed = 1");
 ```
 
+Each `execute` call accepts one SQL statement. Use `executeTransaction` to run multiple statements atomically.
+
 ---
 
 ## Backup and Restore
@@ -929,7 +931,17 @@ const { rows } = syncDb.executeKysely((db) =>
 const item = rows[0];
 ```
 
-Server-side reads can use the read-only **CRDT view name** (e.g., `"item"`). The Durable Object adapter creates these views from the schema and filters out tombstoned rows automatically. Writes still go through CRDT events, not SQL writes to the view.
+Server-side SQL uses the **CRDT view name** (e.g., `"item"`). The Durable Object adapter creates writable views
+from the schema, filters out tombstoned rows, and converts inserts, updates, and deletes into CRDT events inside the
+same transaction.
+
+```ts
+syncDb.executeKysely((db) =>
+  db.updateTable("item").set({ processingStatus: "complete" }).where("id", "=", itemId),
+);
+```
+
+Each `execute` call accepts one SQL statement. Multiple mutations can also be submitted through the event API below.
 
 ### Writing Events
 
@@ -1194,7 +1206,9 @@ Behavior:
 
 Sets up CRDT storage inside a Cloudflare Durable Object.
 
-After running your schema migrations, the adapter recreates read-only CRDT views for each configured table. Each view uses the configured CRDT table name and selects non-tombstoned rows from the base table.
+After running your schema migrations, the adapter recreates writable CRDT views for each configured table. Each view
+uses the configured CRDT table name, selects non-tombstoned rows from the base table, and stages SQL mutations as CRDT
+change intents that are drained before the statement commits.
 
 ```ts
 function createCrdtStorage<Schema extends SyncDbSchema>(options: {

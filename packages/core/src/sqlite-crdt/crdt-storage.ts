@@ -38,6 +38,15 @@ export type OwnCrdtEvent = {
   schema_version?: undefined;
 };
 
+export type CrdtChangeIntent = {
+  seq: number;
+  dataset: string;
+  type: CrdtEventType;
+  item_id: string;
+  new_item_id: string | null;
+  payload_json: string;
+};
+
 type RemoteCrdtEvent = {
   type: CrdtEventType;
   dataset: string;
@@ -289,6 +298,36 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
     persistEvent(tx, persistedEvent);
     applyCrdtEvent(persistedEvent);
+  };
+
+  const applyOwnIntentsFromTransaction = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    intents: CrdtChangeIntent[],
+  ) => {
+    let appliedEvents = 0;
+
+    for (const intent of intents) {
+      if (intent.type === "item-updated") {
+        if (intent.item_id !== intent.new_item_id) {
+          throw new Error(
+            `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
+          );
+        }
+        if (intent.payload_json === "{}") {
+          continue;
+        }
+      }
+
+      applyOwnEventFromTransaction(tx, {
+        type: intent.type,
+        dataset: intent.dataset,
+        item_id: intent.item_id,
+        payload: intent.payload_json,
+      });
+      appliedEvents++;
+    }
+
+    return { appliedEvents };
   };
 
   const dispatchEventsApplied = (previousSequentialSyncId: number) => {
@@ -620,6 +659,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
     internal: {
       applyOwnEventFromTransaction,
+      applyOwnIntentsFromTransaction,
       processEnqueuedEvents,
     },
   };
