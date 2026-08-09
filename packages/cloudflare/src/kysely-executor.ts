@@ -1,4 +1,5 @@
-import { dummyKysely, type InternalSQLiteWrapper, type KyselyStatementFactory } from "@sqlite-sync/core";
+import { dummyKysely } from "@sqlite-sync/core";
+import type { InternalSQLiteWrapper, KyselyStatementFactory } from "@sqlite-sync/core/internal";
 import type { Compilable, Kysely } from "kysely";
 
 type ExecuteParams = {
@@ -25,6 +26,12 @@ export type KyselyExecutor<TDatabase> = {
   transaction: (callback: (tx: Pick<KyselyExecutor<TDatabase>, "execute" | "executeKysely">) => void) => void;
 };
 
+/**
+ * Creates a direct Durable Object SQLite executor.
+ *
+ * This executor does not drain CRDT change intents. Use the `syncDb` executor
+ * returned by `durableObjectAdapter.createCrdtStorage` for synced-view writes.
+ */
 export function createKyselyExecutor<TDatabase>(db: DurableObjectStorage): KyselyExecutor<TDatabase> {
   const execute = <TResult = unknown>(query: ExecuteParams): ExecuteResult<TResult> => {
     // https://github.com/cloudflare/workers-sdk/issues/9964 - booleans are not coerced to 1/0 in DO SQL

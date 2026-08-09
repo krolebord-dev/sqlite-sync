@@ -41,9 +41,6 @@ export {
 export {
   applyMemoryDbSchema,
   applyWorkerDbSchema,
-  baseSystemMigrations,
-  createSystemDbConfig,
-  runSystemMigrations,
   type SystemDbConfig,
   type SystemMigration,
   type SystemMigrationContext,
@@ -90,7 +87,6 @@ export {
 // CRDT Schema
 export type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "./sqlite-crdt/crdt-schema";
 export {
-  type CrdtChangeIntent,
   type CrdtStorage,
   createCrdtStorage,
   type OwnCrdtEvent,
@@ -114,27 +110,28 @@ export {
   isNoOpCrdtEventPayload,
   type PersistedCrdtEvent,
 } from "./sqlite-crdt/crdt-table-schema";
-export {
-  CRDT_CHANGE_INTENTS_TABLE,
-  createCrdtViewStatements,
-  drainCrdtChangeIntents,
-  makeCrdtTable,
-} from "./sqlite-crdt/make-crdt-table";
+export { makeCrdtTable } from "./sqlite-crdt/make-crdt-table";
 export { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 // SQLite Wrapper
 export {
   type ExecuteParams,
   type ExecuteResult,
-  type InternalSQLiteWrapper,
   type KyselyQueryFactory,
-  type KyselyStatementFactory,
   type PreparedStatement,
   type QueryBuilderOutput,
   SQLiteDbWrapper,
   type SQLiteTransactionWrapper,
 } from "./sqlite-db-wrapper";
 export { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "./sqlite-kv-store";
-export { createSyncedDb, type SyncedDb } from "./sync-db";
+export {
+  createSyncedDb,
+  type SyncedDb,
+  type SyncedDbDatabase,
+  type SyncedDbOptions,
+  type SyncedDbSqlExecutor,
+  type SyncedDbTransaction,
+  type UnsafeSyncedDbSqlExecutor,
+} from "./sync-db";
 // Utilities
 export {
   createDeferredPromise,

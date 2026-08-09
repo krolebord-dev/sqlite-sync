@@ -534,6 +534,21 @@ db.execute("DELETE FROM todo WHERE completed = 1");
 
 Each `execute` call accepts one SQL statement. Use `executeTransaction` to run multiple statements atomically.
 
+### Unsafe SQL
+
+Normal `execute` and `executeKysely` calls drain CRDT change intents before their statement commits. Low-level database
+maintenance and recovery tooling can explicitly bypass that behavior through `unsafe`:
+
+```ts
+db.unsafe.execute({
+  sql: "UPDATE _todo SET title = ? WHERE id = ?",
+  parameters: ["Recovered title", todoId],
+});
+```
+
+`unsafe` is also available inside transactions as `trx.unsafe`. Never use it to mutate a synced CRDT view: doing so can
+leave undrained intents and will not produce a correctly synchronized mutation.
+
 ---
 
 ## Backup and Restore
@@ -876,7 +891,7 @@ export default {
 | Option | Type | Description |
 |--------|------|-------------|
 | `syncDbSchema` | `SyncDbSchema` | Same schema used on the client. |
-| `crdtEventsTable` | `string` | Name of the SQLite table for storing CRDT events (e.g., `"crdt_events"`). |
+| `crdtEventsTable` | `string?` | Name of the SQLite table for storing CRDT events. Default: `"crdt_events"`. |
 | `nodeId` | `string` | Unique ID for this server node. Typically `this.ctx.id.toString()`. Truncated to 12 chars for HLC. |
 | `storage` | `DurableObjectStorage` | The Durable Object's `ctx.storage`. |
 | `broadcastPayload` | `(payload: string) => void` | Callback to send a message to all connected WebSocket clients. |
@@ -943,6 +958,10 @@ syncDb.executeKysely((db) =>
 
 Each `execute` call accepts one SQL statement. Multiple mutations can also be submitted through the event API below.
 
+Normal `syncDb.execute` and `syncDb.executeKysely` calls drain CRDT change intents before committing. For low-level
+maintenance and recovery only, `syncDb.unsafe` provides direct `execute`, `executeKysely`, and `transaction` methods
+that do not drain. Mutating a synced view through `unsafe` can leave undrained intents.
+
 ### Writing Events
 
 ```ts
@@ -987,11 +1006,10 @@ syncDb.addEventListener("event-applied", (event) => {
 
 ```ts
 import { createAiDbAccess, createDbTools } from "@sqlite-sync/ai";
-import { createKyselyExecutor } from "@sqlite-sync/cloudflare";
 
 // Next to the storage:
 const aiDbAccess = createAiDbAccess({
-  executor: createKyselyExecutor(this.ctx.storage),
+  executor: syncDb.unsafe,
   syncDbSchema,
   context: {
     overview: "# My app's database\n\nDeletes are soft-deletes; the views below already hide them.",
@@ -1008,8 +1026,8 @@ To allow AI writes, pass the CRDT storage to `createAiDbAccess` and opt in when 
 
 ```ts
 const aiDbAccess = createAiDbAccess({
-  executor: createKyselyExecutor(this.ctx.storage),
-  storage: crdtStorage,
+  executor: syncDb.unsafe,
+  storage: syncDb,
   syncDbSchema,
 });
 
@@ -1068,16 +1086,21 @@ function createSyncedDb<Database, Props = undefined>(
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `db.execute(params)` | `(params) => ExecuteResult<T>` | Execute raw SQL |
-| `db.executeKysely(factory)` | `(factory) => ExecuteResult<T>` | Execute a Kysely query |
-| `db.executeTransaction(callback)` | `(callback) => T` | Run mutations in a transaction |
+| `db.execute(params)` | `(params) => ExecuteResult<T>` | Execute SQL and drain CRDT change intents |
+| `db.executeKysely(factory)` | `(factory) => ExecuteResult<T>` | Execute a typed Kysely query and drain intents |
+| `db.unsafe.execute(params)` | `(params) => ExecuteResult<T>` | Execute SQL without draining intents |
+| `db.unsafe.executeKysely(factory)` | `(factory) => ExecuteResult<T>` | Execute Kysely without draining intents |
+| `db.executeTransaction(callback)` | `(callback) => T` | Run mutations in a transaction; exposes safe execution plus `trx.unsafe` |
 | `db.createLiveQuery(query)` | `(query) => LiveQuery<T>` | Create a reactive query subscription |
+| `db.getSharedLiveQuery(query)` | `(query) => SharedLiveQuery<T>` | Get or create a shared reactive query |
 | `state.getState()` | `() => WorkerState` | Get current sync state |
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server |
-| `state.goOffline()` | `() => void` | Disconnect from remote server |
+| `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
+| `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |
+| `importData(data, options?)` | `(data, options?) => Promise<ImportDataResult>` | Import rows through CRDT events |
 | `dispose()` | `() => Promise<void>` | Clean up all resources |
 
 #### `defineSyncSchema(config)`
@@ -1215,7 +1238,7 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
   storage: DurableObjectStorage;
   syncDbSchema: Schema;
   nodeId: string;
-  crdtEventsTable: string;
+  crdtEventsTable?: string;
   batchSize?: number;
   broadcastPayload: (payload: string) => void;
 }): Promise<{
@@ -1228,8 +1251,11 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 
 | Method | Description |
 |--------|-------------|
-| `execute(params)` | Execute raw SQL |
-| `executeKysely(factory)` | Execute a typed Kysely query |
+| `execute(params)` | Execute raw SQL and drain CRDT change intents |
+| `executeKysely(factory)` | Execute a typed Kysely query and drain intents |
+| `unsafe.execute(params)` | Execute raw SQL without draining intents |
+| `unsafe.executeKysely(factory)` | Execute a typed Kysely query without draining intents |
+| `unsafe.transaction(callback)` | Run a direct SQLite transaction without draining intents |
 | `enqueueEvent(event)` | Write a single CRDT event |
 | `enqueueEvents(events)` | Write multiple CRDT events |
 | `applyOwnEvents(events)` | Validate, persist, and immediately apply own CRDT events |
@@ -1242,29 +1268,6 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 |--------|-------------|
 | `handleMessage(message: string)` | Parse and handle a WebSocket message. Returns `{ success: true, payload: string }` or `{ success: false, error: unknown }`. |
 
-#### `createKyselyExecutor(storage)`
-
-Low-level typed SQL executor wrapping Durable Object storage. Used internally by `durableObjectAdapter` but available for direct use.
-
-```ts
-function createKyselyExecutor<TDatabase>(
-  storage: DurableObjectStorage
-): KyselyExecutor<TDatabase>
-```
-
-#### `createMigrator(kv, executor, migrations)`
-
-Creates a migration runner for Durable Object storage.
-
-```ts
-function createMigrator(
-  kv: SyncKvStorage,
-  executor: KyselyExecutor<any>,
-  migrations: Migrations,
-  updateLogTableName?: string
-): SyncDbMigrator
-```
-
 ### `@sqlite-sync/ai`
 
 #### `createAiDbAccess(options)`
@@ -1273,7 +1276,7 @@ Creates AI access to a synced database. Query access is read-only; mutation acce
 
 ```ts
 function createAiDbAccess(options: {
-  executor: AiDbExecutor; // satisfied by createKyselyExecutor from @sqlite-sync/cloudflare
+  executor: AiDbExecutor; // satisfied by a Cloudflare ServerSyncDb's unsafe executor
   storage?: Pick<CrdtStorage, "applyOwnEvents">; // enables mutate(input)
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext; // overview/app-level notes

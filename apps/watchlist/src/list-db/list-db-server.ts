@@ -7,12 +7,7 @@ import {
   type AiQueryResult,
   createAiDbAccess,
 } from "@sqlite-sync/ai";
-import {
-  createKyselyExecutor,
-  durableObjectAdapter,
-  type RemoteHandler,
-  type TypedPersistedCrdtEvent,
-} from "@sqlite-sync/cloudflare";
+import { durableObjectAdapter, type RemoteHandler, type TypedPersistedCrdtEvent } from "@sqlite-sync/cloudflare";
 import { type Connection, Server } from "partyserver";
 import { listDbOrpcRouter, listOrpcHandler } from "./list-db-router";
 import { syncDbSchema } from "./migrations";
@@ -55,7 +50,7 @@ export class ListDbServer extends Server<Env> {
     });
 
     this.aiDbAccess = createAiDbAccess({
-      executor: createKyselyExecutor(this.ctx.storage),
+      executor: syncDb.unsafe,
       storage: syncDb,
       syncDbSchema,
       context: listDbSchemaDocContext,

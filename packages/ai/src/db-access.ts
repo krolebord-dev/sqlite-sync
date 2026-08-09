@@ -15,8 +15,9 @@ export type AiDbExecuteParams = {
 };
 
 /**
- * Minimal executor contract for AI database access. Runtime-specific — inject the one that
- * matches where the storage lives; @sqlite-sync/cloudflare's `createKyselyExecutor` satisfies it.
+ * Minimal executor contract for AI database access. Runtime-specific — inject the raw SQL
+ * capability that matches where the storage lives; a Cloudflare `ServerSyncDb`'s `unsafe`
+ * executor satisfies it.
  */
 export type AiDbExecutor = {
   execute<TResult = unknown>(query: AiDbExecuteParams): { rows: TResult[] };

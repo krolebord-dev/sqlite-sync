@@ -53,6 +53,21 @@ export default {
 
 See the [full documentation](https://github.com/krolebord-dev/sqlite-sync/blob/main/docs.md) and the [project README](https://github.com/krolebord-dev/sqlite-sync) for how sync works and client setup.
 
+## SQL execution
+
+The `syncDb` returned by `createCrdtStorage` exposes two execution levels:
+
+```ts
+// Normal application path: drains CRDT change intents before commit.
+syncDb.executeKysely((db) => db.updateTable("item").set({ complete: true }).where("id", "=", itemId));
+
+// Explicit low-level bypass for maintenance and recovery tooling.
+syncDb.unsafe.execute({ sql: "vacuum", parameters: [] });
+```
+
+`syncDb.unsafe` also provides raw `executeKysely` and `transaction` methods. Do not use them to mutate synced views;
+unsafe execution intentionally does not drain CRDT change intents.
+
 ## License
 
 MIT

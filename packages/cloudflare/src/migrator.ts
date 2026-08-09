@@ -1,9 +1,16 @@
 import { createMigrator as createBaseMigrator, createStoredValue, type Migrations } from "@sqlite-sync/core";
-import type { KyselyExecutor } from "./kysely-executor";
+
+export type SqlStatementExecutor = {
+  execute<TResult = unknown>(query: { sql: string; parameters: readonly unknown[] }): { rows: TResult[] };
+};
+
+export type TransactionalSqlExecutor = SqlStatementExecutor & {
+  transaction(callback: (tx: SqlStatementExecutor) => void): void;
+};
 
 export function createMigrator(
   kv: SyncKvStorage,
-  sqlExecutor: KyselyExecutor<any>,
+  sqlExecutor: TransactionalSqlExecutor,
   migrations: Migrations,
   updateLogTableName?: string,
 ) {
@@ -23,10 +30,10 @@ export function createMigrator(
     migrateDbToLatest: () => {
       baseMigrator.migrateDbToLatest({
         startTransaction: (callback) => {
-          sqlExecutor.transaction(() => {
+          sqlExecutor.transaction((tx) => {
             return callback({
               execute: (sql, parameters) =>
-                sqlExecutor.execute({
+                tx.execute({
                   sql,
                   parameters,
                 }),

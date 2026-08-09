@@ -26,6 +26,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./internal": {
+      "@sqlite-sync/source": "./src/internal.ts",
+      "workerd": "./src/internal.ts",
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
+    },
     "./worker": {
       "@sqlite-sync/source": "./src/worker.ts",
       "workerd": "./src/worker.ts",
@@ -47,6 +53,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./internal": {
+        "types": "./dist/internal.d.ts",
+        "import": "./dist/internal.js"
       },
       "./worker": {
         "types": "./dist/worker.d.ts",
