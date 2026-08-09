@@ -121,8 +121,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
           ? this.afterMutatingStatement
           : null;
 
+      let totalChangesBefore = 0;
       if (afterMutatingStatement) {
         transaction = this.beginStatementTransaction();
+        totalChangesBefore = this.sqlite3.capi.sqlite3_total_changes(this.ensureDb);
       }
 
       if (bind && bind.length > 0) {
@@ -144,7 +146,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       perf?.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
 
       if (transaction) {
-        afterMutatingStatement?.(this);
+        // Nothing was written, so the statement cannot have produced any work for the callback.
+        if (this.sqlite3.capi.sqlite3_total_changes(this.ensureDb) !== totalChangesBefore) {
+          afterMutatingStatement?.(this);
+        }
         transaction.commit();
       }
 
@@ -270,8 +275,17 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         }
 
         const results = [] as TResult[];
+        // Reading rows as arrays and naming them here keeps sqlite from looking up
+        // every column name again for every row.
+        let columnNames: string[] | undefined;
         while (stmt.step()) {
-          results.push(stmt.get({}) as TResult);
+          columnNames ??= stmt.getColumnNames([]);
+          const values = stmt.get([]);
+          const row = {} as Record<string, unknown>;
+          for (let index = 0; index < columnNames.length; index++) {
+            row[columnNames[index]] = values[index];
+          }
+          results.push(row as TResult);
         }
 
         return results;
