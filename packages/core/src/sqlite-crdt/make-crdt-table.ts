@@ -133,10 +133,19 @@ export function registerCrdtIntentDrainer({
   storage: InternalCrdtStorage;
 }) {
   let eventApplied = false;
+  let processedIntentMutationVersion = reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE);
 
   reactiveDb.db.setAfterMutatingStatement((tx) => {
-    if (drainCrdtChangeIntents({ tx, storage })) {
-      eventApplied = true;
+    if (reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE) === processedIntentMutationVersion) {
+      return;
+    }
+
+    try {
+      if (drainCrdtChangeIntents({ tx, storage })) {
+        eventApplied = true;
+      }
+    } finally {
+      processedIntentMutationVersion = reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE);
     }
   });
 

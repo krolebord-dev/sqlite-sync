@@ -364,6 +364,24 @@ describe("CRDT convergence for parallel entity edits", () => {
     }
   });
 
+  it("does not drain CRDT intents after an unrelated mutation", async () => {
+    const systemQueries: string[] = [];
+    const replica = await createReplica("node-a", 1_000, {
+      logger(type, message, level) {
+        if (type === "memory:prepare-execute" && level === "system") {
+          systemQueries.push(message);
+        }
+      },
+    });
+    replica.db.execute(`CREATE TABLE "unrelated" ("id" INTEGER PRIMARY KEY)`);
+    systemQueries.length = 0;
+
+    replica.db.execute(`INSERT INTO "unrelated" DEFAULT VALUES`);
+
+    expect(systemQueries.some((query) => query.includes(`delete from "${CRDT_CHANGE_INTENTS_TABLE}"`))).toBe(false);
+    expect(replica.getPersistedEvents()).toEqual([]);
+  });
+
   it("marks migration-dropped events as applied with no-op payload", async () => {
     const schemaVersion = { current: 1 };
     const migrator = createMigrator({
