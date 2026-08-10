@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HLCCounter, serializeHLC } from "../src/hlc";
+import type { Logger } from "../src/logger";
 import { createMemoryDb } from "../src/memory-db/memory-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
@@ -56,6 +57,7 @@ async function createReplica(
     trackEventHlcAccumulator?: boolean;
     migrator?: ReturnType<typeof createMigrator>;
     schemaVersion?: { current: number };
+    logger?: Logger;
   } = {},
 ) {
   const reactiveDb = await createSQLiteReactiveDb<{
@@ -65,7 +67,7 @@ async function createReplica(
     crdt_update_log: CrdtUpdateLogItem;
   }>({
     snapshot: new Uint8Array(),
-    logger: noopLogger,
+    logger: opts.logger ?? noopLogger,
   });
   const db = reactiveDb.db;
 
@@ -300,6 +302,66 @@ describe("CRDT convergence for parallel entity edits", () => {
       tombstone: false,
     });
     expect(replica.getPersistedEvent(1)?.status).toBe("applied");
+  });
+
+  it("finalizes unchanged events with a status-only update", async () => {
+    const systemQueries: string[] = [];
+    const replica = await createReplica("node-a", 1_000, {
+      logger(type, message, level) {
+        if (type === "memory:prepare-execute" && level === "system") {
+          systemQueries.push(message);
+        }
+      },
+    });
+    systemQueries.length = 0;
+
+    await replica.importEvents([
+      {
+        schema_version: 0,
+        type: "item-created",
+        timestamp: "000000000001000:00000:remote-node",
+        dataset: BASE_TABLE,
+        item_id: "todo-1",
+        payload: JSON.stringify({
+          id: "todo-1",
+          title: "Status only",
+          completed: false,
+        }),
+      },
+    ]);
+
+    const eventUpdates = systemQueries.filter((query) => query.includes('update "persisted_crdt_events"'));
+    expect(eventUpdates).toHaveLength(1);
+    expect(eventUpdates[0]).toContain('set "status" = ? where "sync_id" = ?');
+    expect(eventUpdates[0]).not.toContain('"schema_version" = ?');
+  });
+
+  it("does not schedule per-event notification microtasks without an observer", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask");
+
+    try {
+      await replica.storage.enqueueRemoteEvents(
+        ["todo-1", "todo-2", "todo-3"].map((itemId, index) => ({
+          schema_version: 0,
+          type: "item-created" as const,
+          timestamp: serializeHLC(new HLCCounter("remote-node", () => 1_000 + index).getCurrentHLC()),
+          dataset: BASE_TABLE,
+          item_id: itemId,
+          payload: JSON.stringify({
+            id: itemId,
+            title: `Todo ${index + 1}`,
+            completed: false,
+          }),
+        })),
+      ).processed;
+
+      // The enqueue and processing transactions each schedule one reactive-DB
+      // notification. CRDT storage itself schedules nothing without an observer.
+      expect(queueMicrotaskSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      queueMicrotaskSpy.mockRestore();
+    }
   });
 
   it("marks migration-dropped events as applied with no-op payload", async () => {

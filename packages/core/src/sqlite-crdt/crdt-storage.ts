@@ -219,12 +219,27 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     return enqueueEvents("remote", "", events);
   };
 
-  const notifyEventApplied = (event: PersistedCrdtEvent) => {
-    if (event.status === "applied") {
-      queueMicrotask(() => {
-        storage.onEventApplied?.(event);
-      });
+  const notifyEventsApplied = (events: PersistedCrdtEvent[]) => {
+    const onEventApplied = storage.onEventApplied;
+    if (!onEventApplied || events.length === 0) {
+      return;
     }
+
+    queueMicrotask(() => {
+      let callbackFailed = false;
+      let firstError: unknown;
+      for (const event of events) {
+        try {
+          onEventApplied(event);
+        } catch (error) {
+          callbackFailed = true;
+          firstError ??= error;
+        }
+      }
+      if (callbackFailed) {
+        throw firstError;
+      }
+    });
   };
 
   const applyOwnEvents = (events: OwnCrdtEvent[]) => {
@@ -338,6 +353,23 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       syncId: sequentialSyncId,
       eventHlcSum: sequentialSyncId === localSyncId ? (eventHlcAccumulator?.current ?? null) : null,
     });
+  };
+
+  const publishProcessedBatch = ({
+    previousSequentialSyncId,
+    nextSequentialSyncId,
+    appliedEvents,
+  }: {
+    previousSequentialSyncId: number;
+    nextSequentialSyncId: number;
+    appliedEvents: PersistedCrdtEvent[];
+  }) => {
+    sequentialSyncId = nextSequentialSyncId;
+
+    // Schedule per-event observers before dispatching cursor progress, matching
+    // the previous ordering while keeping both signals behind one post-commit API.
+    notifyEventsApplied(appliedEvents);
+    dispatchEventsApplied(previousSequentialSyncId);
   };
 
   const hasPendingEvents = (): boolean => {
@@ -514,6 +546,14 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       throw new Error(`Event ${event.sync_id} is not pending`);
     }
 
+    const persistedEventData = {
+      schema_version: event.schema_version,
+      type: event.type,
+      dataset: event.dataset,
+      item_id: event.item_id,
+      payload: event.payload,
+    };
+
     try {
       if (event.origin === "own-applied") {
         event.status = "applied";
@@ -560,23 +600,45 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       console.error("Error applying enqueued CRDT event", error);
       event.status = "failed";
     } finally {
-      tx.executePrepared(
-        "update-crdt-event",
-        event,
-        (db, params) =>
-          db
-            .updateTable(crdtEventsTable)
-            .set({
-              status: params("status"),
-              schema_version: params("schema_version"),
-              type: params("type"),
-              dataset: params("dataset"),
-              item_id: params("item_id"),
-              payload: params("payload"),
-            })
-            .where("sync_id", "=", params("sync_id")),
-        { loggerLevel: "system" },
-      );
+      const eventDataChanged =
+        event.schema_version !== persistedEventData.schema_version ||
+        event.type !== persistedEventData.type ||
+        event.dataset !== persistedEventData.dataset ||
+        event.item_id !== persistedEventData.item_id ||
+        event.payload !== persistedEventData.payload;
+
+      if (eventDataChanged) {
+        tx.executePrepared(
+          "update-crdt-event-full",
+          event,
+          (db, params) =>
+            db
+              .updateTable(crdtEventsTable)
+              .set({
+                status: params("status"),
+                schema_version: params("schema_version"),
+                type: params("type"),
+                dataset: params("dataset"),
+                item_id: params("item_id"),
+                payload: params("payload"),
+              })
+              .where("sync_id", "=", params("sync_id")),
+          { loggerLevel: "system" },
+        );
+      } else {
+        tx.executePrepared(
+          "update-crdt-event-status",
+          event,
+          (db, params) =>
+            db
+              .updateTable(crdtEventsTable)
+              .set({
+                status: params("status"),
+              })
+              .where("sync_id", "=", params("sync_id")),
+          { loggerLevel: "system" },
+        );
+      }
     }
   };
 
@@ -609,29 +671,37 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       const previousSequentialSyncId = sequentialSyncId;
       if (events.length === 0) {
-        sequentialSyncId = localSyncId;
-        dispatchEventsApplied(previousSequentialSyncId);
+        publishProcessedBatch({
+          previousSequentialSyncId,
+          nextSequentialSyncId: localSyncId,
+          appliedEvents: [],
+        });
         break;
       }
 
       const failedRemoteSyncIds: number[] = [];
+      const appliedEventsToNotify: PersistedCrdtEvent[] = [];
 
       db.executeTransaction((tx) => {
         for (const event of events) {
           processPersistedEvent(tx, event);
           if (event.status === "applied") {
             eventHlcAccumulator?.add(event.timestamp);
+            if (storage.onEventApplied) {
+              appliedEventsToNotify.push(event);
+            }
           }
-          notifyEventApplied(event);
           if (event.status === "failed" && event.origin === "remote") {
             failedRemoteSyncIds.push(event.sync_id);
           }
         }
         persistEventHlcAccumulator();
       });
-
-      sequentialSyncId = hasMore ? (events[events.length - 1]?.sync_id ?? sequentialSyncId) : localSyncId;
-      dispatchEventsApplied(previousSequentialSyncId);
+      publishProcessedBatch({
+        previousSequentialSyncId,
+        nextSequentialSyncId: hasMore ? (events[events.length - 1]?.sync_id ?? sequentialSyncId) : localSyncId,
+        appliedEvents: appliedEventsToNotify,
+      });
 
       // A remote event was accepted by the server but could not be applied
       // locally, which means our local state has diverged from the server.

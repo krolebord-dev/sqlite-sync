@@ -155,9 +155,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       saveToStorage: (val) => storage.kv.put("crdt.consistency.event_hlc_sum.v3", val),
     }),
     onEventApplied: (event) => {
-      queueMicrotask(() => {
-        eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
-      });
+      eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
     },
     schema: syncDbSchema,
   });
