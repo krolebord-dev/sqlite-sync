@@ -304,7 +304,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replica.getPersistedEvent(1)?.status).toBe("applied");
   });
 
-  it("finalizes unchanged events with a status-only update", async () => {
+  it("finalizes unchanged events with one batched status-only update", async () => {
     const systemQueries: string[] = [];
     const replica = await createReplica("node-a", 1_000, {
       logger(type, message, level) {
@@ -315,25 +315,54 @@ describe("CRDT convergence for parallel entity edits", () => {
     });
     systemQueries.length = 0;
 
-    await replica.importEvents([
-      {
+    await replica.importEvents(
+      ["todo-1", "todo-2", "todo-3"].map((itemId, index) => ({
         schema_version: 0,
-        type: "item-created",
-        timestamp: "000000000001000:00000:remote-node",
+        type: "item-created" as const,
+        timestamp: `00000000000100${index}:00000:remote-node`,
         dataset: BASE_TABLE,
-        item_id: "todo-1",
+        item_id: itemId,
         payload: JSON.stringify({
-          id: "todo-1",
-          title: "Status only",
+          id: itemId,
+          title: `Status only ${index + 1}`,
           completed: false,
         }),
-      },
-    ]);
+      })),
+    );
 
     const eventUpdates = systemQueries.filter((query) => query.includes('update "persisted_crdt_events"'));
     expect(eventUpdates).toHaveLength(1);
-    expect(eventUpdates[0]).toContain('set "status" = ? where "sync_id" = ?');
+    expect(eventUpdates[0]).toContain(`set "status" = ? where "sync_id" in (select "value" from json_each(?))`);
     expect(eventUpdates[0]).not.toContain('"schema_version" = ?');
+
+    const duplicateLookups = systemQueries.filter((query) => query.includes('min("sync_id") as "first_sync_id"'));
+    expect(duplicateLookups).toHaveLength(1);
+    expect(duplicateLookups[0]).toContain(`"timestamp" in (select "value" from json_each(?))`);
+  });
+
+  it("does not run the duplicate lookup for local writes", async () => {
+    const systemQueries: string[] = [];
+    const replica = await createReplica("node-a", 1_000, {
+      logger(type, message, level) {
+        if (type === "memory:prepare-execute" && level === "system") {
+          systemQueries.push(message);
+        }
+      },
+    });
+    systemQueries.length = 0;
+
+    await replica.createTodo({ id: "todo-1", title: "Local", completed: false, tombstone: false });
+    await replica.updateTodo("todo-1", { title: "Local edited" });
+
+    const duplicateLookups = systemQueries.filter((query) => query.includes('min("sync_id") as "first_sync_id"'));
+    expect(duplicateLookups).toHaveLength(0);
+    expect(replica.getPersistedEvents().map((event) => event.status)).toEqual(["applied", "applied"]);
+
+    const eventUpdates = systemQueries.filter((query) => query.includes('update "persisted_crdt_events"'));
+    expect(eventUpdates).toHaveLength(2);
+    for (const eventUpdate of eventUpdates) {
+      expect(eventUpdate).toContain(`set "status" = ? where "sync_id" = ?`);
+    }
   });
 
   it("does not schedule per-event notification microtasks without an observer", async () => {
@@ -505,6 +534,34 @@ describe("CRDT convergence for parallel entity edits", () => {
       completed: false,
       tombstone: false,
     });
+  });
+
+  it("detects duplicate timestamps within the same processing batch", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const timestamp = "000000000001000:00000:remote-node";
+
+    await replica.importEvents([
+      {
+        schema_version: 0,
+        type: "item-created",
+        timestamp,
+        dataset: BASE_TABLE,
+        item_id: "todo-1",
+        payload: JSON.stringify({ id: "todo-1", title: "Accepted", completed: false }),
+      },
+      {
+        schema_version: 0,
+        type: "item-created",
+        timestamp,
+        dataset: BASE_TABLE,
+        item_id: "todo-duplicate",
+        payload: JSON.stringify({ id: "todo-duplicate", title: "Deduped", completed: false }),
+      },
+    ]);
+
+    expect(replica.getPersistedEvents().map((event) => event.status)).toEqual(["applied", "deduped"]);
+    expect(replica.getTodo("todo-1")?.title).toBe("Accepted");
+    expect(replica.getTodo("todo-duplicate")).toBeNull();
   });
 
   it("does not expose applied events after an earlier pending gap", async () => {
