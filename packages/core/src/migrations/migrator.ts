@@ -29,20 +29,23 @@ type MigrationStepSql =
   | Compilable
   | ((db: Kysely<unknown>) => Compilable);
 
-type TableRename = { oldTable: string; newTable: string };
+type UpdateLogMutation =
+  | { type: "rename-table"; oldTable: string; newTable: string }
+  | { type: "drop-table"; table: string }
+  | { type: "rename-column"; table: string; oldColumn: string; newColumn: string }
+  | { type: "add-column"; table: string; column: string }
+  | { type: "drop-column"; table: string; column: string };
 
 type MigrationStep = {
   sql: MigrationStepSql | MigrationStepSql[];
   eventTransformer?: MigrationEventTransformers;
-  tableRenames?: TableRename[];
-  tableDrops?: string[];
+  updateLogMutations?: UpdateLogMutation[];
 };
 
 type RawMigrationStep = {
   sql: MigrationSql[];
   eventTransformer?: CompiledMigrationEventTransformer;
-  tableRenames?: TableRename[];
-  tableDrops?: string[];
+  updateLogMutations?: UpdateLogMutation[];
 };
 
 type MigrationSql = { sql: string; parameters: readonly unknown[] };
@@ -67,7 +70,7 @@ const migrationSteps = {
     eventTransformer: {
       [table]: () => null,
     },
-    tableDrops: [table],
+    updateLogMutations: [{ type: "drop-table", table }],
   }),
 
   createIndex: (indexName: string, build: (index: CreateIndexBuilder) => Compilable): MigrationStep => ({
@@ -86,7 +89,7 @@ const migrationSteps = {
         return event;
       },
     },
-    tableRenames: [{ oldTable, newTable }],
+    updateLogMutations: [{ type: "rename-table", oldTable, newTable }],
   }),
 
   renameColumn: ({
@@ -115,6 +118,7 @@ const migrationSteps = {
           return event;
         },
       },
+      updateLogMutations: [{ type: "rename-column", table, oldColumn, newColumn }],
     };
   },
 
@@ -143,6 +147,7 @@ const migrationSteps = {
         return event;
       },
     },
+    updateLogMutations: [{ type: "add-column", table, column }],
   }),
 
   dropColumn: ({ table, column }: { table: string; column: string }): MigrationStep => {
@@ -164,6 +169,7 @@ const migrationSteps = {
           return event;
         },
       },
+      updateLogMutations: [{ type: "drop-column", table, column }],
     };
   },
 };
@@ -242,16 +248,14 @@ export function createMigrations(buildMigrations: (builder: typeof migrationStep
         throw new Error(`Migration version cannot be negative: ${version}`);
       }
 
-      const tableRenames = steps.flatMap((s) => s.tableRenames ?? []);
-      const tableDrops = steps.flatMap((s) => s.tableDrops ?? []);
+      const updateLogMutations = steps.flatMap((step) => step.updateLogMutations ?? []);
 
       return [
         version,
         {
           sql: buildMigrationSql(steps),
           eventTransformer: buildMigrationEventTransformer(steps),
-          ...(tableRenames.length > 0 && { tableRenames }),
-          ...(tableDrops.length > 0 && { tableDrops }),
+          ...(updateLogMutations.length > 0 && { updateLogMutations }),
         },
       ];
     }),
@@ -295,17 +299,70 @@ export function createMigrator({
       for (const statement of migration.sql) {
         tx.execute(statement.sql, statement.parameters);
       }
-      if (updateLogTableName) {
-        if (migration.tableRenames) {
-          for (const { oldTable, newTable } of migration.tableRenames) {
-            tx.execute(`UPDATE ${updateLogTableName} SET "dataset" = ? WHERE "dataset" = ?`, [newTable, oldTable], {
-              loggerLevel: "system",
-            });
-          }
-        }
-        if (migration.tableDrops) {
-          for (const table of migration.tableDrops) {
-            tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [table], { loggerLevel: "system" });
+      if (updateLogTableName && migration.updateLogMutations) {
+        for (const mutation of migration.updateLogMutations) {
+          switch (mutation.type) {
+            case "rename-table": {
+              tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [mutation.newTable], {
+                loggerLevel: "system",
+              });
+              tx.execute(
+                `UPDATE ${updateLogTableName} SET "dataset" = ? WHERE "dataset" = ?`,
+                [mutation.newTable, mutation.oldTable],
+                { loggerLevel: "system" },
+              );
+              break;
+            }
+            case "drop-table": {
+              tx.execute(`DELETE FROM ${updateLogTableName} WHERE "dataset" = ?`, [mutation.table], {
+                loggerLevel: "system",
+              });
+              break;
+            }
+            case "rename-column": {
+              tx.execute(
+                `UPDATE ${updateLogTableName}
+SET "payload" = COALESCE(
+  (
+    SELECT json_group_object(CASE WHEN "key" = ? THEN ? ELSE "key" END, "value")
+    FROM json_each("payload")
+    WHERE "key" != ?
+  ),
+  '{}'
+)
+WHERE "dataset" = ?
+  AND EXISTS (SELECT 1 FROM json_each("payload") WHERE "key" = ? OR "key" = ?)`,
+                [
+                  mutation.oldColumn,
+                  mutation.newColumn,
+                  mutation.newColumn,
+                  mutation.table,
+                  mutation.oldColumn,
+                  mutation.newColumn,
+                ],
+                { loggerLevel: "system" },
+              );
+              break;
+            }
+            case "add-column":
+            case "drop-column": {
+              tx.execute(
+                `UPDATE ${updateLogTableName}
+SET "payload" = COALESCE(
+  (SELECT json_group_object("key", "value") FROM json_each("payload") WHERE "key" != ?),
+  '{}'
+)
+WHERE "dataset" = ?
+  AND EXISTS (SELECT 1 FROM json_each("payload") WHERE "key" = ?)`,
+                [mutation.column, mutation.table, mutation.column],
+                { loggerLevel: "system" },
+              );
+              break;
+            }
+            default: {
+              const _exhaustive: never = mutation;
+              throw new Error(`Unsupported update-log mutation: ${JSON.stringify(_exhaustive)}`);
+            }
           }
         }
       }
