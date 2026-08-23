@@ -8,7 +8,7 @@ await startDbWorker({
   createRemoteSource: createWsRemoteSource({
     createWebSocket: () =>
       new PartySocket({
-        host: "localhost:8787",
+        host: import.meta.env.VITE_SYNC_URL || self.location.origin,
         party: "event-log-server",
         room: "main",
       }),
