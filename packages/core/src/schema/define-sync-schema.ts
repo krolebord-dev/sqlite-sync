@@ -1,7 +1,14 @@
 import type { Migrations } from "../migrations/migrator";
 import type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { buildWriteOriginByName } from "./admit-client-events";
-import type { AnyTableBuilder, InferRow, SyncSchemaTables, TableBuilder, TableColumns, WriteOrigin } from "./table-builder";
+import type {
+  AnyTableBuilder,
+  InferRow,
+  SyncSchemaTables,
+  TableBuilder,
+  TableColumns,
+  WriteOrigin,
+} from "./table-builder";
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 

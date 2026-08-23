@@ -45,6 +45,10 @@ export {
   type SystemMigration,
   type SystemMigrationContext,
 } from "./migrations/system-schema";
+export {
+  type AdmitClientEventsResult,
+  admitClientEvents,
+} from "./schema/admit-client-events";
 // Schema definition (defineSyncSchema)
 export {
   type DefinedSyncSchema,
@@ -69,10 +73,6 @@ export {
   t,
   type WriteOrigin,
 } from "./schema/table-builder";
-export {
-  type AdmitClientEventsResult,
-  admitClientEvents,
-} from "./schema/admit-client-events";
 export {
   CrdtEventValidationError,
   type NewCrdtEventValidationResult,
