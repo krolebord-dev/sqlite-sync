@@ -4,7 +4,7 @@ import type { SyncDbMigrator } from "../migrations/migrator";
 import type { SystemDbConfig } from "../migrations/system-schema";
 import { CrdtEventValidationError, validateNewCrdtEvent } from "../schema/validate-crdt-event";
 import type { InternalSQLiteTransactionWrapper, InternalSQLiteWrapper } from "../sqlite-db-wrapper";
-import { createTypedEventTarget, ensureSingletonExecution } from "../utils";
+import { createTypedEventTarget, ensureSingletonExecution, quoteId } from "../utils";
 import { createSQLiteCrdtApplyFunction } from "./apply-crdt-event";
 import type { SyncDbSchema } from "./crdt-schema";
 import {
@@ -36,6 +36,15 @@ export type OwnCrdtEvent = {
   payload: string;
   timestamp?: undefined;
   schema_version?: undefined;
+};
+
+export type CrdtChangeIntent = {
+  seq: number;
+  dataset: string;
+  type: CrdtEventType;
+  item_id: string;
+  new_item_id: string | null;
+  payload_json: string;
 };
 
 type RemoteCrdtEvent = {
@@ -116,12 +125,15 @@ type InternalDbSchema = {
   _crdt_update_log: CrdtUpdateLogItem;
 };
 
+type FirstAcceptedSyncIdRow = { timestamp: string; first_sync_id: number };
+
 export function createCrdtStorage(storage: DbSyncerStorage) {
   let localSyncId = storage.initialLocalSyncId;
 
   const db = storage.db as InternalSQLiteWrapper<InternalDbSchema>;
 
   const crdtEventsTable = storage.dbConfig.eventsTable.fullIdentifier as "_crdt_events";
+  const quotedEventsTable = quoteId(storage.dbConfig.eventsTable.fullIdentifier);
 
   const getInitialSequentialSyncId = () => {
     const [firstPendingEvent] = db.executePrepared(
@@ -147,25 +159,90 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     "remote-event-apply-failed": { syncId: number };
   }>();
 
-  const persistEvent = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, event: PersistedCrdtEvent) => {
-    tx.executePrepared(
-      "persist-crdt-event",
-      event,
-      (db, params) =>
-        db.insertInto(crdtEventsTable).values({
-          type: params("type"),
-          dataset: params("dataset"),
-          item_id: params("item_id"),
-          payload: params("payload"),
-          schema_version: params("schema_version"),
-          sync_id: params("sync_id"),
-          status: params("status"),
-          timestamp: params("timestamp"),
-          origin: params("origin"),
-          source_node_id: params("source_node_id"),
-        }),
-      { loggerLevel: "system" },
-    );
+  // Column order is the JSON array order for persist/read.
+  const EVENT_COLUMNS = [
+    "sync_id",
+    "schema_version",
+    "status",
+    "type",
+    "timestamp",
+    "origin",
+    "source_node_id",
+    "dataset",
+    "item_id",
+    "payload",
+  ] as const;
+
+  const quotedEventColumns = EVENT_COLUMNS.map((column) => quoteId(column)).join(", ");
+
+  const persistEventsSql = `insert into ${quotedEventsTable} (${quotedEventColumns}) select ${EVENT_COLUMNS.map(
+    (_, index) => `"value"->>${index}`,
+  ).join(", ")} from json_each(?)`;
+
+  const pendingEventsSql = `select json_group_array(json_array(${quotedEventColumns})) as "batch" from (select ${quotedEventColumns} from ${quotedEventsTable} where "status" = ? order by "sync_id" asc limit ?)`;
+
+  const PERSIST_EVENTS_CHUNK_SIZE = 100;
+
+  const eventToRow = (event: PersistedCrdtEvent) => [
+    event.sync_id,
+    event.schema_version,
+    event.status,
+    event.type,
+    event.timestamp,
+    event.origin,
+    event.source_node_id,
+    event.dataset,
+    event.item_id,
+    event.payload,
+  ];
+
+  type EventRow = [
+    number,
+    number,
+    CrdtEventStatus,
+    CrdtEventType,
+    string,
+    CrdtEventOrigin,
+    string,
+    string,
+    string,
+    string,
+  ];
+
+  const rowToEvent = (row: EventRow): PersistedCrdtEvent => ({
+    sync_id: row[0],
+    schema_version: row[1],
+    status: row[2],
+    type: row[3],
+    timestamp: row[4],
+    origin: row[5],
+    source_node_id: row[6],
+    dataset: row[7],
+    item_id: row[8],
+    payload: row[9],
+  });
+
+  const persistEvents = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, events: PersistedCrdtEvent[]) => {
+    for (let offset = 0; offset < events.length; offset += PERSIST_EVENTS_CHUNK_SIZE) {
+      const chunk = events.slice(offset, offset + PERSIST_EVENTS_CHUNK_SIZE);
+      tx.executePreparedRaw<[string], never>({
+        key: "persist-crdt-events",
+        sql: persistEventsSql,
+        params: [JSON.stringify(chunk.map(eventToRow))],
+        meta: { loggerLevel: "system" },
+      });
+    }
+  };
+
+  const readPendingEvents = (limit: number): PersistedCrdtEvent[] => {
+    const [row] = db.executePreparedRaw<[string, number], { batch: string }>({
+      key: "get-enqueued-pending-events",
+      sql: pendingEventsSql,
+      params: ["pending", limit],
+      meta: { loggerLevel: "system" },
+    });
+
+    return (JSON.parse(row.batch) as EventRow[]).map(rowToEvent);
   };
 
   const enqueueEvents = (
@@ -179,8 +256,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     db.executeTransaction((tx) => {
-      for (const event of events) {
-        persistEvent(tx, {
+      const persistedEvents = events.map(
+        (event): PersistedCrdtEvent => ({
           schema_version: event.schema_version ?? storage.migrator.currentSchemaVersion,
           timestamp: event.timestamp ?? serializeHLC(storage.hlc.getNextHLC()),
           type: event.type,
@@ -191,8 +268,9 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           payload: event.payload,
           sync_id: ++localSyncId,
           status: "pending",
-        });
-      }
+        }),
+      );
+      persistEvents(tx, persistedEvents);
     });
 
     return { beforeSyncId, afterSyncId: localSyncId, processed: processEnqueuedEvents() };
@@ -210,12 +288,27 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     return enqueueEvents("remote", "", events);
   };
 
-  const notifyEventApplied = (event: PersistedCrdtEvent) => {
-    if (event.status === "applied") {
-      queueMicrotask(() => {
-        storage.onEventApplied?.(event);
-      });
+  const notifyEventsApplied = (events: PersistedCrdtEvent[]) => {
+    const onEventApplied = storage.onEventApplied;
+    if (!onEventApplied || events.length === 0) {
+      return;
     }
+
+    queueMicrotask(() => {
+      let callbackFailed = false;
+      let firstError: unknown;
+      for (const event of events) {
+        try {
+          onEventApplied(event);
+        } catch (error) {
+          callbackFailed = true;
+          firstError ??= error;
+        }
+      }
+      if (callbackFailed) {
+        throw firstError;
+      }
+    });
   };
 
   const applyOwnEvents = (events: OwnCrdtEvent[]) => {
@@ -248,8 +341,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     db.executeTransaction((tx) => {
-      for (const event of validatedEvents) {
-        const persistedEvent: PersistedCrdtEvent = {
+      const persistedEvents = validatedEvents.map(
+        (event): PersistedCrdtEvent => ({
           schema_version: storage.migrator.currentSchemaVersion,
           timestamp: serializeHLC(storage.hlc.getNextHLC()),
           type: event.type,
@@ -260,9 +353,10 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           payload: JSON.stringify(event.payload),
           sync_id: ++localSyncId,
           status: "pending",
-        };
-
-        persistEvent(tx, persistedEvent);
+        }),
+      );
+      persistEvents(tx, persistedEvents);
+      for (const persistedEvent of persistedEvents) {
         applyCrdtEvent(persistedEvent);
       }
     });
@@ -287,8 +381,38 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       status: "pending",
     };
 
-    persistEvent(tx, persistedEvent);
+    persistEvents(tx, [persistedEvent]);
     applyCrdtEvent(persistedEvent);
+  };
+
+  const applyOwnIntentsFromTransaction = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    intents: CrdtChangeIntent[],
+  ) => {
+    let appliedEvents = 0;
+
+    for (const intent of intents) {
+      if (intent.type === "item-updated") {
+        if (intent.item_id !== intent.new_item_id) {
+          throw new Error(
+            `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
+          );
+        }
+        if (intent.payload_json === "{}") {
+          continue;
+        }
+      }
+
+      applyOwnEventFromTransaction(tx, {
+        type: intent.type,
+        dataset: intent.dataset,
+        item_id: intent.item_id,
+        payload: intent.payload_json,
+      });
+      appliedEvents++;
+    }
+
+    return { appliedEvents };
   };
 
   const dispatchEventsApplied = (previousSequentialSyncId: number) => {
@@ -299,6 +423,23 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       syncId: sequentialSyncId,
       eventHlcSum: sequentialSyncId === localSyncId ? (eventHlcAccumulator?.current ?? null) : null,
     });
+  };
+
+  const publishProcessedBatch = ({
+    previousSequentialSyncId,
+    nextSequentialSyncId,
+    appliedEvents,
+  }: {
+    previousSequentialSyncId: number;
+    nextSequentialSyncId: number;
+    appliedEvents: PersistedCrdtEvent[];
+  }) => {
+    sequentialSyncId = nextSequentialSyncId;
+
+    // Schedule per-event observers before dispatching cursor progress, matching
+    // the previous ordering while keeping both signals behind one post-commit API.
+    notifyEventsApplied(appliedEvents);
+    dispatchEventsApplied(previousSequentialSyncId);
   };
 
   const hasPendingEvents = (): boolean => {
@@ -446,34 +587,87 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     persistEventHlcAccumulator();
   };
 
-  const hasAcceptedEventWithTimestamp = (
+  const getFirstAcceptedSyncIdsByTimestamp = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
-    event: PersistedCrdtEvent,
+    events: PersistedCrdtEvent[],
   ) => {
-    const [existingEvent] = tx.executePrepared(
-      "get-accepted-crdt-event-by-timestamp",
-      {
-        timestamp: event.timestamp,
-        sync_id: event.sync_id,
-      },
-      (db, params) =>
-        db
-          .selectFrom(crdtEventsTable)
-          .select("sync_id")
-          .where("timestamp", "=", params("timestamp"))
-          .where("sync_id", "<", params("sync_id"))
-          .where("status", "=", sql.lit("applied"))
-          .limit(sql.lit(1)),
-      { loggerLevel: "system" },
+    const timestamps = Array.from(
+      new Set(events.filter((event) => event.origin !== "own-applied").map((event) => event.timestamp)),
     );
+    if (timestamps.length === 0) {
+      return new Map<string, number>();
+    }
 
-    return existingEvent !== undefined;
+    const rows =
+      timestamps.length === 1
+        ? tx.executePreparedRaw<string[], FirstAcceptedSyncIdRow>({
+            key: "get-first-accepted-sync-id-by-timestamp",
+            sql: `select "timestamp", min("sync_id") as "first_sync_id" from ${quotedEventsTable} where "status" = 'applied' and "timestamp" = ? group by "timestamp"`,
+            params: timestamps,
+            meta: { loggerLevel: "system" },
+          })
+        : tx.executePreparedRaw<string[], FirstAcceptedSyncIdRow>({
+            key: "get-first-accepted-sync-ids-by-timestamp",
+            sql: `select "timestamp", min("sync_id") as "first_sync_id" from ${quotedEventsTable} where "status" = 'applied' and "timestamp" in (select "value" from json_each(?)) group by "timestamp"`,
+            params: [JSON.stringify(timestamps)],
+            meta: { loggerLevel: "system" },
+          });
+
+    return new Map(rows.map((row) => [row.timestamp, row.first_sync_id]));
   };
 
-  const processPersistedEvent = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, event: PersistedCrdtEvent) => {
+  const updateEventStatuses = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    events: PersistedCrdtEvent[],
+  ) => {
+    const syncIdsByStatus = new Map<Exclude<CrdtEventStatus, "pending">, number[]>();
+    for (const event of events) {
+      if (event.status === "pending") {
+        throw new Error(`Event ${event.sync_id} is still pending after processing`);
+      }
+
+      const syncIds = syncIdsByStatus.get(event.status) ?? [];
+      syncIds.push(event.sync_id);
+      syncIdsByStatus.set(event.status, syncIds);
+    }
+
+    for (const [status, syncIds] of syncIdsByStatus) {
+      if (syncIds.length === 1) {
+        tx.executePreparedRaw<[string, number], never>({
+          key: "update-crdt-event-status",
+          sql: `update ${quotedEventsTable} set "status" = ? where "sync_id" = ?`,
+          params: [status, syncIds[0]],
+          meta: { loggerLevel: "system" },
+        });
+        continue;
+      }
+
+      tx.executePreparedRaw<[string, string], never>({
+        key: "update-crdt-event-status-batch",
+        sql: `update ${quotedEventsTable} set "status" = ? where "sync_id" in (select "value" from json_each(?))`,
+        params: [status, JSON.stringify(syncIds)],
+        meta: { loggerLevel: "system" },
+      });
+    }
+  };
+
+  const processPersistedEvent = (
+    tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
+    event: PersistedCrdtEvent,
+    firstAcceptedSyncIdByTimestamp: Map<string, number>,
+    statusOnlyEvents: PersistedCrdtEvent[],
+  ) => {
     if (event.status !== "pending") {
       throw new Error(`Event ${event.sync_id} is not pending`);
     }
+
+    const persistedEventData = {
+      schema_version: event.schema_version,
+      type: event.type,
+      dataset: event.dataset,
+      item_id: event.item_id,
+      payload: event.payload,
+    };
 
     try {
       if (event.origin === "own-applied") {
@@ -481,7 +675,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         return event;
       }
 
-      if (hasAcceptedEventWithTimestamp(tx, event)) {
+      const firstAcceptedSyncId = firstAcceptedSyncIdByTimestamp.get(event.timestamp);
+      if (firstAcceptedSyncId !== undefined && firstAcceptedSyncId < event.sync_id) {
         event.status = "deduped";
         return event;
       }
@@ -521,23 +716,34 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       console.error("Error applying enqueued CRDT event", error);
       event.status = "failed";
     } finally {
-      tx.executePrepared(
-        "update-crdt-event",
-        event,
-        (db, params) =>
-          db
-            .updateTable(crdtEventsTable)
-            .set({
-              status: params("status"),
-              schema_version: params("schema_version"),
-              type: params("type"),
-              dataset: params("dataset"),
-              item_id: params("item_id"),
-              payload: params("payload"),
-            })
-            .where("sync_id", "=", params("sync_id")),
-        { loggerLevel: "system" },
-      );
+      const eventDataChanged =
+        event.schema_version !== persistedEventData.schema_version ||
+        event.type !== persistedEventData.type ||
+        event.dataset !== persistedEventData.dataset ||
+        event.item_id !== persistedEventData.item_id ||
+        event.payload !== persistedEventData.payload;
+
+      if (eventDataChanged) {
+        tx.executePrepared(
+          "update-crdt-event-full",
+          event,
+          (db, params) =>
+            db
+              .updateTable(crdtEventsTable)
+              .set({
+                status: params("status"),
+                schema_version: params("schema_version"),
+                type: params("type"),
+                dataset: params("dataset"),
+                item_id: params("item_id"),
+                payload: params("payload"),
+              })
+              .where("sync_id", "=", params("sync_id")),
+          { loggerLevel: "system" },
+        );
+      } else {
+        statusOnlyEvents.push(event);
+      }
     }
   };
 
@@ -548,21 +754,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       const batchSize = 100;
 
-      const events = db.executePrepared(
-        "get-enqueued-pending-events",
-        {
-          status: "pending" as const,
-          limit: batchSize + 1,
-        },
-        (db, params) =>
-          db
-            .selectFrom(crdtEventsTable)
-            .selectAll()
-            .where("status", "=", params("status"))
-            .limit(params("limit"))
-            .orderBy("sync_id", "asc"),
-        { loggerLevel: "system" },
-      );
+      const events = readPendingEvents(batchSize + 1);
       hasMore = events.length > batchSize;
       if (hasMore) {
         events.pop();
@@ -570,29 +762,45 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       const previousSequentialSyncId = sequentialSyncId;
       if (events.length === 0) {
-        sequentialSyncId = localSyncId;
-        dispatchEventsApplied(previousSequentialSyncId);
+        publishProcessedBatch({
+          previousSequentialSyncId,
+          nextSequentialSyncId: localSyncId,
+          appliedEvents: [],
+        });
         break;
       }
 
       const failedRemoteSyncIds: number[] = [];
+      const appliedEventsToNotify: PersistedCrdtEvent[] = [];
 
       db.executeTransaction((tx) => {
+        const firstAcceptedSyncIdByTimestamp = getFirstAcceptedSyncIdsByTimestamp(tx, events);
+        const statusOnlyEvents: PersistedCrdtEvent[] = [];
+
         for (const event of events) {
-          processPersistedEvent(tx, event);
+          processPersistedEvent(tx, event, firstAcceptedSyncIdByTimestamp, statusOnlyEvents);
           if (event.status === "applied") {
+            const firstAcceptedSyncId = firstAcceptedSyncIdByTimestamp.get(event.timestamp);
+            if (firstAcceptedSyncId === undefined || event.sync_id < firstAcceptedSyncId) {
+              firstAcceptedSyncIdByTimestamp.set(event.timestamp, event.sync_id);
+            }
             eventHlcAccumulator?.add(event.timestamp);
+            if (storage.onEventApplied) {
+              appliedEventsToNotify.push(event);
+            }
           }
-          notifyEventApplied(event);
           if (event.status === "failed" && event.origin === "remote") {
             failedRemoteSyncIds.push(event.sync_id);
           }
         }
+        updateEventStatuses(tx, statusOnlyEvents);
         persistEventHlcAccumulator();
       });
-
-      sequentialSyncId = hasMore ? (events[events.length - 1]?.sync_id ?? sequentialSyncId) : localSyncId;
-      dispatchEventsApplied(previousSequentialSyncId);
+      publishProcessedBatch({
+        previousSequentialSyncId,
+        nextSequentialSyncId: hasMore ? (events[events.length - 1]?.sync_id ?? sequentialSyncId) : localSyncId,
+        appliedEvents: appliedEventsToNotify,
+      });
 
       // A remote event was accepted by the server but could not be applied
       // locally, which means our local state has diverged from the server.
@@ -620,6 +828,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
     internal: {
       applyOwnEventFromTransaction,
+      applyOwnIntentsFromTransaction,
       processEnqueuedEvents,
     },
   };

@@ -56,6 +56,8 @@ export class SQLiteReactiveDb<Database> {
   private tablesUsedStatement: PreparedStatement<[string], { name: string; isWrite: boolean }> | null = null;
 
   private eventTarget = createTypedEventTarget<EventsMap>();
+  private mutationVersion = 0;
+  private tableMutationVersions = new Map<string, number>();
 
   private constructor(sqlite3: Sqlite3Static, logger: Logger) {
     this.sqlite3 = sqlite3;
@@ -71,7 +73,7 @@ export class SQLiteReactiveDb<Database> {
 
   static async create<Database>(opts: SQLiteReactiveDbOptions) {
     const logger = opts.logger;
-    const perf = startPerformanceLogger(logger);
+    const perf = startPerformanceLogger(logger, "system");
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
     }
@@ -364,6 +366,10 @@ export class SQLiteReactiveDb<Database> {
     this.eventTarget.removeEventListener(type, listener);
   }
 
+  getTableMutationVersion(table: string) {
+    return this.tableMutationVersions.get(table) ?? 0;
+  }
+
   private notifyTableSubscribers(tables: (TableName<Database> | (string & {}))[] | Set<string> | null = null) {
     if (!tables) {
       this.eventTarget.dispatchEvent("any-table-changed", undefined);
@@ -382,6 +388,7 @@ export class SQLiteReactiveDb<Database> {
       this.db.ensureDb,
       (_ctx, _opId, _db, table) => {
         updateQueue.add(table);
+        this.tableMutationVersions.set(table, ++this.mutationVersion);
       },
       0,
     );

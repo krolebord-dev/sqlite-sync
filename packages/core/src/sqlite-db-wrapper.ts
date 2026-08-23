@@ -55,6 +55,14 @@ type QueryMetaOpts = {
   loggerLevel?: "info" | "system";
 };
 
+/** Runs after user SQL succeeds, before its transaction or savepoint is committed. */
+type AfterMutatingStatement<TDatabase> = (db: InternalSQLiteTransactionWrapper<TDatabase>) => void;
+
+type ExecuteOptions = QueryMetaOpts & {
+  /** For internal mutations whose effects must not be processed by afterMutatingStatement. */
+  skipAfterMutatingStatement?: boolean;
+};
+
 export class SQLiteDbWrapper<TDatabase = unknown> {
   private db: SQLiteDatabase | null = null;
   private sqlite3: Sqlite3Static;
@@ -68,6 +76,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
   private preparedStatementsMap = new Map<string, TypedStatement<Record<string, unknown>, unknown>>();
   private preparedRawStatementsMap = new Map<string, PreparedStatement<SqlValue[], unknown>>();
+  private afterMutatingStatement: AfterMutatingStatement<TDatabase> | null = null;
 
   constructor(opts: SqliteWrapperOptions) {
     this.db = opts.db();
@@ -90,20 +99,80 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return this.loadedDbSchema;
   }
 
-  execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>, meta?: QueryMetaOpts): ExecuteResult<T> {
+  private executeSql<T>(
+    sql: string,
+    bind: readonly unknown[] | undefined,
+    loggerLevel: QueryMetaOpts["loggerLevel"],
+    skipAfterMutatingStatement: boolean,
+  ): ExecuteResult<T> {
+    const perf = startPerformanceLogger(this.logger, loggerLevel);
+    const statement = this.ensureDb.prepare(sql);
+    let transaction: { commit: () => void; rollback: () => void } | undefined;
+
+    try {
+      const statementPointer = statement.pointer;
+      if (!statementPointer) {
+        throw new Error("Prepared statement is already finalized");
+      }
+      const afterMutatingStatement =
+        !skipAfterMutatingStatement &&
+        this.afterMutatingStatement &&
+        this.sqlite3.capi.sqlite3_stmt_readonly(statementPointer) === 0
+          ? this.afterMutatingStatement
+          : null;
+
+      let totalChangesBefore = 0;
+      if (afterMutatingStatement) {
+        transaction = this.beginStatementTransaction();
+        totalChangesBefore = this.sqlite3.capi.sqlite3_total_changes(this.ensureDb);
+      }
+
+      if (bind && bind.length > 0) {
+        statement.bind(bind as BindableValue[]);
+      }
+
+      const rows: T[] = [];
+      let columnNames: string[] | undefined;
+      while (statement.step()) {
+        columnNames ??= statement.getColumnNames([]);
+        const values = statement.get([]);
+        const row = Object.create(null) as Record<string, unknown>;
+        for (let index = 0; index < columnNames.length; index++) {
+          row[columnNames[index]] = values[index];
+        }
+        rows.push(row as T);
+      }
+      statement.finalize();
+      perf.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
+
+      if (transaction) {
+        // Nothing was written, so the statement cannot have produced any work for the callback.
+        if (this.sqlite3.capi.sqlite3_total_changes(this.ensureDb) !== totalChangesBefore) {
+          afterMutatingStatement?.(this);
+        }
+        transaction.commit();
+      }
+
+      return { rows };
+    } catch (error) {
+      statement.finalize();
+      transaction?.rollback();
+      throw error;
+    }
+  }
+
+  execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>, options?: ExecuteOptions): ExecuteResult<T> {
     const sql = typeof opts === "string" ? opts : opts.sql;
     const bind = typeof opts === "string" ? undefined : opts.parameters;
 
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
-    const rows = this.ensureDb.exec({
-      sql,
-      bind: bind as BindableValue[],
-      returnValue: "resultRows",
-      rowMode: "object",
-    });
-    perf?.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, meta?.loggerLevel);
+    return this.executeSql<T>(sql, bind, options?.loggerLevel, options?.skipAfterMutatingStatement ?? false);
+  }
 
-    return { rows: rows as T[] };
+  setAfterMutatingStatement(callback: AfterMutatingStatement<TDatabase>) {
+    if (this.afterMutatingStatement) {
+      throw new Error("An afterMutatingStatement callback is already registered");
+    }
+    this.afterMutatingStatement = callback;
   }
 
   executeTransaction<T>(callback: (db: SQLiteTransactionWrapper<TDatabase>) => T): T {
@@ -153,10 +222,44 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     };
   }
 
+  private beginStatementTransaction() {
+    if (!this.isInTransaction()) {
+      return this.beginTransaction();
+    }
+
+    this.executePreparedRaw({
+      key: "$begin-statement-savepoint",
+      sql: "savepoint sqlite_sync_statement",
+      meta: { loggerLevel: "system" },
+    });
+
+    return {
+      commit: () => {
+        this.executePreparedRaw({
+          key: "$commit-statement-savepoint",
+          sql: "release savepoint sqlite_sync_statement",
+          meta: { loggerLevel: "system" },
+        });
+      },
+      rollback: () => {
+        this.executePreparedRaw({
+          key: "$rollback-statement-savepoint",
+          sql: "rollback to savepoint sqlite_sync_statement",
+          meta: { loggerLevel: "system" },
+        });
+        this.executePreparedRaw({
+          key: "$release-rolled-back-statement-savepoint",
+          sql: "release savepoint sqlite_sync_statement",
+          meta: { loggerLevel: "system" },
+        });
+      },
+    };
+  }
+
   prepare<TParams extends unknown[], TResult>(sql: string, opts?: QueryMetaOpts) {
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
     const stmt = this.ensureDb.prepare(sql);
-    perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
+    perf.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
 
     let isFinalized = false;
 
@@ -165,21 +268,30 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         throw new Error("Statement is finalized");
       }
 
-      const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+      const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
       try {
         if (params.length > 0) {
           stmt.bind(params as SqlValue[]);
         }
 
         const results = [] as TResult[];
+        // Reading rows as arrays and naming them here keeps sqlite from looking up
+        // every column name again for every row.
+        let columnNames: string[] | undefined;
         while (stmt.step()) {
-          results.push(stmt.get({}) as TResult);
+          columnNames ??= stmt.getColumnNames([]);
+          const values = stmt.get([]);
+          const row = {} as Record<string, unknown>;
+          for (let index = 0; index < columnNames.length; index++) {
+            row[columnNames[index]] = values[index];
+          }
+          results.push(row as TResult);
         }
 
         return results;
       } finally {
         stmt.reset(true);
-        perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
+        perf.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       }
     };
 
@@ -220,10 +332,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
   executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
     factory: KyselyQueryFactory<TDatabase, TQuery, TResult>,
-    meta?: QueryMetaOpts,
+    options?: ExecuteOptions,
   ) {
     const query = factory(dummyKysely).compile();
-    return this.execute(query, meta);
+    return this.execute(query, options);
   }
 
   executePrepared<
@@ -299,7 +411,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const perf = startPerformanceLogger(this.logger, "system");
     const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
     this.dataPointers.push(dataPointer);
 
@@ -316,7 +428,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
     this.invalidateDbSchema();
 
-    perf?.logEnd("useSnapshot", "success", "system");
+    perf.logEnd("useSnapshot", "success", "system");
   }
 
   createSnapshot() {

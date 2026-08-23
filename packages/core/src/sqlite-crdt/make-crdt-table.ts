@@ -1,7 +1,9 @@
 import type { SQLiteReactiveDb } from "../memory-db/sqlite-reactive-db";
-import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import type { InternalSQLiteTransactionWrapper, SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
-import type { InternalCrdtStorage } from "./crdt-storage";
+import type { CrdtChangeIntent, InternalCrdtStorage } from "./crdt-storage";
+
+export const CRDT_CHANGE_INTENTS_TABLE = "crdt_change_intents";
 
 export function makeCrdtTable({
   db,
@@ -18,7 +20,7 @@ export function makeCrdtTable({
     throw new Error(`Table ${baseTableName} not found`);
   }
 
-  const columns = new Map(tableSchema.columns.map((c) => [c.name, c]));
+  const columns = new Map(tableSchema.columns.map((column) => [column.name, column]));
 
   const idColumn = columns.get("id");
   if (!idColumn) {
@@ -45,62 +47,85 @@ export function makeCrdtTable({
     );
   }
 
-  db.execute(
-    `
-create view ${quoteId(crdtTableName)} as
+  for (const sql of createCrdtViewStatements({
+    baseTableName,
+    crdtTableName,
+    columnNames: tableSchema.columns.map((column) => column.name),
+  })) {
+    db.execute(sql, { loggerLevel: "system" });
+  }
+}
+
+export function createCrdtViewStatements({
+  baseTableName,
+  crdtTableName,
+  columnNames,
+}: {
+  baseTableName: string;
+  crdtTableName: string;
+  columnNames: string[];
+}) {
+  const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  const fullPayload = `'{'||${columnNames
+    .map((columnName) => `${sqlString(`${JSON.stringify(columnName)}:`)}||json_quote(new.${quoteId(columnName)})`)
+    .join("||','||")}||'}'`;
+  const updatePayload = `'{'||rtrim(${columnNames
+    .filter((columnName) => columnName !== "id")
+    .map(
+      (columnName) =>
+        `case when old.${quoteId(columnName)} collate binary is not new.${quoteId(columnName)} then ${sqlString(
+          `${JSON.stringify(columnName)}:`,
+        )}||json_quote(new.${quoteId(columnName)})||',' else '' end`,
+    )
+    .join("||")}, ',')||'}'`;
+
+  return [
+    `create table if not exists ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
+  "seq" integer primary key,
+  "dataset" text not null,
+  "type" text not null,
+  "item_id" text not null,
+  "new_item_id" text,
+  "payload_json" text not null
+)`,
+    `create view ${quoteId(crdtTableName)} as
 select * from ${quoteId(baseTableName)}
-where tombstone = 0;`,
-    { loggerLevel: "system" },
-  );
-
-  const allColumnNames = tableSchema.columns.map((column) => column.name);
-
-  const jsonPayload = (from: "new" | "old") =>
-    `'{'||${allColumnNames.map((col) => `'"${col}":'||json_quote(${from}.${quoteId(col)})`).join("||','||")}||'}'`;
-
-  db.execute(
-    `
-create trigger ${quoteId(`${crdtTableName}_created`)}
+where tombstone = 0`,
+    `create trigger ${quoteId(`${crdtTableName}_created`)}
 instead of insert on ${quoteId(crdtTableName)}
 for each row
 begin
-select handle_item_created('${baseTableName}', ${jsonPayload("new")});
-end;
-`,
-    { loggerLevel: "system" },
+  insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
+    "dataset", "type", "item_id", "new_item_id", "payload_json"
+  ) values (
+    ${sqlString(baseTableName)}, 'item-created', new."id", null, ${fullPayload}
   );
-
-  db.execute(
-    `
-create trigger ${quoteId(`${crdtTableName}_updated`)}
+end`,
+    `create trigger ${quoteId(`${crdtTableName}_updated`)}
 instead of update on ${quoteId(crdtTableName)}
 for each row
 begin
-select handle_item_updated(
-  '${baseTableName}',
-  ${jsonPayload("old")},
-  ${jsonPayload("new")}
-);
-end;
-`,
-    { loggerLevel: "system" },
+  insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
+    "dataset", "type", "item_id", "new_item_id", "payload_json"
+  ) values (
+    ${sqlString(baseTableName)}, 'item-updated', old."id", new."id", ${updatePayload}
   );
-
-  db.execute(
-    `
-create trigger ${quoteId(`${crdtTableName}_deleted`)}
+end`,
+    `create trigger ${quoteId(`${crdtTableName}_deleted`)}
 instead of delete on ${quoteId(crdtTableName)}
 for each row
-when old.tombstone = 0
+when old."tombstone" = 0
 begin
-select handle_item_deleted('${baseTableName}', old.id);
-end;
-`,
-    { loggerLevel: "system" },
+  insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
+    "dataset", "type", "item_id", "new_item_id", "payload_json"
+  ) values (
+    ${sqlString(baseTableName)}, 'item-deleted', old."id", null, '{}'
   );
+end`,
+  ];
 }
 
-export function registerCrdtFunctions({
+export function registerCrdtIntentDrainer({
   reactiveDb,
   storage,
 }: {
@@ -108,98 +133,20 @@ export function registerCrdtFunctions({
   storage: InternalCrdtStorage;
 }) {
   let eventApplied = false;
+  let processedIntentMutationVersion = reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE);
 
-  reactiveDb.db.createScalarFunction({
-    name: "handle_item_created",
-    deterministic: false,
-    directOnly: false,
-    innocuous: false,
-    callback: (dataset: string, payloadRaw: string) => {
-      const payload = JSON.parse(payloadRaw) as { id: string };
+  reactiveDb.db.setAfterMutatingStatement((tx) => {
+    if (reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE) === processedIntentMutationVersion) {
+      return;
+    }
 
-      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
-        type: "item-created",
-        dataset,
-        item_id: payload.id,
-        payload: payloadRaw,
-      });
-
-      eventApplied = true;
-      return undefined;
-    },
-  });
-
-  reactiveDb.db.createScalarFunction({
-    name: "handle_item_updated",
-    deterministic: false,
-    directOnly: false,
-    innocuous: false,
-    callback: (dataset: string, oldPayloadRaw: string, newPayloadRaw: string) => {
-      if (oldPayloadRaw === newPayloadRaw) {
-        return undefined;
+    try {
+      if (drainCrdtChangeIntents({ tx, storage })) {
+        eventApplied = true;
       }
-
-      const tableSchema = reactiveDb.db.dbSchema[dataset];
-
-      if (!tableSchema?.columns) {
-        throw new Error(`Schema not found for dataset: ${dataset}`);
-      }
-
-      const oldPayload = JSON.parse(oldPayloadRaw);
-      const newPayload = JSON.parse(newPayloadRaw);
-
-      let hasDiff = false;
-      const updatePayload = {} as Record<string, unknown>;
-
-      for (const column of tableSchema.columns) {
-        const oldValue = oldPayload[column.name];
-        const newValue = newPayload[column.name];
-        if (oldValue === newValue) {
-          continue;
-        }
-
-        if (column.name === "id") {
-          throw new Error(
-            `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
-          );
-        }
-
-        hasDiff = true;
-        updatePayload[column.name] = newValue;
-      }
-
-      if (!hasDiff) {
-        return;
-      }
-
-      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
-        type: "item-updated",
-        dataset,
-        item_id: oldPayload.id,
-        payload: JSON.stringify(updatePayload),
-      });
-
-      eventApplied = true;
-      return undefined;
-    },
-  });
-
-  reactiveDb.db.createScalarFunction({
-    name: "handle_item_deleted",
-    deterministic: false,
-    directOnly: false,
-    innocuous: false,
-    callback: (dataset: string, itemId: string) => {
-      storage.internal.applyOwnEventFromTransaction(reactiveDb.db, {
-        type: "item-deleted",
-        dataset,
-        item_id: itemId,
-        payload: "{}",
-      });
-
-      eventApplied = true;
-      return undefined;
-    },
+    } finally {
+      processedIntentMutationVersion = reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE);
+    }
   });
 
   reactiveDb.addEventListener("transaction-committed", () => {
@@ -212,4 +159,22 @@ export function registerCrdtFunctions({
   reactiveDb.addEventListener("transaction-rolled-back", () => {
     eventApplied = false;
   });
+}
+
+export function drainCrdtChangeIntents({
+  tx,
+  storage,
+}: {
+  tx: InternalSQLiteTransactionWrapper<any>;
+  storage: InternalCrdtStorage;
+}) {
+  const intents = tx.executePreparedRaw<[], CrdtChangeIntent>({
+    key: "drain-crdt-change-intents",
+    sql: `delete from ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} returning *`,
+    meta: { loggerLevel: "system" },
+  });
+  intents.sort((a, b) => a.seq - b.seq);
+
+  const { appliedEvents } = storage.internal.applyOwnIntentsFromTransaction(tx, intents);
+  return appliedEvents > 0;
 }

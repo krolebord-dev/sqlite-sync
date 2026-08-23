@@ -16,13 +16,13 @@ AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) 
 
 ```ts
 import { createAiDbAccess } from "@sqlite-sync/ai";
-import { createKyselyExecutor, durableObjectAdapter } from "@sqlite-sync/cloudflare";
+import { durableObjectAdapter } from "@sqlite-sync/cloudflare";
 
 // In the DO that owns the synced database:
 async onStart() {
   const { syncDb } = await durableObjectAdapter.createCrdtStorage({ syncDbSchema, storage: this.ctx.storage, /* ... */ });
   this.aiDbAccess = createAiDbAccess({
-    executor: createKyselyExecutor(this.ctx.storage),
+    executor: syncDb.unsafe,
     storage: syncDb, // optional; enables mutate() on the access object
     syncDbSchema,
     context: {

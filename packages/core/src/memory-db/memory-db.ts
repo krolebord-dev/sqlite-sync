@@ -4,7 +4,7 @@ import type { SyncDbMigrator } from "../migrations/migrator";
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../migrations/system-schema";
 import type { CrdtTableConfig, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
-import { makeCrdtTable, registerCrdtFunctions } from "../sqlite-crdt/make-crdt-table";
+import { makeCrdtTable, registerCrdtIntentDrainer } from "../sqlite-crdt/make-crdt-table";
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
@@ -59,7 +59,7 @@ export async function createMemoryDb<Database>({
     schema: syncDbSchema,
   });
 
-  registerCrdtFunctions({
+  registerCrdtIntentDrainer({
     reactiveDb,
     storage: crdtStorage,
   });
