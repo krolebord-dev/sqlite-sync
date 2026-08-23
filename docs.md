@@ -171,6 +171,10 @@ Each column builder chains `.nullable()`, `.default(value)`,
 `.$type<Narrowed>()` (type-only narrowing, e.g. `t.text().$type<"a" | (string & {})>()`), and
 `.describe(text)` for generated schema docs. Table builders also chain `.describe(text)`.
 
+Table builders also chain `.ai(access)` (`"read-write"` by default, or `"read-only"` / `"hidden"`),
+which only affects `@sqlite-sync/ai`: see
+[AI access control](#limiting-what-an-agent-may-touch).
+
 The table builders also expose runtime metadata: `syncDbSchema.tables.todo.columns` (per-column
 kind, nullability, defaults) and `validatePayload(payload, { event })` for checking CRDT event
 payloads against the declared columns.
@@ -1061,6 +1065,44 @@ const tools = createDbTools({ access: () => aiDbAccess, mutations: true });
 
 This adds `mutateDb`, which accepts `item-created`, `item-updated`, and `item-deleted` CRDT events. It applies them through sqlite-sync's own-event path, not arbitrary write SQL, so writes are validated, persisted to the event log, applied locally, and synced normally. For `item-created` events, omit `item_id` and `payload.id`; the tool generates ids, injects them into the CRDT events, and returns them as `createdIds`.
 
+### Limiting what an agent may touch
+
+By default the agent can read every table in the database file and mutate every table in the sync
+schema. Narrow that on the table builder with `.ai(access)`:
+
+```ts
+const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({ title: t.text() }),
+    audit: t.table({ note: t.text() }).ai("read-only"), // documented, queryable, AI writes rejected
+    billing: t.table({ card_last4: t.text() }).ai("hidden"), // undocumented, AI reads rejected
+  },
+  migrations,
+});
+```
+
+What is enforced:
+
+| Level | Effect |
+| --- | --- |
+| `"read-only"` | documented and queryable; `mutateDb` rejects events for the table |
+| `"hidden"` | left out of the schema doc; `queryDb` rejects any statement that reads the table |
+
+Hiding is enforced against the root pages a compiled statement opens, so views, aliases, CTEs,
+subqueries and quoting variants all resolve to the same check.
+
+Access is table-level, with no per-column setting. Columns could not be hidden from reads anyway
+(SQLite bytecode identifies tables, not columns), and blocking writes to a column that is required
+on insert would leave the agent unable to create rows at all. Keep data the agent must not touch in
+its own table.
+
+Hiding a table also changes two things globally:
+
+- Reads become an allow-list of the remaining base tables, so every other table in the same
+  database file (internal sync tables, and any non-synced table of your own) becomes unreadable.
+- `change_history` is dropped from the doc and denied, because it reads the raw event log where
+  every dataset's payloads live and so cannot be filtered per table.
+
 ---
 
 ## Vite Configuration
@@ -1306,6 +1348,7 @@ function createAiDbAccess(options: {
   storage?: Pick<CrdtStorage, "applyOwnEvents">; // enables mutate(input)
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext; // overview/app-level notes
+  limits?: { maxRows?: number; maxCellChars?: number };
 }): AiDbAccess // { getSchemaDoc(): string; query(input): AiQueryResult; mutate?(input): AiMutationResult }
 ```
 
@@ -1323,6 +1366,15 @@ function createDbTools(options: {
 #### `createSchemaDoc(options)`
 
 Lower-level helper that generates the markdown schema doc directly from a `syncDbSchema` (and optional `context`) — used internally by `createAiDbAccess`.
+
+#### `resolveAiPolicy(options)`
+
+Flattens the `.ai()` access declared on the schema's table builders into the effective access per table. Exposed for inspection and testing; `createAiDbAccess` calls it for you.
+
+```ts
+function resolveAiPolicy(options: { syncDbSchema: SyncDbSchema }): ResolvedAiPolicy
+// { tables, hasHiddenTables, readableBaseTableNames, tableAccess(dataset) }
+```
 
 ### WebSocket Protocol
 

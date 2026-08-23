@@ -2,6 +2,13 @@ export type ColumnKind = "text" | "integer" | "real" | "boolean" | "enum";
 
 export type SqliteStorageType = "text" | "integer" | "real";
 
+/**
+ * How much of a table an AI agent may use. Consumed by `@sqlite-sync/ai`, which rejects
+ * mutations to `read-only` tables, and leaves `hidden` tables out of the generated schema doc
+ * while rejecting queries that read them.
+ */
+export type AiAccess = "read-write" | "read-only" | "hidden";
+
 export type ColumnMeta = {
   kind: ColumnKind;
   /** Storage type used in generated DDL. Booleans store as integer 0/1. */
@@ -92,6 +99,13 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   readonly baseName: BaseName;
   readonly description: string | undefined;
 
+  #aiAccess: AiAccess = "read-write";
+
+  /** AI access declared via `.ai()`; "read-write" unless narrowed. */
+  get aiAccess(): AiAccess {
+    return this.#aiAccess;
+  }
+
   constructor(
     readonly userColumns: Cols,
     options?: TableOptions<BaseName>,
@@ -111,8 +125,26 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
     this.description = options?.description;
   }
 
+  /** Rebuilds the table with `overrides` applied, carrying over state kept outside the options. */
+  private withOptions(overrides: Partial<TableOptions<BaseName>>): TableBuilder<Cols, BaseName> {
+    const next = new TableBuilder<Cols, BaseName>(this.userColumns, {
+      baseName: this.baseName,
+      description: this.description,
+      ...overrides,
+    });
+    next.#aiAccess = this.#aiAccess;
+    return next;
+  }
+
   describe(description: string): TableBuilder<Cols, BaseName> {
-    return new TableBuilder(this.userColumns, { baseName: this.baseName, description });
+    return this.withOptions({ description });
+  }
+
+  /** Restrict what an AI agent may do with this table; see {@link AiAccess}. */
+  ai(access: AiAccess): TableBuilder<Cols, BaseName> {
+    const next = this.withOptions({});
+    next.#aiAccess = access;
+    return next;
   }
 
   /** Type-only: the row shape returned by queries. Do not access at runtime. */

@@ -53,6 +53,7 @@ export {
 } from "./schema/define-sync-schema";
 // Schema table builder (t.*)
 export {
+  type AiAccess,
   type AnyColumnBuilder,
   type AnyTableBuilder,
   ColumnBuilder,

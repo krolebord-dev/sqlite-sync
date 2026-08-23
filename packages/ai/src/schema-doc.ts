@@ -1,4 +1,5 @@
 import type { ColumnMeta, SyncDbSchema } from "@sqlite-sync/core";
+import { resolveAiPolicy } from "./policy";
 
 export type SchemaDocContext = {
   overview?: string;
@@ -11,6 +12,13 @@ const SCHEMA_DOC_PREAMBLE = [
   "All writes go through a sync event log, which is why the tables listed below are exposed as",
   "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
   "without any tombstone filtering. Every table has a unique `id` text primary key.",
+].join("\n");
+
+// Added when the schema hides a table, because then reads are restricted to an allow-list and a
+// query touching anything else fails. Worth spending tokens on to save the agent a wasted turn.
+const RESTRICTED_READS_NOTE = [
+  "Only the tables documented below are readable. Queries that touch any other table are",
+  "rejected, including the internal sync event log, so there is no change history available.",
 ].join("\n");
 
 function renderColumn(name: string, meta: ColumnMeta): string {
@@ -32,11 +40,15 @@ function renderColumn(name: string, meta: ColumnMeta): string {
  * queries; descriptions come from `.describe()` on the table and column builders.
  * The internal `tombstone` column is omitted.
  *
+ * Tables declared `.ai("hidden")` are left out entirely, and read-only ones are labelled so the
+ * agent does not attempt a mutation that would be rejected.
+ *
  * The doc always includes a built-in preamble explaining sqlite-sync mechanics (read-only
  * views, soft-deletes already filtered) after the consumer's `overview` — consumers only
  * need to describe their own domain.
  */
 export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: SchemaDocContext }): string {
+  const policy = resolveAiPolicy({ syncDbSchema: opts.syncDbSchema });
   const sections: string[] = [];
 
   const overview = opts.context?.overview?.trim();
@@ -44,11 +56,20 @@ export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: Sc
     sections.push(overview);
   }
   sections.push(SCHEMA_DOC_PREAMBLE);
+  if (policy.hasHiddenTables) {
+    sections.push(RESTRICTED_READS_NOTE);
+  }
 
   for (const [crdtTableName, table] of Object.entries(opts.syncDbSchema.tables)) {
+    const access = policy.tableAccess(crdtTableName);
+    if (access === "hidden") continue;
+
     const lines = [`## ${crdtTableName}`];
     if (table.description) {
       lines.push("", table.description.trim());
+    }
+    if (access === "read-only") {
+      lines.push("", "Read-only: you can query this table but cannot create, update, or delete its rows.");
     }
     lines.push("", "Columns:");
     for (const [name, meta] of Object.entries(table.columns)) {
@@ -58,14 +79,17 @@ export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: Sc
     sections.push(lines.join("\n"));
   }
 
-  sections.push(CHANGE_HISTORY_DOC);
+  if (!policy.hasHiddenTables) {
+    sections.push(CHANGE_HISTORY_DOC);
+  }
 
   return sections.join("\n\n");
 }
 
 // Documents the curated `change_history` view created over the sync event log. Unlike the table
 // views above, it is NOT tombstone-filtered — it intentionally surfaces the full change log,
-// including the contents of since-deleted items.
+// including the contents of since-deleted items. Omitted when any table is hidden: the view reads
+// the raw event log, which holds every dataset's payloads, so it cannot be filtered per table.
 const CHANGE_HISTORY_DOC = [
   "## change_history",
   "",

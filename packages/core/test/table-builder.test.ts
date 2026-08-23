@@ -65,6 +65,23 @@ describe("column metadata", () => {
     expect(described.description).toBe("Items the user tracks.");
     expect(described.baseName).toBe("raw_item");
   });
+
+  it("records AI access and carries it through the other modifiers in either order", () => {
+    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
+
+    expect(base.aiAccess).toBe("read-write");
+    expect(base.ai("hidden").aiAccess).toBe("hidden");
+    expect(base.aiAccess).toBe("read-write");
+
+    const aiThenDescribe = base.ai("read-only").describe("Items the user tracks.");
+    const describeThenAi = base.describe("Items the user tracks.").ai("read-only");
+
+    for (const table of [aiThenDescribe, describeThenAi]) {
+      expect(table.aiAccess).toBe("read-only");
+      expect(table.description).toBe("Items the user tracks.");
+      expect(table.baseName).toBe("raw_item");
+    }
+  });
 });
 
 describe("row type inference", () => {

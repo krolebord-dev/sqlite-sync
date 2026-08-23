@@ -7,7 +7,7 @@ export type QueryGuardInput = {
 
 export type QueryGuardRejection = {
   allowed: false;
-  code: "invalid-statement" | "multi-statement" | "invalid-sql" | "write-detected";
+  code: "invalid-statement" | "multi-statement" | "invalid-sql" | "write-detected" | "table-denied";
   message: string;
 };
 
@@ -25,9 +25,10 @@ export class QueryGuardError extends Error {
 
 export type QueryGuard = {
   /**
-   * Statically verifies the query is a read-only single statement. Reads are not restricted
-   * by table — the whole database file is in scope for the agent, so don't colocate data the
-   * agent must not see.
+   * Statically verifies the query is a read-only single statement, and — when the guard was
+   * created with `readableTables` — that it only reads those tables. Without `readableTables`
+   * reads are unrestricted: the whole database file is in scope for the agent, so don't
+   * colocate data the agent must not see.
    */
   check(input: QueryGuardInput): QueryGuardVerdict;
   /**
@@ -70,13 +71,94 @@ const WRITE_OPCODES = new Set([
   "Program",
 ]);
 
+/**
+ * Opcodes that open a b-tree cursor for reading. `p2` is the root page of the table or index
+ * and `p3` the database it lives in (0 = main), which is how a statement's real table set is
+ * recovered — views are already flattened into their base tables by the time bytecode exists,
+ * so aliases, CTEs, subqueries and quoting tricks all resolve here.
+ */
+const READ_CURSOR_OPCODES = new Set(["OpenRead", "ReopenIdx"]);
+
 type ExplainRow = {
   opcode: string;
+  p2: number | string;
+  p3: number | string;
 };
+
+/**
+ * Table-valued pragma functions (`pragma_table_list()`, ...) read the schema through a virtual
+ * table, so no root page identifies them. They expose names and columns rather than rows, but a
+ * hidden table should not be enumerable either, so they are rejected outright when restricted.
+ */
+const PRAGMA_FUNCTION_PATTERN = /\bpragma_[a-z_]+\s*\(/i;
 
 const READ_STATEMENT_PREFIXES = ["select", "with", "values"];
 
-export function createQueryGuard(opts: { executor: AiDbExecutor }): QueryGuard {
+export function createQueryGuard(opts: {
+  executor: AiDbExecutor;
+  /**
+   * Restrict reads to these tables (matched case-insensitively, indexes on them included).
+   * Views are resolved through their base tables, so pass base table names. Omit for
+   * unrestricted reads.
+   */
+  readableTables?: readonly string[];
+}): QueryGuard {
+  const readableTables = opts.readableTables ? new Set(opts.readableTables.map((name) => name.toLowerCase())) : null;
+  const readableTablesLabel = opts.readableTables?.join(", ") ?? "";
+
+  /**
+   * Root page to table name, for every b-tree in the main database. Re-read per query instead of
+   * cached: a migration can drop a table and hand its root page to another one, and a stale map
+   * would then resolve that page to the wrong (possibly allowed) name.
+   */
+  function readRootPages(): Map<number, string> {
+    const rows = opts.executor.execute<{ tbl_name: string; rootpage: number }>({
+      sql: `SELECT "tbl_name", "rootpage" FROM "sqlite_master" WHERE "rootpage" IS NOT NULL AND "rootpage" > 0`,
+      parameters: [],
+    }).rows;
+    return new Map(rows.map((row) => [Number(row.rootpage), row.tbl_name]));
+  }
+
+  function checkReadableTables(sql: string, operations: ExplainRow[]): QueryGuardRejection | null {
+    if (!readableTables) {
+      return null;
+    }
+
+    if (PRAGMA_FUNCTION_PATTERN.test(sql)) {
+      return reject(
+        "table-denied",
+        `Pragma functions are not available. You can only read these tables: ${readableTablesLabel}.`,
+      );
+    }
+
+    const cursors = operations.filter((operation) => READ_CURSOR_OPCODES.has(operation.opcode));
+    if (cursors.length === 0) {
+      return null;
+    }
+
+    let rootPages: Map<number, string>;
+    try {
+      rootPages = readRootPages();
+    } catch {
+      // Fail closed: without the schema mapping we cannot tell which tables the statement reads.
+      return reject("table-denied", "The tables this statement reads could not be verified, so it was rejected.");
+    }
+
+    for (const cursor of cursors) {
+      // Only the main database is mapped; nothing the agent can legitimately read lives elsewhere.
+      const name = Number(cursor.p3) === 0 ? rootPages.get(Number(cursor.p2)) : undefined;
+      if (!name || !readableTables.has(name.toLowerCase())) {
+        const subject = name ? `Table "${name}"` : "A table this statement reads";
+        return reject(
+          "table-denied",
+          `${subject} is not available to you. You can only read these tables: ${readableTablesLabel}.`,
+        );
+      }
+    }
+
+    return null;
+  }
+
   function reject(code: QueryGuardRejection["code"], message: string): QueryGuardRejection {
     return { allowed: false, code, message };
   }
@@ -119,6 +201,11 @@ export function createQueryGuard(opts: { executor: AiDbExecutor }): QueryGuard {
           `The statement was rejected because it would modify the database (${operation.opcode}). This tool is strictly read-only; rewrite the query as a pure SELECT.`,
         );
       }
+    }
+
+    const denied = checkReadableTables(body, operations);
+    if (denied) {
+      return denied;
     }
 
     return { allowed: true };

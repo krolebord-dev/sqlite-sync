@@ -35,7 +35,18 @@ beforeAll(async () => {
     )
   `);
 
+  db.execute(`
+    CREATE TABLE "secret" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "token" TEXT NOT NULL,
+      "tombstone" INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  db.execute(`CREATE INDEX "secret_token_idx" ON "secret" ("token")`);
+  db.execute(`CREATE VIEW "secrets" AS SELECT * FROM "secret" WHERE "tombstone" = 0`);
+
   db.execute(`INSERT INTO "item" ("id", "title", "tombstone") VALUES ('1', 'first', 0), ('2', 'gone', 1)`);
+  db.execute(`INSERT INTO "secret" ("id", "token") VALUES ('1', 'hunter2')`);
   db.execute(`INSERT INTO "persisted_crdt_events" ("sync_id", "payload") VALUES (1, 'secret')`);
 
   executor = {
@@ -168,6 +179,92 @@ describe("createQueryGuard", () => {
       expect(error).toBeInstanceOf(QueryGuardError);
       expect((error as QueryGuardError).rejection.code).toBe("write-detected");
     }
+  });
+});
+
+// `readableTables` names base tables; views flatten into them before the bytecode exists, so the
+// allow-list is checked against the root pages a statement actually opens.
+describe("createQueryGuard with readableTables", () => {
+  let restricted: QueryGuard;
+
+  beforeAll(() => {
+    restricted = createQueryGuard({ executor, readableTables: ["item"] });
+  });
+
+  function expectDenied(sql: string, parameters: readonly unknown[] = []) {
+    const verdict = restricted.check({ sql, parameters });
+    expect(verdict.allowed).toBe(false);
+    if (!verdict.allowed) {
+      expect(verdict.code).toBe("table-denied");
+    }
+    return verdict as { allowed: false; code: string; message: string };
+  }
+
+  it("allows the readable table and views over it", () => {
+    expect(restricted.check({ sql: "SELECT * FROM items" })).toEqual({ allowed: true });
+    expect(restricted.check({ sql: `SELECT * FROM "item"` })).toEqual({ allowed: true });
+    expect(restricted.execute<{ title: string }>({ sql: "SELECT title FROM items" }).rows).toEqual([
+      { title: "first" },
+    ]);
+  });
+
+  it("allows indexes on a readable table and statements that open no table at all", () => {
+    expect(restricted.check({ sql: `SELECT * FROM "item" INDEXED BY "item_title_idx" WHERE title = 'first'` })).toEqual(
+      { allowed: true },
+    );
+    expect(restricted.check({ sql: "SELECT 1" })).toEqual({ allowed: true });
+    expect(restricted.check({ sql: "SELECT value FROM json_each('[1,2]')" })).toEqual({ allowed: true });
+  });
+
+  it("denies a denied table however it is reached", () => {
+    expect(expectDenied(`SELECT * FROM "secret"`).message).toContain(`"secret"`);
+    expectDenied("SELECT * FROM secrets");
+    expectDenied("SELECT (SELECT token FROM secrets LIMIT 1) AS leak FROM items");
+    expectDenied("WITH s AS (SELECT * FROM secrets) SELECT * FROM s");
+    expectDenied(`SELECT * FROM "secret" AS "items"`);
+    expectDenied("SELECT count(*) FROM secrets WHERE token = 'hunter2'");
+    expectDenied("SELECT * FROM items UNION ALL SELECT * FROM secrets");
+  });
+
+  it("denies the internal event log and the schema table", () => {
+    expectDenied("SELECT payload FROM persisted_crdt_events");
+    expectDenied("SELECT name FROM sqlite_master");
+    expectDenied("SELECT name FROM sqlite_schema");
+  });
+
+  it("denies pragma functions, which would enumerate hidden tables", () => {
+    expect(expectDenied("SELECT * FROM pragma_table_list()").message).toContain("Pragma functions");
+    expectDenied(`SELECT * FROM pragma_table_info('secret')`);
+  });
+
+  it("lists the readable tables so the agent can retry", () => {
+    expect(expectDenied(`SELECT * FROM "secret"`).message).toContain("You can only read these tables: item.");
+  });
+
+  it("execute throws QueryGuardError for denied tables", () => {
+    expect(() => restricted.execute({ sql: `SELECT * FROM "secret"` })).toThrowError(QueryGuardError);
+  });
+
+  it("fails closed when the schema mapping cannot be read", () => {
+    const failing: AiDbExecutor = {
+      execute: <TResult>(query: { sql: string; parameters: readonly unknown[] }) => {
+        if (query.sql.includes("sqlite_master")) {
+          throw new Error("no schema access");
+        }
+        return executor.execute<TResult>(query);
+      },
+      transaction: (callback) => callback(failing),
+    };
+
+    const verdict = createQueryGuard({ executor: failing, readableTables: ["item"] }).check({
+      sql: "SELECT * FROM items",
+    });
+
+    expect(verdict).toEqual({
+      allowed: false,
+      code: "table-denied",
+      message: "The tables this statement reads could not be verified, so it was rejected.",
+    });
   });
 });
 

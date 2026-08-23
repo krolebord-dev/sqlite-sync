@@ -9,6 +9,7 @@ export {
   type AiQueryResult,
   createAiDbAccess,
 } from "./db-access";
+export { type ResolvedAiPolicy, type ResolvedTablePolicy, resolveAiPolicy } from "./policy";
 export {
   createQueryGuard,
   type QueryGuard,

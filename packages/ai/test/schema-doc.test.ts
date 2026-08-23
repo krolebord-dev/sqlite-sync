@@ -122,6 +122,67 @@ describe("createSchemaDoc", () => {
     ]);
   });
 
+  it("omits hidden tables and labels read-only ones", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        todos: t.table({ title: t.text() }),
+        audit: t.table({ note: t.text() }).ai("read-only").describe("Append-only trail."),
+        billing: t.table({ card: t.text() }).ai("hidden"),
+      },
+      migrations,
+    });
+
+    const doc = createSchemaDoc({ syncDbSchema });
+
+    expect(doc).not.toContain("billing");
+    expect(doc).not.toContain("card");
+    expect(doc).toContain("- `title` TEXT NOT NULL");
+    expect(doc).toContain(
+      [
+        "## audit",
+        "",
+        "Append-only trail.",
+        "",
+        "Read-only: you can query this table but cannot create, update, or delete its rows.",
+        "",
+        "Columns:",
+        "- `id` TEXT NOT NULL — Unique immutable item id",
+        "- `note` TEXT NOT NULL",
+      ].join("\n"),
+    );
+  });
+
+  it("drops the change history section and warns about restricted reads once a table is hidden", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        todos: t.table({ title: t.text() }),
+        billing: t.table({ card: t.text() }).ai("hidden"),
+      },
+      migrations,
+    });
+
+    const doc = createSchemaDoc({ syncDbSchema });
+
+    expect(doc).not.toContain("## change_history");
+    expect(doc).toContain("Only the tables documented below are readable.");
+  });
+
+  it("keeps the change history when tables are read-only but none are hidden", () => {
+    const syncDbSchema = defineSyncSchema({
+      tables: {
+        todos: t.table({ title: t.text() }).ai("read-only"),
+      },
+      migrations,
+    });
+
+    const doc = createSchemaDoc({ syncDbSchema });
+
+    expect(doc).toContain("Read-only: you can query this table");
+    // Nothing is hidden, so reads stay unrestricted and history stays available.
+    expect(doc).toContain("## change_history");
+    expect(doc).not.toContain("Only the tables documented below are readable.");
+  });
+
   it("renders enum values and builder descriptions", () => {
     const syncDbSchema = defineSyncSchema({
       tables: {

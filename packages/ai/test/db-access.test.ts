@@ -7,7 +7,7 @@ import {
   t,
 } from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type AiDbExecutor, createAiDbAccess } from "../src/db-access";
+import { type AiDbAccess, type AiDbExecutor, createAiDbAccess } from "../src/db-access";
 
 function createFakeExecutor() {
   const calls: string[] = [];
@@ -122,16 +122,79 @@ describe("createAiDbAccess", () => {
       executor,
       storage: {
         applyOwnEvents: () => {
-          throw new CrdtEventValidationError(['[0] Unknown dataset "missing"']);
+          throw new CrdtEventValidationError(['[0] payload: Unknown column "nope"']);
         },
       },
       syncDbSchema,
     });
 
-    expect(access.mutate?.({ events: [{ type: "item-deleted", dataset: "missing", item_id: "1" }] })).toEqual({
-      error: 'Invalid CRDT events: [0] Unknown dataset "missing"',
-      errors: ['[0] Unknown dataset "missing"'],
+    expect(
+      access.mutate?.({ events: [{ type: "item-updated", dataset: "item", item_id: "1", payload: { nope: 1 } }] }),
+    ).toEqual({
+      error: 'Invalid CRDT events: [0] payload: Unknown column "nope"',
+      errors: ['[0] payload: Unknown column "nope"'],
     });
+  });
+
+  it("rejects mutations to datasets outside the schema before reaching storage", () => {
+    const { executor } = createFakeExecutor();
+    const applied: unknown[] = [];
+    const access = createAiDbAccess({
+      executor,
+      storage: { applyOwnEvents: (events) => applied.push(...events) },
+      syncDbSchema,
+    });
+
+    expect(access.mutate?.({ events: [{ type: "item-deleted", dataset: "missing", item_id: "1" }] })).toEqual({
+      error: 'Invalid mutation events: [0] unknown or unavailable dataset "missing"',
+      errors: ['[0] unknown or unavailable dataset "missing"'],
+    });
+    expect(applied).toEqual([]);
+  });
+});
+
+describe("createAiDbAccess policy enforcement", () => {
+  const policySchema = defineSyncSchema({
+    tables: {
+      items: t.table({ title: t.text() }, { baseName: "item" }),
+      audit: t.table({ note: t.text() }).ai("read-only"),
+      billing: t.table({ card: t.text() }).ai("hidden"),
+    },
+    migrations: createMigrations(() => ({ 0: [] })),
+  });
+
+  function createAccess() {
+    const { executor } = createFakeExecutor();
+    const applied: OwnCrdtEvent[] = [];
+    const access = createAiDbAccess({
+      executor,
+      storage: { applyOwnEvents: (events) => applied.push(...events) },
+      syncDbSchema: policySchema,
+    });
+    return { access, applied };
+  }
+
+  it("rejects mutations to read-only and hidden tables", () => {
+    const { access, applied } = createAccess();
+
+    expect(access.mutate?.({ events: [{ type: "item-created", dataset: "audit", payload: { note: "x" } }] })).toEqual({
+      error: 'Invalid mutation events: [0] dataset "audit" is read-only and cannot be modified',
+      errors: ['[0] dataset "audit" is read-only and cannot be modified'],
+    });
+    expect(access.mutate?.({ events: [{ type: "item-deleted", dataset: "billing", item_id: "1" }] })).toEqual({
+      error: 'Invalid mutation events: [0] unknown or unavailable dataset "billing"',
+      errors: ['[0] unknown or unavailable dataset "billing"'],
+    });
+    expect(applied).toEqual([]);
+  });
+
+  it("still applies mutations to read-write tables", () => {
+    const { access, applied } = createAccess();
+
+    expect(
+      access.mutate?.({ events: [{ type: "item-updated", dataset: "item", item_id: "1", payload: { title: "ok" } }] }),
+    ).toEqual({ applied: true, eventCount: 1, createdIds: [] });
+    expect(applied).toHaveLength(1);
   });
 });
 
@@ -225,6 +288,12 @@ describe("createAiDbAccess query", () => {
     });
   });
 
+  it("keeps reads unrestricted while no table is hidden", () => {
+    const access = createAiDbAccess({ executor, syncDbSchema });
+
+    expect(access.query({ sql: "SELECT count(*) AS count FROM sqlite_master" })).toMatchObject({ truncated: false });
+  });
+
   it("returns guard rejections as model-facing errors instead of throwing", () => {
     const access = createAiDbAccess({ executor, syncDbSchema });
 
@@ -237,5 +306,66 @@ describe("createAiDbAccess query", () => {
     expect(executor.execute({ sql: "SELECT count(*) AS count FROM item", parameters: [] }).rows).toEqual([
       { count: 3 },
     ]);
+  });
+});
+
+// A hidden table turns reads into an allow-list of the remaining base tables, enforced end to end.
+describe("createAiDbAccess query with a hidden table", () => {
+  const restrictedSchema = defineSyncSchema({
+    tables: {
+      items: t.table({ title: t.text() }, { baseName: "item" }),
+      billing: t.table({ card: t.text() }).ai("hidden"),
+    },
+    migrations: createMigrations(() => ({ 0: [] })),
+  });
+
+  let access: AiDbAccess;
+
+  beforeAll(async () => {
+    const reactiveDb = await SQLiteReactiveDb.create<Record<string, never>>({
+      snapshot: new Uint8Array(),
+      logger: () => {},
+    });
+    const db = reactiveDb.db;
+
+    db.execute(`CREATE TABLE "item" ("id" TEXT PRIMARY KEY, "title" TEXT NOT NULL, "tombstone" INTEGER DEFAULT 0)`);
+    db.execute(`CREATE VIEW "items" AS SELECT "id", "title" FROM "item" WHERE "tombstone" = 0`);
+    db.execute(`CREATE TABLE "_billing" ("id" TEXT PRIMARY KEY, "card" TEXT NOT NULL, "tombstone" INTEGER DEFAULT 0)`);
+    db.execute(`CREATE VIEW "billing" AS SELECT "id", "card" FROM "_billing" WHERE "tombstone" = 0`);
+    db.execute(`CREATE TABLE "crdt_events" ("sync_id" INTEGER PRIMARY KEY, "dataset" TEXT, "payload" TEXT)`);
+    db.execute(`INSERT INTO "item" ("id", "title") VALUES ('1', 'first')`);
+    db.execute(`INSERT INTO "_billing" ("id", "card") VALUES ('1', '4111')`);
+    db.execute(`INSERT INTO "crdt_events" VALUES (1, 'billing', '{"card":"4111"}')`);
+
+    const executor: AiDbExecutor = {
+      execute: <TResult>(query: { sql: string; parameters: readonly unknown[] }) =>
+        db.execute<TResult>({ sql: query.sql, parameters: query.parameters as unknown[] }),
+      transaction: (callback) => db.executeTransaction(() => callback(executor)),
+    };
+
+    access = createAiDbAccess({ executor, syncDbSchema: restrictedSchema });
+  });
+
+  it("still reads the visible table", () => {
+    expect(access.query({ sql: "SELECT title FROM items" })).toEqual({
+      rows: [{ title: "first" }],
+      rowCount: 1,
+      truncated: false,
+    });
+  });
+
+  it("rejects reads of the hidden table and of the event log that carries its payloads", () => {
+    for (const sql of [
+      "SELECT card FROM billing",
+      `SELECT card FROM "_billing"`,
+      "SELECT (SELECT card FROM billing LIMIT 1) AS leak FROM items",
+      "SELECT payload FROM crdt_events",
+    ]) {
+      const result = access.query({ sql });
+      expect(result).toHaveProperty("error");
+      if ("error" in result) {
+        expect(result.error).toContain("not available to you");
+      }
+    }
   });
 });

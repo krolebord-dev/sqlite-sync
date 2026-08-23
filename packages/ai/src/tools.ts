@@ -137,7 +137,7 @@ export function createDbTools(opts: CreateDbToolsOptions): ToolSet {
   if (opts.mutations) {
     tools.mutateDb = tool({
       description:
-        "Apply one or more CRDT mutation events to the synced database. Use this for writes instead of SQL. Query the current data first when updating or deleting existing rows. Create events must omit ids: do not provide item_id or payload.id, because the tool generates ids and returns them. Create payloads must include all required non-id columns, update events should include only changed columns, and delete events should use an empty payload.",
+        "Apply one or more CRDT mutation events to the synced database. Use this for writes instead of SQL. Query the current data first when updating or deleting existing rows. Create events must omit ids: do not provide item_id or payload.id, because the tool generates ids and returns them. Create payloads must include all required non-id columns, update events should include only changed columns, and delete events should use an empty payload. Tables the schema documentation marks read-only cannot be written.",
       inputSchema: mutationInputSchema,
       execute: async (input) => {
         const access = await opts.access();

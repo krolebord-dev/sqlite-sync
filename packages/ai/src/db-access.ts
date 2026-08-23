@@ -6,6 +6,7 @@ import {
   type OwnCrdtEvent,
   type SyncDbSchema,
 } from "@sqlite-sync/core";
+import { resolveAiPolicy } from "./policy";
 import { createQueryGuard, QueryGuardError } from "./query-guard";
 import { createSchemaDoc, type SchemaDocContext } from "./schema-doc";
 
@@ -74,11 +75,13 @@ export type AiMutationResult =
  * (promise-wrapped) and satisfies the tool layer's `DbToolsAccess`.
  *
  * `query` enforces read-only (single SELECT/WITH/VALUES statement, no write opcodes, executed
- * in a forced-rollback transaction) but reads are not restricted by table — the whole database
- * file is in scope for the agent, so don't colocate data the agent must not see.
+ * in a forced-rollback transaction). Reads are restricted by table only once the schema declares
+ * a table `.ai("hidden")`; until then the whole database file is in scope for the agent, so don't
+ * colocate data the agent must not see.
  *
  * `mutate` is only present when `createAiDbAccess` receives a CRDT storage. Mutations are CRDT
- * events applied through sqlite-sync's normal own-event path, never direct SQL writes.
+ * events applied through sqlite-sync's normal own-event path, never direct SQL writes, and are
+ * rejected for tables the schema declares read-only or hidden.
  */
 export type AiDbAccess = {
   getSchemaDoc(): string;
@@ -101,8 +104,14 @@ export function createAiDbAccess(opts: {
   context?: SchemaDocContext;
   limits?: { maxRows?: number; maxCellChars?: number };
 }): AiDbAccess {
+  const policy = resolveAiPolicy({ syncDbSchema: opts.syncDbSchema });
   const schemaDoc = createSchemaDoc({ syncDbSchema: opts.syncDbSchema, context: opts.context });
-  const guard = createQueryGuard({ executor: opts.executor });
+  // A hidden table flips reads to an allow-list, which also cuts off the event log (it holds every
+  // dataset's payloads) and any non-synced table sharing the database file.
+  const guard = createQueryGuard({
+    executor: opts.executor,
+    readableTables: policy.hasHiddenTables ? policy.readableBaseTableNames : undefined,
+  });
   const maxRows = opts.limits?.maxRows ?? 200;
   const maxCellChars = opts.limits?.maxCellChars ?? 2000;
 
@@ -155,6 +164,15 @@ export function createAiDbAccess(opts: {
       const events: OwnCrdtEvent[] = [];
 
       for (const [index, event] of input.events.entries()) {
+        const tableAccess = policy.tableAccess(event.dataset);
+        if (tableAccess === "hidden") {
+          errors.push(`[${index}] unknown or unavailable dataset "${event.dataset}"`);
+          continue;
+        }
+        if (tableAccess === "read-only") {
+          errors.push(`[${index}] dataset "${event.dataset}" is read-only and cannot be modified`);
+          continue;
+        }
         if (event.type === "item-created") {
           const looseEvent = event as { item_id?: unknown };
           const payload = event.payload ?? {};
