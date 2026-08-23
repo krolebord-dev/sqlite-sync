@@ -170,17 +170,15 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     storage: crdtStorage,
   });
 
-  const executeAndDrain = <Result extends { rowsWritten: number }>(execute: () => Result): Result => {
+  const executeAndDrain = <Result>(execute: () => Result): Result => {
     let result: Result | undefined;
     let appliedIntent = false;
     sqlExecutor.transaction(() => {
       result = execute();
-      if (result.rowsWritten > 0) {
-        appliedIntent = drainCrdtChangeIntents({
-          tx: crdtStorageDb,
-          storage: crdtStorage,
-        });
-      }
+      appliedIntent = drainCrdtChangeIntents({
+        tx: crdtStorageDb,
+        storage: crdtStorage,
+      });
     });
     if (appliedIntent) {
       void crdtStorage.internal.processEnqueuedEvents();
