@@ -90,8 +90,13 @@ export {
   type CrdtStorage,
   createCrdtStorage,
   type OwnCrdtEvent,
+  type OwnCrdtSnapshot,
 } from "./sqlite-crdt/crdt-storage";
-export { type CrdtStorageMutator, createCrdtStorageMutator } from "./sqlite-crdt/crdt-storage-mutator";
+export {
+  type CrdtStorageMutator,
+  createCrdtStorageMutator,
+  type SnapshotOptions,
+} from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {
   type CrdtSyncRemoteSource,

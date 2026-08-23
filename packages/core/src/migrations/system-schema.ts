@@ -1,4 +1,8 @@
-import type { CrdtUpdateLogItem, PersistedCrdtEvent } from "../sqlite-crdt/crdt-table-schema";
+import {
+  CRDT_EVENT_NO_OP_PAYLOAD,
+  type CrdtUpdateLogItem,
+  type PersistedCrdtEvent,
+} from "../sqlite-crdt/crdt-table-schema";
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "../sqlite-kv-store";
@@ -52,6 +56,8 @@ export type SystemMigration = {
   up: (ctx: SystemMigrationContext) => void;
 };
 
+const nonNoOpEventPredicate = `"payload" <> '${CRDT_EVENT_NO_OP_PAYLOAD}'`;
+
 export const baseSystemMigrations: SystemMigration[] = [
   {
     version: 0,
@@ -96,6 +102,15 @@ export const baseSystemMigrations: SystemMigration[] = [
       const indexName = `${ctx.eventsTable.table}_timestamp_status_sync_id_idx`;
       ctx.execute(
         `CREATE INDEX IF NOT EXISTS ${ctx.eventsTable.schema}.${indexName} ON ${ctx.eventsTable.table} ("timestamp", "status", "sync_id")`,
+      );
+    },
+  },
+  {
+    version: 4,
+    up: (ctx: SystemMigrationContext) => {
+      const indexName = `${ctx.eventsTable.table}_dataset_item_id_non_no_op_idx`;
+      ctx.execute(
+        `CREATE INDEX IF NOT EXISTS ${ctx.eventsTable.schema}.${indexName} ON ${ctx.eventsTable.table} ("dataset", "item_id") WHERE ${nonNoOpEventPredicate}`,
       );
     },
   },
@@ -163,6 +178,12 @@ export function applyMemoryDbSchema(db: SQLiteDbWrapper<any>) {
   );
   db.execute(
     `CREATE INDEX IF NOT EXISTS ${memoryDbConfig.eventsTable.table}_timestamp_status_sync_id_idx ON ${memoryDbConfig.eventsTable.table} ("timestamp", "status", "sync_id")`,
+    {
+      loggerLevel: "system",
+    },
+  );
+  db.execute(
+    `CREATE INDEX IF NOT EXISTS ${memoryDbConfig.eventsTable.table}_dataset_item_id_non_no_op_idx ON ${memoryDbConfig.eventsTable.table} ("dataset", "item_id") WHERE ${nonNoOpEventPredicate}`,
     {
       loggerLevel: "system",
     },

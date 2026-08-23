@@ -24,6 +24,12 @@ type CommitEventOptions<Database, Table extends keyof Database & string> =
 type CreateEventPayload<Database, Table extends keyof Database> = Omit<Database[Table], "tombstone">;
 type UpdateEventPayload<Database, Table extends keyof Database> = Omit<Partial<Database[Table]>, "id" | "tombstone">;
 
+export type SnapshotOptions<Database, Table extends keyof Database & string> = {
+  dataset: Table;
+  id: string;
+  patch: UpdateEventPayload<Database, Table>;
+};
+
 export function createCrdtStorageMutator<Database>({ storage }: { storage: CrdtStorage }) {
   const mapToStorageEvent = (event: CommitEventOptions<Database, keyof Database & string>): OwnCrdtEvent => {
     switch (event.type) {
@@ -63,9 +69,18 @@ export function createCrdtStorageMutator<Database>({ storage }: { storage: CrdtS
     storage.enqueueOwnEvents([mapToStorageEvent(event)]);
   };
 
+  const enqueueSnapshot = <Table extends keyof Database & string>(snapshot: SnapshotOptions<Database, Table>) => {
+    storage.applyOwnSnapshot({
+      dataset: snapshot.dataset,
+      item_id: snapshot.id,
+      patch: { ...snapshot.patch },
+    });
+  };
+
   return {
     enqueueEvents,
     createEvent,
     enqueueEvent,
+    enqueueSnapshot,
   };
 }

@@ -65,6 +65,21 @@ syncDb.executeKysely((db) => db.updateTable("item").set({ complete: true }).wher
 syncDb.unsafe.execute({ sql: "vacuum", parameters: [] });
 ```
 
+For server-owned rows with disposable intermediate history, `enqueueSnapshot` patches the current row, writes a complete
+`item-created` event, and replaces every older non-empty payload for that row with the no-op marker:
+
+```ts
+syncDb.enqueueSnapshot({
+  dataset: "_message",
+  id: messageId,
+  patch: { content: accumulatedText, status: "streaming" },
+});
+```
+
+Existing clients apply the create as an update. Fresh clients replay the retained no-op envelopes and then insert the
+full snapshot. If the row does not exist, the patch must include every required column. The snapshot path does not run
+runtime schema validation, so SQLite rejects an incomplete create.
+
 `syncDb.unsafe` also provides raw `executeKysely` and `transaction` methods. Do not use them to mutate synced views;
 unsafe execution intentionally does not drain CRDT change intents.
 

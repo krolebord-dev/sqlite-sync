@@ -7,6 +7,7 @@ import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { applyMemoryDbSchema } from "../src/migrations/system-schema";
 import { t } from "../src/schema/table-builder";
 import { CrdtEventValidationError } from "../src/schema/validate-crdt-event";
+import { createCrdtStorageMutator } from "../src/sqlite-crdt/crdt-storage-mutator";
 import {
   CRDT_EVENT_NO_OP_PAYLOAD,
   type CrdtUpdateLogItem,
@@ -935,6 +936,166 @@ describe("CRDT convergence for parallel entity edits", () => {
       ["own-applied", "applied", BASE_TABLE],
       ["own-applied", "applied", BASE_TABLE],
     ]);
+  });
+
+  it("replaces a row's event payload history with no-ops and a full create snapshot", async () => {
+    const replicaA = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
+    const replicaB = await createReplica("node-b", 1_000, { trackEventHlcAccumulator: true });
+
+    expect(
+      replicaA.db
+        .execute<{ name: string }>(`PRAGMA index_list("persisted_crdt_events")`)
+        .rows.map((index) => index.name),
+    ).toContain("persisted_crdt_events_dataset_item_id_non_no_op_idx");
+
+    await replicaA.createTodo({
+      id: "todo-1",
+      title: "Initial",
+      completed: false,
+      tombstone: false,
+    });
+    replicaA.setTime(2_000);
+    await replicaA.updateTodo("todo-1", { title: "Streaming" });
+    await replicaA.updateTodo("todo-1", { title: "Still streaming" });
+
+    let replicaBSyncId = await syncOneWay(replicaA, replicaB, 0);
+    const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replicaA.storage });
+
+    replicaA.setTime(3_000);
+    mutator.enqueueSnapshot({
+      dataset: BASE_TABLE,
+      id: "todo-1",
+      patch: { title: "Almost complete" },
+    });
+    await replicaA.waitForProcessing();
+    expect(JSON.parse(replicaA.getPersistedEvents().at(-1)?.payload ?? "null")).toEqual({
+      id: "todo-1",
+      title: "Almost complete",
+      completed: 0,
+      tombstone: false,
+    });
+    replicaBSyncId = await syncOneWay(replicaA, replicaB, replicaBSyncId);
+
+    replicaA.db.execute(`
+      CREATE TRIGGER "reject-rewriting-no-op-payloads"
+      BEFORE UPDATE OF "payload" ON "persisted_crdt_events"
+      WHEN old."payload" = '${CRDT_EVENT_NO_OP_PAYLOAD}'
+      BEGIN
+        SELECT RAISE(ABORT, 'snapshot rewrote an existing no-op payload');
+      END
+    `);
+
+    replicaA.setTime(4_000);
+    mutator.enqueueSnapshot({
+      dataset: BASE_TABLE,
+      id: "todo-1",
+      patch: { title: "Complete", completed: true },
+    });
+    await replicaA.waitForProcessing();
+
+    const events = replicaA.getPersistedEvents();
+    expect(events.slice(0, -1).map((event) => event.payload)).toEqual([
+      CRDT_EVENT_NO_OP_PAYLOAD,
+      CRDT_EVENT_NO_OP_PAYLOAD,
+      CRDT_EVENT_NO_OP_PAYLOAD,
+      CRDT_EVENT_NO_OP_PAYLOAD,
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      status: "applied",
+      type: "item-created",
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      origin: "own-applied",
+    });
+    expect(JSON.parse(events.at(-1)?.payload ?? "null")).toEqual({
+      id: "todo-1",
+      title: "Complete",
+      completed: true,
+      tombstone: false,
+    });
+
+    await syncOneWay(replicaA, replicaB, replicaBSyncId);
+    const replicaC = await createReplica("node-c", 1_000, { trackEventHlcAccumulator: true });
+    await syncOneWay(replicaA, replicaC, 0);
+
+    const expected = {
+      id: "todo-1",
+      title: "Complete",
+      completed: true,
+      tombstone: false,
+    };
+    expect(replicaA.getTodo("todo-1")).toEqual(expected);
+    expect(replicaB.getTodo("todo-1")).toEqual(expected);
+    expect(replicaC.getTodo("todo-1")).toEqual(expected);
+    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+    expect(replicaC.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+  });
+
+  it("does not schema-validate a snapshot patch", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    await replica.createTodo({ id: "todo-1", title: "Keep", completed: false, tombstone: false });
+
+    replica.storage.applyOwnSnapshot({
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      patch: { completed: "unchecked" },
+    });
+    await replica.waitForProcessing();
+
+    expect(JSON.parse(replica.getPersistedEvents().at(-1)?.payload ?? "null")).toEqual({
+      id: "todo-1",
+      title: "Keep",
+      completed: "unchecked",
+      tombstone: false,
+    });
+  });
+
+  it("creates a missing row from a complete snapshot patch", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replica.storage });
+
+    mutator.enqueueSnapshot({
+      dataset: BASE_TABLE,
+      id: "todo-1",
+      patch: { title: "Created from snapshot", completed: false },
+    });
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")).toEqual({
+      id: "todo-1",
+      title: "Created from snapshot",
+      completed: false,
+      tombstone: false,
+    });
+    expect(replica.getPersistedEvent(1)).toMatchObject({
+      type: "item-created",
+      item_id: "todo-1",
+      status: "applied",
+    });
+  });
+
+  it("rolls back an incomplete snapshot patch for a missing row", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replica.storage });
+
+    expect(() =>
+      mutator.enqueueSnapshot({
+        dataset: BASE_TABLE,
+        id: "todo-1",
+        patch: { title: "Missing completed" },
+      }),
+    ).toThrow();
+
+    expect(replica.getPersistedEvents()).toEqual([]);
+
+    mutator.enqueueSnapshot({
+      dataset: BASE_TABLE,
+      id: "todo-1",
+      patch: { title: "Complete", completed: true },
+    });
+    await replica.waitForProcessing();
+
+    expect(replica.getPersistedEvent(1)?.item_id).toBe("todo-1");
   });
 
   it("rejects an invalid batch without mutating state or consuming sync ids", async () => {

@@ -973,6 +973,31 @@ syncDb.enqueueEvent({
 });
 ```
 
+For server-owned rows whose intermediate states do not need to remain in change history, patch the row and enqueue a
+full-row snapshot:
+
+```ts
+syncDb.enqueueSnapshot({
+  dataset: "_message",
+  id: messageId,
+  patch: {
+    content: accumulatedText,
+    status: "streaming",
+  },
+});
+```
+
+`enqueueSnapshot` reads the current row when present, applies the patch, and immediately writes an `item-created` event
+containing the resulting complete row. Existing rows treat that create as an update. Every older event for the same
+dataset and item remains in the event log with its non-empty payload replaced by sqlite-sync's no-op marker. This
+preserves sync cursors and consistency checks while removing superseded payload data. Fresh replicas replay the no-ops
+followed by the latest full-row snapshot.
+
+If the row does not exist, the patch creates it and must supply every required column. The TypeScript API prevents patches
+from changing `id` or `tombstone`, but this path does not run runtime schema validation. SQLite rejects an incomplete
+create. Use this helper only where replacing the row's change history is intentional. Event listeners receive the new
+event as `item-created`.
+
 To delete from the server, enqueue an `item-deleted` event. The payload is omitted because the tombstone is materialized when the event is applied:
 
 ```ts
@@ -1258,6 +1283,7 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 | `unsafe.transaction(callback)` | Run a direct SQLite transaction without draining intents |
 | `enqueueEvent(event)` | Write a single CRDT event |
 | `enqueueEvents(events)` | Write multiple CRDT events |
+| `enqueueSnapshot(snapshot)` | Patch a row, replace its older non-empty event payloads with no-ops, and write a full create snapshot |
 | `applyOwnEvents(events)` | Validate, persist, and immediately apply own CRDT events |
 | `createEvent(event)` | Type helper — returns the event as-is |
 | `addEventListener("event-applied", handler)` | Listen for applied events |

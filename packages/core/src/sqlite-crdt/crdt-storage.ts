@@ -38,6 +38,12 @@ export type OwnCrdtEvent = {
   schema_version?: undefined;
 };
 
+export type OwnCrdtSnapshot = {
+  dataset: string;
+  item_id: string;
+  patch: Record<string, unknown>;
+};
+
 export type CrdtChangeIntent = {
   seq: number;
   dataset: string;
@@ -134,6 +140,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
   const crdtEventsTable = storage.dbConfig.eventsTable.fullIdentifier as "_crdt_events";
   const quotedEventsTable = quoteId(storage.dbConfig.eventsTable.fullIdentifier);
+  const noOpPayloadSqlLiteral = `'${CRDT_EVENT_NO_OP_PAYLOAD}'`;
 
   const getInitialSequentialSyncId = () => {
     const [firstPendingEvent] = db.executePrepared(
@@ -360,6 +367,52 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         applyCrdtEvent(persistedEvent);
       }
     });
+
+    void processEnqueuedEvents();
+  };
+
+  const applyOwnSnapshot = (snapshot: OwnCrdtSnapshot) => {
+    const syncId = localSyncId + 1;
+    db.executeTransaction((tx) => {
+      const [currentRow] = tx.executePreparedRaw<[string], Record<string, unknown>>({
+        key: `get-crdt-snapshot-row-${snapshot.dataset}`,
+        sql: `select * from ${quoteId(snapshot.dataset)} where "id" = ? limit 1`,
+        params: [snapshot.item_id],
+        meta: { loggerLevel: "system" },
+      });
+
+      const event: PersistedCrdtEvent = {
+        schema_version: storage.migrator.currentSchemaVersion,
+        timestamp: serializeHLC(storage.hlc.getNextHLC()),
+        type: "item-created",
+        dataset: snapshot.dataset,
+        item_id: snapshot.item_id,
+        origin: "own-applied",
+        source_node_id: storage.nodeId,
+        payload: JSON.stringify({
+          ...(currentRow ?? {}),
+          ...snapshot.patch,
+          id: snapshot.item_id,
+          tombstone: false,
+        }),
+        sync_id: syncId,
+        status: "pending",
+      };
+
+      tx.executePreparedRaw<[string, string, string], never>({
+        key: "replace-crdt-row-history-with-no-ops",
+        // Keep the no-op sentinel literal in this predicate so SQLite can use the
+        // matching partial index. A bound parameter does not imply its predicate.
+        sql: `update ${quotedEventsTable}
+set "payload" = ?
+where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`,
+        params: [CRDT_EVENT_NO_OP_PAYLOAD, event.dataset, event.item_id],
+        meta: { loggerLevel: "system" },
+      });
+      persistEvents(tx, [event]);
+      applyCrdtEvent(event);
+    });
+    localSyncId = syncId;
 
     void processEnqueuedEvents();
   };
@@ -820,6 +873,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     enqueueOwnEvents,
     enqueueRemoteEvents,
     applyOwnEvents,
+    applyOwnSnapshot,
     checkIsQuiescent,
     getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
 
