@@ -5,7 +5,7 @@ import type { ResetStore } from "./reset-state";
  * the worker DB layout in a way old persisted databases cannot survive —
  * every client resets its local DB on the next worker start.
  */
-export const LIB_STORAGE_VERSION = 1;
+export const LIB_STORAGE_VERSION = 2;
 
 const storageVersionKey = (dbId: string) => `sqlite-sync-storage-version-${dbId}`;
 
