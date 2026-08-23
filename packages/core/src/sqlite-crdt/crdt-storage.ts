@@ -159,25 +159,90 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     "remote-event-apply-failed": { syncId: number };
   }>();
 
-  const persistEvent = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, event: PersistedCrdtEvent) => {
-    tx.executePrepared(
-      "persist-crdt-event",
-      event,
-      (db, params) =>
-        db.insertInto(crdtEventsTable).values({
-          type: params("type"),
-          dataset: params("dataset"),
-          item_id: params("item_id"),
-          payload: params("payload"),
-          schema_version: params("schema_version"),
-          sync_id: params("sync_id"),
-          status: params("status"),
-          timestamp: params("timestamp"),
-          origin: params("origin"),
-          source_node_id: params("source_node_id"),
-        }),
-      { loggerLevel: "system" },
-    );
+  // Column order is the JSON array order for persist/read.
+  const EVENT_COLUMNS = [
+    "sync_id",
+    "schema_version",
+    "status",
+    "type",
+    "timestamp",
+    "origin",
+    "source_node_id",
+    "dataset",
+    "item_id",
+    "payload",
+  ] as const;
+
+  const quotedEventColumns = EVENT_COLUMNS.map((column) => quoteId(column)).join(", ");
+
+  const persistEventsSql = `insert into ${quotedEventsTable} (${quotedEventColumns}) select ${EVENT_COLUMNS.map(
+    (_, index) => `"value"->>${index}`,
+  ).join(", ")} from json_each(?)`;
+
+  const pendingEventsSql = `select json_group_array(json_array(${quotedEventColumns})) as "batch" from (select ${quotedEventColumns} from ${quotedEventsTable} where "status" = ? order by "sync_id" asc limit ?)`;
+
+  const PERSIST_EVENTS_CHUNK_SIZE = 100;
+
+  const eventToRow = (event: PersistedCrdtEvent) => [
+    event.sync_id,
+    event.schema_version,
+    event.status,
+    event.type,
+    event.timestamp,
+    event.origin,
+    event.source_node_id,
+    event.dataset,
+    event.item_id,
+    event.payload,
+  ];
+
+  type EventRow = [
+    number,
+    number,
+    CrdtEventStatus,
+    CrdtEventType,
+    string,
+    CrdtEventOrigin,
+    string,
+    string,
+    string,
+    string,
+  ];
+
+  const rowToEvent = (row: EventRow): PersistedCrdtEvent => ({
+    sync_id: row[0],
+    schema_version: row[1],
+    status: row[2],
+    type: row[3],
+    timestamp: row[4],
+    origin: row[5],
+    source_node_id: row[6],
+    dataset: row[7],
+    item_id: row[8],
+    payload: row[9],
+  });
+
+  const persistEvents = (tx: InternalSQLiteTransactionWrapper<InternalDbSchema>, events: PersistedCrdtEvent[]) => {
+    for (let offset = 0; offset < events.length; offset += PERSIST_EVENTS_CHUNK_SIZE) {
+      const chunk = events.slice(offset, offset + PERSIST_EVENTS_CHUNK_SIZE);
+      tx.executePreparedRaw<[string], never>({
+        key: "persist-crdt-events",
+        sql: persistEventsSql,
+        params: [JSON.stringify(chunk.map(eventToRow))],
+        meta: { loggerLevel: "system" },
+      });
+    }
+  };
+
+  const readPendingEvents = (limit: number): PersistedCrdtEvent[] => {
+    const [row] = db.executePreparedRaw<[string, number], { batch: string }>({
+      key: "get-enqueued-pending-events",
+      sql: pendingEventsSql,
+      params: ["pending", limit],
+      meta: { loggerLevel: "system" },
+    });
+
+    return (JSON.parse(row.batch) as EventRow[]).map(rowToEvent);
   };
 
   const enqueueEvents = (
@@ -191,8 +256,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     db.executeTransaction((tx) => {
-      for (const event of events) {
-        persistEvent(tx, {
+      const persistedEvents = events.map(
+        (event): PersistedCrdtEvent => ({
           schema_version: event.schema_version ?? storage.migrator.currentSchemaVersion,
           timestamp: event.timestamp ?? serializeHLC(storage.hlc.getNextHLC()),
           type: event.type,
@@ -203,8 +268,9 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           payload: event.payload,
           sync_id: ++localSyncId,
           status: "pending",
-        });
-      }
+        }),
+      );
+      persistEvents(tx, persistedEvents);
     });
 
     return { beforeSyncId, afterSyncId: localSyncId, processed: processEnqueuedEvents() };
@@ -275,8 +341,8 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     }
 
     db.executeTransaction((tx) => {
-      for (const event of validatedEvents) {
-        const persistedEvent: PersistedCrdtEvent = {
+      const persistedEvents = validatedEvents.map(
+        (event): PersistedCrdtEvent => ({
           schema_version: storage.migrator.currentSchemaVersion,
           timestamp: serializeHLC(storage.hlc.getNextHLC()),
           type: event.type,
@@ -287,9 +353,10 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           payload: JSON.stringify(event.payload),
           sync_id: ++localSyncId,
           status: "pending",
-        };
-
-        persistEvent(tx, persistedEvent);
+        }),
+      );
+      persistEvents(tx, persistedEvents);
+      for (const persistedEvent of persistedEvents) {
         applyCrdtEvent(persistedEvent);
       }
     });
@@ -314,7 +381,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       status: "pending",
     };
 
-    persistEvent(tx, persistedEvent);
+    persistEvents(tx, [persistedEvent]);
     applyCrdtEvent(persistedEvent);
   };
 
@@ -687,21 +754,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
 
       const batchSize = 100;
 
-      const events = db.executePrepared(
-        "get-enqueued-pending-events",
-        {
-          status: "pending" as const,
-          limit: batchSize + 1,
-        },
-        (db, params) =>
-          db
-            .selectFrom(crdtEventsTable)
-            .selectAll()
-            .where("status", "=", params("status"))
-            .limit(params("limit"))
-            .orderBy("sync_id", "asc"),
-        { loggerLevel: "system" },
-      );
+      const events = readPendingEvents(batchSize + 1);
       hasMore = events.length > batchSize;
       if (hasMore) {
         events.pop();

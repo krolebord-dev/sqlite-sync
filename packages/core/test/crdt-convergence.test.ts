@@ -1145,4 +1145,30 @@ describe("CRDT convergence for parallel entity edits", () => {
       tombstone: 1,
     });
   });
+
+  it("round-trips payloads that need JSON escaping", async () => {
+    const trickyTitle = `quote " backslash \\ slash / brace {"json":"like"} newline \n tab \t unicode ✓ emoji 🚀 nul-ish \\u0000`;
+    const replicaA = await createReplica("node-a", 1_000);
+    const replicaB = await createReplica("node-b", 1_000);
+
+    await replicaA.createTodo({
+      id: "todo-1",
+      title: trickyTitle,
+      completed: false,
+      tombstone: false,
+    });
+
+    expect(replicaA.getTodo("todo-1")?.title).toBe(trickyTitle);
+    expect(JSON.parse(replicaA.getPersistedEvent(1).payload).title).toBe(trickyTitle);
+
+    const syncedFromA = await syncOneWay(replicaA, replicaB, 0);
+    expect(replicaB.getTodo("todo-1")?.title).toBe(trickyTitle);
+
+    replicaA.setTime(2_000);
+    await replicaA.updateTodo("todo-1", { title: `${trickyTitle} edited` });
+    await syncOneWay(replicaA, replicaB, syncedFromA);
+
+    expect(replicaB.getTodo("todo-1")?.title).toBe(`${trickyTitle} edited`);
+    expect(replicaA.getEventHlcAccumulator()).toBe(replicaB.getEventHlcAccumulator());
+  });
 });
