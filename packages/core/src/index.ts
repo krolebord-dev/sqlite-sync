@@ -67,7 +67,12 @@ export {
   type TableColumns,
   type TableOptions,
   t,
+  type WriteOrigin,
 } from "./schema/table-builder";
+export {
+  type AdmitClientEventsResult,
+  admitClientEvents,
+} from "./schema/admit-client-events";
 export {
   CrdtEventValidationError,
   type NewCrdtEventValidationResult,

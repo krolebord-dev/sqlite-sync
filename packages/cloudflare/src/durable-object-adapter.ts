@@ -1,4 +1,5 @@
 import {
+  admitClientEvents,
   type CrdtEventOrigin,
   type CrdtEventStatus,
   type CrdtEventType,
@@ -164,6 +165,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     bufferSize: batchSize,
     crdtStorage,
     broadcastPayload,
+    syncDbSchema,
   });
 
   const syncDbMutator = createCrdtStorageMutator<Schema[`~mutationsSchema`]>({
@@ -217,10 +219,12 @@ function createDurableObjectRemoteHandler({
   bufferSize = 50,
   crdtStorage,
   broadcastPayload,
+  syncDbSchema,
 }: {
   bufferSize?: number;
   crdtStorage: CrdtStorage;
   broadcastPayload: (payload: string) => void;
+  syncDbSchema: SyncDbSchema;
 }): RemoteHandler {
   createCrdtSyncProducer({
     storage: crdtStorage,
@@ -294,7 +298,17 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(request.events, request.nodeId);
+    const { admitted, skipped } = admitClientEvents({
+      syncDbSchema,
+      events: request.events,
+    });
+    if (skipped.length > 0) {
+      console.warn(
+        "Skipped client events for server-only tables",
+        skipped.map((event) => ({ dataset: event.dataset, type: event.type, item_id: event.item_id })),
+      );
+    }
+    const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(admitted, request.nodeId);
     const eventsAppliedMessage: SyncServerMessage = {
       type: "events-push-response",
       requestId: request.requestId,

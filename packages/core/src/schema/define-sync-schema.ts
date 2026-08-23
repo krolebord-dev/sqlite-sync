@@ -1,6 +1,7 @@
 import type { Migrations } from "../migrations/migrator";
 import type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
-import type { AnyTableBuilder, InferRow, SyncSchemaTables, TableBuilder, TableColumns } from "./table-builder";
+import { buildWriteOriginByName } from "./admit-client-events";
+import type { AnyTableBuilder, InferRow, SyncSchemaTables, TableBuilder, TableColumns, WriteOrigin } from "./table-builder";
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
@@ -46,6 +47,8 @@ export interface DefinedSyncSchema<Tables extends SyncSchemaTables>
   extends SyncDbSchema<ClientSchemaOf<Tables>, ServerSchemaOf<Tables>, MutationsSchemaOf<Tables>> {
   /** The table builders, for type extraction (`typeof schema.tables.item.$row`) and runtime metadata. */
   tables: Tables;
+  /** Write origin keyed by crdt and base table name. */
+  writeOriginByName: ReadonlyMap<string, WriteOrigin>;
 }
 
 export type DefineSyncSchemaConfig<Tables extends SyncSchemaTables> = {
@@ -83,10 +86,15 @@ export function defineSyncSchema<Tables extends SyncSchemaTables>({
     }
   }
 
+  const writeOriginByName = buildWriteOriginByName({ tables, tablesConfig });
+
   return {
     tables,
     get tablesConfig() {
       return tablesConfig;
+    },
+    get writeOriginByName() {
+      return writeOriginByName;
     },
     get migrations() {
       return migrations;

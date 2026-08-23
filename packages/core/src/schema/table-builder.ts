@@ -9,6 +9,12 @@ export type SqliteStorageType = "text" | "integer" | "real";
  */
 export type AiAccess = "read-write" | "read-only" | "hidden";
 
+/**
+ * Which replicas may author CRDT events for a table. `"any"` (the default) lets every replica
+ * write. `"server"` events are dropped from client pushes.
+ */
+export type WriteOrigin = "any" | "server";
+
 export type ColumnMeta = {
   kind: ColumnKind;
   /** Storage type used in generated DDL. Booleans store as integer 0/1. */
@@ -100,10 +106,16 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   readonly description: string | undefined;
 
   #aiAccess: AiAccess = "read-write";
+  #writeOrigin: WriteOrigin = "any";
 
   /** AI access declared via `.ai()`; "read-write" unless narrowed. */
   get aiAccess(): AiAccess {
     return this.#aiAccess;
+  }
+
+  /** Who may author events for this table; "any" unless narrowed via `.writes()`. */
+  get writeOrigin(): WriteOrigin {
+    return this.#writeOrigin;
   }
 
   constructor(
@@ -133,6 +145,7 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
       ...overrides,
     });
     next.#aiAccess = this.#aiAccess;
+    next.#writeOrigin = this.#writeOrigin;
     return next;
   }
 
@@ -144,6 +157,13 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   ai(access: AiAccess): TableBuilder<Cols, BaseName> {
     const next = this.withOptions({});
     next.#aiAccess = access;
+    return next;
+  }
+
+  /** Restrict which replicas may author events for this table; see {@link WriteOrigin}. */
+  writes(origin: WriteOrigin): TableBuilder<Cols, BaseName> {
+    const next = this.withOptions({});
+    next.#writeOrigin = origin;
     return next;
   }
 

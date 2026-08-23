@@ -174,6 +174,9 @@ Each column builder chains `.nullable()`, `.default(value)`,
 Table builders also chain `.ai(access)` (`"read-write"` by default, or `"read-only"` / `"hidden"`),
 which only affects `@sqlite-sync/ai`: see
 [AI access control](#limiting-what-an-agent-may-touch).
+They also chain `.writes("any" | "server")` (`"any"` by default),
+which only affects client push: see
+[Server-only tables](#server-only-tables).
 
 The table builders also expose runtime metadata: `syncDbSchema.tables.todo.columns` (per-column
 kind, nullability, defaults) and `validatePayload(payload, { event })` for checking CRDT event
@@ -1014,6 +1017,31 @@ syncDb.enqueueEvent({
 
 Events enqueued on the server are applied immediately and broadcast to all connected clients.
 
+### Server-only tables
+
+By default any replica can author events for a table. Mark a table `.writes("server")` when only
+the Durable Object should originate those events:
+
+```ts
+const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({ title: t.text() }),
+    job: t.table({ status: t.text() }).writes("server"),
+  },
+  migrations,
+});
+```
+
+Clients still receive and query the table. On push, the Durable Object drops events for
+server-only datasets, accepts the rest of the batch, and still returns `ok: true`. Server
+`enqueueEvent`, `applyOwnEvents`, and SQL writes are not filtered.
+
+This is independent of `.ai()`. A server-side agent can still mutate a server-only table unless
+you also mark it `.ai("read-only")`.
+
+A client that already applied the event locally keeps that row. Other replicas never see it.
+Client types and write triggers are not restricted yet.
+
 ### Listening to Events
 
 ```ts
@@ -1198,6 +1226,19 @@ Defines versioned DDL migrations.
 function createMigrations(
   builder: (steps: MigrationSteps) => Record<number, MigrationStep[]>
 ): Migrations
+```
+
+#### `admitClientEvents(options)`
+
+Splits a client push into events the hub should persist and events for tables declared
+`.writes("server")`. The Durable Object adapter calls this on `push-events`. Unknown datasets
+stay admitted.
+
+```ts
+function admitClientEvents<T extends { dataset: string }>(options: {
+  syncDbSchema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
+  events: readonly T[];
+}): { admitted: T[]; skipped: T[] }
 ```
 
 #### `generateId()`

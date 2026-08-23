@@ -52,6 +52,21 @@ describe("defineSyncSchema", () => {
     expect(schema.tables.todo.validatePayload({ title: "x" }, { event: "item-updated" })).toEqual({ success: true });
   });
 
+  it("indexes write origin by crdt and base table name", () => {
+    const schema = defineSyncSchema({
+      tables: {
+        todo: t.table({ title: t.text() }),
+        job: t.table({ status: t.text() }).writes("server"),
+      },
+      migrations,
+    });
+
+    expect(schema.writeOriginByName.get("todo")).toBe("any");
+    expect(schema.writeOriginByName.get("_todo")).toBe("any");
+    expect(schema.writeOriginByName.get("job")).toBe("server");
+    expect(schema.writeOriginByName.get("_job")).toBe("server");
+  });
+
   it("rejects colliding table names", () => {
     expect(() =>
       defineSyncSchema({

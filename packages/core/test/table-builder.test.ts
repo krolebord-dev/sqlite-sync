@@ -82,6 +82,24 @@ describe("column metadata", () => {
       expect(table.baseName).toBe("raw_item");
     }
   });
+
+  it("records write origin and carries it through the other modifiers in either order", () => {
+    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
+
+    expect(base.writeOrigin).toBe("any");
+    expect(base.writes("server").writeOrigin).toBe("server");
+    expect(base.writeOrigin).toBe("any");
+
+    const writesThenAi = base.writes("server").ai("read-only").describe("Server job rows.");
+    const aiThenWrites = base.ai("read-only").describe("Server job rows.").writes("server");
+
+    for (const table of [writesThenAi, aiThenWrites]) {
+      expect(table.writeOrigin).toBe("server");
+      expect(table.aiAccess).toBe("read-only");
+      expect(table.description).toBe("Server job rows.");
+      expect(table.baseName).toBe("raw_item");
+    }
+  });
 });
 
 describe("row type inference", () => {
