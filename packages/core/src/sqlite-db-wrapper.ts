@@ -105,7 +105,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     loggerLevel: QueryMetaOpts["loggerLevel"],
     skipAfterMutatingStatement: boolean,
   ): ExecuteResult<T> {
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const perf = startPerformanceLogger(this.logger, loggerLevel);
     const statement = this.ensureDb.prepare(sql);
     let transaction: { commit: () => void; rollback: () => void } | undefined;
 
@@ -143,7 +143,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         rows.push(row as T);
       }
       statement.finalize();
-      perf?.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
+      perf.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
 
       if (transaction) {
         // Nothing was written, so the statement cannot have produced any work for the callback.
@@ -257,9 +257,9 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   prepare<TParams extends unknown[], TResult>(sql: string, opts?: QueryMetaOpts) {
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
     const stmt = this.ensureDb.prepare(sql);
-    perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
+    perf.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
 
     let isFinalized = false;
 
@@ -268,7 +268,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         throw new Error("Statement is finalized");
       }
 
-      const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+      const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
       try {
         if (params.length > 0) {
           stmt.bind(params as SqlValue[]);
@@ -291,7 +291,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         return results;
       } finally {
         stmt.reset(true);
-        perf?.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
+        perf.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       }
     };
 
@@ -411,7 +411,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
-    const perf = this.logger ? startPerformanceLogger(this.logger) : undefined;
+    const perf = startPerformanceLogger(this.logger, "system");
     const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
     this.dataPointers.push(dataPointer);
 
@@ -428,7 +428,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
     this.invalidateDbSchema();
 
-    perf?.logEnd("useSnapshot", "success", "system");
+    perf.logEnd("useSnapshot", "success", "system");
   }
 
   createSnapshot() {

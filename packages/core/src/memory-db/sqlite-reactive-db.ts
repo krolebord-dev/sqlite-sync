@@ -73,7 +73,7 @@ export class SQLiteReactiveDb<Database> {
 
   static async create<Database>(opts: SQLiteReactiveDbOptions) {
     const logger = opts.logger;
-    const perf = startPerformanceLogger(logger);
+    const perf = startPerformanceLogger(logger, "system");
     if (!sqliteModule) {
       sqliteModule = await sqlite3InitModule();
     }
