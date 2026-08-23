@@ -56,6 +56,45 @@ export function makeCrdtTable({
   }
 }
 
+// Workerd caps expr depth at 100; a left-deep `||` chain fails around 34 columns.
+function concatSql(parts: readonly string[]): string {
+  if (parts.length === 0) {
+    return "''";
+  }
+  if (parts.length === 1) {
+    return parts[0];
+  }
+  const mid = parts.length >> 1;
+  return `(${concatSql(parts.slice(0, mid))})||(${concatSql(parts.slice(mid))})`;
+}
+
+function sqlStringLiteral(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function fullRowPayloadSql(columnNames: string[]) {
+  return concatSql([
+    "'{'",
+    ...columnNames.flatMap((columnName, index) => [
+      ...(index > 0 ? ["','"] : []),
+      sqlStringLiteral(`${JSON.stringify(columnName)}:`),
+      `json_quote(new.${quoteId(columnName)})`,
+    ]),
+    "'}'",
+  ]);
+}
+
+function sparseUpdatePayloadSql(columnNames: string[]) {
+  const changedFields = columnNames
+    .filter((columnName) => columnName !== "id")
+    .map((columnName) => {
+      const quoted = quoteId(columnName);
+      const key = sqlStringLiteral(`${JSON.stringify(columnName)}:`);
+      return `case when old.${quoted} collate binary is not new.${quoted} then ${key}||json_quote(new.${quoted})||',' else '' end`;
+    });
+  return concatSql(["'{'", `rtrim(${concatSql(changedFields)}, ',')`, "'}'"]);
+}
+
 export function createCrdtViewStatements({
   baseTableName,
   crdtTableName,
@@ -65,19 +104,8 @@ export function createCrdtViewStatements({
   crdtTableName: string;
   columnNames: string[];
 }) {
-  const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
-  const fullPayload = `'{'||${columnNames
-    .map((columnName) => `${sqlString(`${JSON.stringify(columnName)}:`)}||json_quote(new.${quoteId(columnName)})`)
-    .join("||','||")}||'}'`;
-  const updatePayload = `'{'||rtrim(${columnNames
-    .filter((columnName) => columnName !== "id")
-    .map(
-      (columnName) =>
-        `case when old.${quoteId(columnName)} collate binary is not new.${quoteId(columnName)} then ${sqlString(
-          `${JSON.stringify(columnName)}:`,
-        )}||json_quote(new.${quoteId(columnName)})||',' else '' end`,
-    )
-    .join("||")}, ',')||'}'`;
+  const fullPayload = fullRowPayloadSql(columnNames);
+  const updatePayload = sparseUpdatePayloadSql(columnNames);
 
   return [
     `create table if not exists ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
@@ -98,7 +126,7 @@ begin
   insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
     "dataset", "type", "item_id", "new_item_id", "payload_json"
   ) values (
-    ${sqlString(baseTableName)}, 'item-created', new."id", null, ${fullPayload}
+    ${sqlStringLiteral(baseTableName)}, 'item-created', new."id", null, ${fullPayload}
   );
 end`,
     `create trigger ${quoteId(`${crdtTableName}_updated`)}
@@ -108,7 +136,7 @@ begin
   insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
     "dataset", "type", "item_id", "new_item_id", "payload_json"
   ) values (
-    ${sqlString(baseTableName)}, 'item-updated', old."id", new."id", ${updatePayload}
+    ${sqlStringLiteral(baseTableName)}, 'item-updated', old."id", new."id", ${updatePayload}
   );
 end`,
     `create trigger ${quoteId(`${crdtTableName}_deleted`)}
@@ -119,7 +147,7 @@ begin
   insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
     "dataset", "type", "item_id", "new_item_id", "payload_json"
   ) values (
-    ${sqlString(baseTableName)}, 'item-deleted', old."id", null, '{}'
+    ${sqlStringLiteral(baseTableName)}, 'item-deleted', old."id", null, '{}'
   );
 end`,
   ];
