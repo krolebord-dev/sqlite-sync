@@ -14,6 +14,7 @@ import {
 } from "../src/sqlite-crdt/crdt-table-schema";
 import { CRDT_CHANGE_INTENTS_TABLE, makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
 import { createStoredValue } from "../src/sqlite-crdt/stored-value";
+import type { SQLiteDbWrapper } from "../src/sqlite-db-wrapper";
 
 const BASE_TABLE = "todo";
 const CRDT_TABLE = "_todo";
@@ -271,6 +272,22 @@ async function syncOneWay(
   return nextSyncId;
 }
 
+function recordStatements(db: SQLiteDbWrapper<unknown>) {
+  const rawSpy = vi.spyOn(db, "executePreparedRaw");
+  const preparedSpy = vi.spyOn(db, "executePrepared");
+
+  return {
+    keys: () => [...rawSpy.mock.calls.map(([opts]) => opts.key), ...preparedSpy.mock.calls.map(([key]) => key)],
+    sqlFor: (key: string) => rawSpy.mock.calls.filter(([opts]) => opts.key === key).map(([opts]) => opts.sql),
+    restore: () => {
+      rawSpy.mockRestore();
+      preparedSpy.mockRestore();
+    },
+  };
+}
+
+const countKey = (keys: string[], key: string) => keys.filter((candidate) => candidate === key).length;
+
 describe("CRDT convergence for parallel entity edits", () => {
   it("replays pending persisted events on startup", async () => {
     const replica = await createReplica("node-a", 1_000, {
@@ -305,15 +322,8 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 
   it("finalizes unchanged events with one batched status-only update", async () => {
-    const systemQueries: string[] = [];
-    const replica = await createReplica("node-a", 1_000, {
-      logger(type, message, level) {
-        if (type === "memory:prepare-execute" && level === "system") {
-          systemQueries.push(message);
-        }
-      },
-    });
-    systemQueries.length = 0;
+    const replica = await createReplica("node-a", 1_000);
+    const statements = recordStatements(replica.db);
 
     await replica.importEvents(
       ["todo-1", "todo-2", "todo-3"].map((itemId, index) => ({
@@ -330,39 +340,36 @@ describe("CRDT convergence for parallel entity edits", () => {
       })),
     );
 
-    const eventUpdates = systemQueries.filter((query) => query.includes('update "persisted_crdt_events"'));
-    expect(eventUpdates).toHaveLength(1);
-    expect(eventUpdates[0]).toContain(`set "status" = ? where "sync_id" in (select "value" from json_each(?))`);
-    expect(eventUpdates[0]).not.toContain('"schema_version" = ?');
+    const keys = statements.keys();
+    expect(countKey(keys, "update-crdt-event-status-batch")).toBe(1);
+    expect(countKey(keys, "update-crdt-event-status")).toBe(0);
+    expect(countKey(keys, "update-crdt-event-full")).toBe(0);
+    expect(statements.sqlFor("update-crdt-event-status-batch")[0]).toContain(
+      `set "status" = ? where "sync_id" in (select "value" from json_each(?))`,
+    );
 
-    const duplicateLookups = systemQueries.filter((query) => query.includes('min("sync_id") as "first_sync_id"'));
-    expect(duplicateLookups).toHaveLength(1);
-    expect(duplicateLookups[0]).toContain(`"timestamp" in (select "value" from json_each(?))`);
+    expect(countKey(keys, "get-first-accepted-sync-ids-by-timestamp")).toBe(1);
+    expect(statements.sqlFor("get-first-accepted-sync-ids-by-timestamp")[0]).toContain(
+      `"timestamp" in (select "value" from json_each(?))`,
+    );
+    statements.restore();
   });
 
   it("does not run the duplicate lookup for local writes", async () => {
-    const systemQueries: string[] = [];
-    const replica = await createReplica("node-a", 1_000, {
-      logger(type, message, level) {
-        if (type === "memory:prepare-execute" && level === "system") {
-          systemQueries.push(message);
-        }
-      },
-    });
-    systemQueries.length = 0;
+    const replica = await createReplica("node-a", 1_000);
+    const statements = recordStatements(replica.db);
 
     await replica.createTodo({ id: "todo-1", title: "Local", completed: false, tombstone: false });
     await replica.updateTodo("todo-1", { title: "Local edited" });
 
-    const duplicateLookups = systemQueries.filter((query) => query.includes('min("sync_id") as "first_sync_id"'));
-    expect(duplicateLookups).toHaveLength(0);
+    const keys = statements.keys();
+    expect(countKey(keys, "get-first-accepted-sync-id-by-timestamp")).toBe(0);
+    expect(countKey(keys, "get-first-accepted-sync-ids-by-timestamp")).toBe(0);
     expect(replica.getPersistedEvents().map((event) => event.status)).toEqual(["applied", "applied"]);
 
-    const eventUpdates = systemQueries.filter((query) => query.includes('update "persisted_crdt_events"'));
-    expect(eventUpdates).toHaveLength(2);
-    for (const eventUpdate of eventUpdates) {
-      expect(eventUpdate).toContain(`set "status" = ? where "sync_id" = ?`);
-    }
+    expect(countKey(keys, "update-crdt-event-status")).toBe(2);
+    expect(statements.sqlFor("update-crdt-event-status")[0]).toContain(`set "status" = ? where "sync_id" = ?`);
+    statements.restore();
   });
 
   it("does not schedule per-event notification microtasks without an observer", async () => {
@@ -394,21 +401,15 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 
   it("does not drain CRDT intents after an unrelated mutation", async () => {
-    const systemQueries: string[] = [];
-    const replica = await createReplica("node-a", 1_000, {
-      logger(type, message, level) {
-        if (type === "memory:prepare-execute" && level === "system") {
-          systemQueries.push(message);
-        }
-      },
-    });
+    const replica = await createReplica("node-a", 1_000);
     replica.db.execute(`CREATE TABLE "unrelated" ("id" INTEGER PRIMARY KEY)`);
-    systemQueries.length = 0;
+    const statements = recordStatements(replica.db);
 
     replica.db.execute(`INSERT INTO "unrelated" DEFAULT VALUES`);
 
-    expect(systemQueries.some((query) => query.includes(`delete from "${CRDT_CHANGE_INTENTS_TABLE}"`))).toBe(false);
+    expect(countKey(statements.keys(), "drain-crdt-change-intents")).toBe(0);
     expect(replica.getPersistedEvents()).toEqual([]);
+    statements.restore();
   });
 
   it("marks migration-dropped events as applied with no-op payload", async () => {
