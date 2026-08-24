@@ -16,9 +16,8 @@ export type AiDbExecuteParams = {
 };
 
 /**
- * Minimal executor contract for AI database access. Runtime-specific — inject the raw SQL
- * capability that matches where the storage lives; a Cloudflare `ServerSyncDb`'s `unsafe`
- * executor satisfies it.
+ * Minimal executor contract for AI database access. Inject the raw SQL capability that
+ * matches where the storage lives. A Cloudflare `ServerSyncDb`'s `unsafe` executor satisfies it.
  */
 export type AiDbExecutor = {
   execute<TResult = unknown>(query: AiDbExecuteParams): { rows: TResult[] };
@@ -70,18 +69,17 @@ export type AiMutationResult =
     };
 
 /**
- * AI access to a synced database. Lives where the storage lives; its method names
- * are the RPC contract, so a DO stub proxying to these methods exposes the same surface
- * (promise-wrapped) and satisfies the tool layer's `DbToolsAccess`.
+ * AI access to a synced database. Lives next to the storage. Method names are the RPC
+ * contract: a DO stub that proxies them (promise-wrapped) satisfies `DbToolsAccess`.
  *
- * `query` enforces read-only (single SELECT/WITH/VALUES statement, no write opcodes, executed
- * in a forced-rollback transaction). Reads are restricted by table only once the schema declares
- * a table `.ai("hidden")`; until then the whole database file is in scope for the agent, so don't
- * colocate data the agent must not see.
+ * `query` is read-only: one SELECT/WITH/VALUES statement, no write opcodes, run in a
+ * forced-rollback transaction. Table-level read limits apply only after the schema sets
+ * `{ ai: "hidden" }` on a table. Until then the whole database file is in scope, so do not
+ * put secret data in the same file.
  *
- * `mutate` is only present when `createAiDbAccess` receives a CRDT storage. Mutations are CRDT
- * events applied through sqlite-sync's normal own-event path, never direct SQL writes, and are
- * rejected for tables the schema declares read-only or hidden.
+ * `mutate` exists only when `createAiDbAccess` gets a CRDT storage. Mutations are CRDT
+ * events on the normal own-event path, never direct SQL writes. Tables marked read-only or
+ * hidden are rejected.
  */
 export type AiDbAccess = {
   getSchemaDoc(): string;
@@ -106,8 +104,8 @@ export function createAiDbAccess(opts: {
 }): AiDbAccess {
   const policy = resolveAiPolicy({ syncDbSchema: opts.syncDbSchema });
   const schemaDoc = createSchemaDoc({ syncDbSchema: opts.syncDbSchema, context: opts.context });
-  // A hidden table flips reads to an allow-list, which also cuts off the event log (it holds every
-  // dataset's payloads) and any non-synced table sharing the database file.
+  // A hidden table flips reads to an allow-list, which also cuts off the event log (it holds
+  // every dataset's payloads) and any non-synced table sharing the database file.
   const guard = createQueryGuard({
     executor: opts.executor,
     readableTables: policy.hasHiddenTables ? policy.readableBaseTableNames : undefined,

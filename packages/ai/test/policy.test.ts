@@ -7,8 +7,8 @@ const migrations = createMigrations(() => ({ 0: [] }));
 const syncDbSchema = defineSyncSchema({
   tables: {
     todos: t.table({ title: t.text() }),
-    audit: t.table({ note: t.text() }).ai("read-only"),
-    billing: t.table({ card: t.text() }).ai("hidden"),
+    audit: t.table({ note: t.text() }, { ai: "read-only" }),
+    billing: t.table({ card: t.text() }, { ai: "hidden" }),
   },
   migrations,
 });

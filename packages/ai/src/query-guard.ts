@@ -25,15 +25,15 @@ export class QueryGuardError extends Error {
 
 export type QueryGuard = {
   /**
-   * Statically verifies the query is a read-only single statement, and — when the guard was
-   * created with `readableTables` — that it only reads those tables. Without `readableTables`
-   * reads are unrestricted: the whole database file is in scope for the agent, so don't
-   * colocate data the agent must not see.
+   * Checks that the query is a read-only single statement. When the guard was created with
+   * `readableTables`, also checks that it only reads those tables. Without `readableTables`,
+   * reads are unrestricted: the whole database file is in scope, so do not put secret data
+   * in the same file.
    */
   check(input: QueryGuardInput): QueryGuardVerdict;
   /**
-   * `check` + execute inside a forced-rollback transaction (the unconditional backstop for
-   * anything the analysis might miss). Throws {@link QueryGuardError} when the check rejects.
+   * Runs `check`, then executes inside a forced-rollback transaction (backstop for anything
+   * the analysis might miss). Throws {@link QueryGuardError} when the check rejects.
    */
   execute<TResult = unknown>(input: QueryGuardInput): { rows: TResult[] };
 };
@@ -43,7 +43,7 @@ export type QueryGuard = {
  * real-table mutation opens its cursor through it), `Clear`/`Destroy` cover whole-table
  * deletes that skip cursors (truncate optimization), the rest cover DDL, pragma-class
  * statements (which a transaction rollback would NOT undo), virtual-table writes, and trigger
- * subprograms. `Insert`/`Delete`/`IdxInsert` are deliberately absent — they also run against
+ * subprograms. `Insert`/`Delete`/`IdxInsert` are deliberately absent: they also run against
  * ephemeral/sorter cursors in ordinary SELECTs (DISTINCT, ORDER BY) and are only dangerous on
  * a cursor an `OpenWrite` would have created.
  */
@@ -74,7 +74,7 @@ const WRITE_OPCODES = new Set([
 /**
  * Opcodes that open a b-tree cursor for reading. `p2` is the root page of the table or index
  * and `p3` the database it lives in (0 = main), which is how a statement's real table set is
- * recovered — views are already flattened into their base tables by the time bytecode exists,
+ * recovered. Views are already flattened into their base tables by the time bytecode exists,
  * so aliases, CTEs, subqueries and quoting tricks all resolve here.
  */
 const READ_CURSOR_OPCODES = new Set(["OpenRead", "ReopenIdx"]);

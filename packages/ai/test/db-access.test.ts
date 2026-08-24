@@ -157,8 +157,8 @@ describe("createAiDbAccess policy enforcement", () => {
   const policySchema = defineSyncSchema({
     tables: {
       items: t.table({ title: t.text() }, { baseName: "item" }),
-      audit: t.table({ note: t.text() }).ai("read-only"),
-      billing: t.table({ card: t.text() }).ai("hidden"),
+      audit: t.table({ note: t.text() }, { ai: "read-only" }),
+      billing: t.table({ card: t.text() }, { ai: "hidden" }),
     },
     migrations: createMigrations(() => ({ 0: [] })),
   });
@@ -314,7 +314,7 @@ describe("createAiDbAccess query with a hidden table", () => {
   const restrictedSchema = defineSyncSchema({
     tables: {
       items: t.table({ title: t.text() }, { baseName: "item" }),
-      billing: t.table({ card: t.text() }).ai("hidden"),
+      billing: t.table({ card: t.text() }, { ai: "hidden" }),
     },
     migrations: createMigrations(() => ({ 0: [] })),
   });

@@ -3,15 +3,15 @@ export type ColumnKind = "text" | "integer" | "real" | "boolean" | "enum";
 export type SqliteStorageType = "text" | "integer" | "real";
 
 /**
- * How much of a table an AI agent may use. Consumed by `@sqlite-sync/ai`, which rejects
- * mutations to `read-only` tables, and leaves `hidden` tables out of the generated schema doc
- * while rejecting queries that read them.
+ * What `@sqlite-sync/ai` may do with a table.
+ * `read-only`: documented and queryable; mutations rejected.
+ * `hidden`: omitted from the schema doc; reads rejected.
  */
 export type AiAccess = "read-write" | "read-only" | "hidden";
 
 /**
- * Which replicas may author CRDT events for a table. `"any"` (the default) lets every replica
- * write. `"server"` events are dropped from client pushes.
+ * Who may author CRDT events for a table.
+ * `"any"` (default): every replica. `"server"`: client pushes drop these events.
  */
 export type WriteOrigin = "any" | "server";
 
@@ -66,6 +66,10 @@ export type TableOptions<BaseName extends string | undefined = string | undefine
   /** Override the materialized base table name (defaults to the crdt table name prefixed with "_"). */
   baseName?: BaseName;
   description?: string;
+  /** Defaults to `"read-write"`. See {@link AiAccess}. */
+  ai?: AiAccess;
+  /** Defaults to `"any"`. See {@link WriteOrigin}. */
+  writes?: WriteOrigin;
 };
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -104,19 +108,10 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   readonly columns: Record<string, ColumnMeta>;
   readonly baseName: BaseName;
   readonly description: string | undefined;
-
-  #aiAccess: AiAccess = "read-write";
-  #writeOrigin: WriteOrigin = "any";
-
-  /** AI access declared via `.ai()`; "read-write" unless narrowed. */
-  get aiAccess(): AiAccess {
-    return this.#aiAccess;
-  }
-
-  /** Who may author events for this table; "any" unless narrowed via `.writes()`. */
-  get writeOrigin(): WriteOrigin {
-    return this.#writeOrigin;
-  }
+  /** Resolved {@link AiAccess}; defaults to `"read-write"`. */
+  readonly aiAccess: AiAccess;
+  /** Resolved {@link WriteOrigin}; defaults to `"any"`. */
+  readonly writeOrigin: WriteOrigin;
 
   constructor(
     readonly userColumns: Cols,
@@ -135,36 +130,33 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
     };
     this.baseName = options?.baseName as BaseName;
     this.description = options?.description;
+    this.aiAccess = options?.ai ?? "read-write";
+    this.writeOrigin = options?.writes ?? "any";
   }
 
-  /** Rebuilds the table with `overrides` applied, carrying over state kept outside the options. */
+  /** Rebuilds the table with `overrides` applied over the current options. */
   private withOptions(overrides: Partial<TableOptions<BaseName>>): TableBuilder<Cols, BaseName> {
-    const next = new TableBuilder<Cols, BaseName>(this.userColumns, {
+    return new TableBuilder<Cols, BaseName>(this.userColumns, {
       baseName: this.baseName,
       description: this.description,
+      ai: this.aiAccess,
+      writes: this.writeOrigin,
       ...overrides,
     });
-    next.#aiAccess = this.#aiAccess;
-    next.#writeOrigin = this.#writeOrigin;
-    return next;
   }
 
   describe(description: string): TableBuilder<Cols, BaseName> {
     return this.withOptions({ description });
   }
 
-  /** Restrict what an AI agent may do with this table; see {@link AiAccess}. */
+  /** Same as `{ ai }` in {@link TableOptions}. */
   ai(access: AiAccess): TableBuilder<Cols, BaseName> {
-    const next = this.withOptions({});
-    next.#aiAccess = access;
-    return next;
+    return this.withOptions({ ai: access });
   }
 
-  /** Restrict which replicas may author events for this table; see {@link WriteOrigin}. */
+  /** Same as `{ writes }` in {@link TableOptions}. */
   writes(origin: WriteOrigin): TableBuilder<Cols, BaseName> {
-    const next = this.withOptions({});
-    next.#writeOrigin = origin;
-    return next;
+    return this.withOptions({ writes: origin });
   }
 
   /** Type-only: the row shape returned by queries. Do not access at runtime. */

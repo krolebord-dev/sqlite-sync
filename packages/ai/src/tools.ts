@@ -125,7 +125,7 @@ export function createDbTools(opts: CreateDbToolsOptions): ToolSet {
     }),
     queryDb: tool({
       description:
-        "Run a read-only SQL query against the synced SQLite database. Only a single SELECT/WITH/VALUES statement is allowed — anything that writes is rejected. Pass values as ? placeholders via `parameters` instead of inlining them as literals. Results are capped; ask for fewer columns or add LIMIT/WHERE if `truncated` is true.",
+        "Run a read-only SQL query against the synced SQLite database. Only a single SELECT/WITH/VALUES statement is allowed. Anything that writes is rejected. Pass values as ? placeholders via `parameters` instead of inlining them as literals. Results are capped; ask for fewer columns or add LIMIT/WHERE if `truncated` is true.",
       inputSchema: queryInputSchema,
       execute: async ({ sql, parameters }) => {
         const access = await opts.access();

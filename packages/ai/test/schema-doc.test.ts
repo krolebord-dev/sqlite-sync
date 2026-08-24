@@ -43,7 +43,7 @@ describe("createSchemaDoc", () => {
         "",
         "A todo app.",
         "",
-        "This is a synced SQLite database — data replicates automatically between the user's devices.",
+        "This is a synced SQLite database. Data replicates automatically between the user's devices.",
         "All writes go through a sync event log, which is why the tables listed below are exposed as",
         "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
         "without any tombstone filtering. Every table has a unique `id` text primary key.",
@@ -83,7 +83,7 @@ describe("createSchemaDoc", () => {
 
     expect(declaredTablesDoc(doc)).toBe(
       [
-        "This is a synced SQLite database — data replicates automatically between the user's devices.",
+        "This is a synced SQLite database. Data replicates automatically between the user's devices.",
         "All writes go through a sync event log, which is why the tables listed below are exposed as",
         "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
         "without any tombstone filtering. Every table has a unique `id` text primary key.",
@@ -126,8 +126,8 @@ describe("createSchemaDoc", () => {
     const syncDbSchema = defineSyncSchema({
       tables: {
         todos: t.table({ title: t.text() }),
-        audit: t.table({ note: t.text() }).ai("read-only").describe("Append-only trail."),
-        billing: t.table({ card: t.text() }).ai("hidden"),
+        audit: t.table({ note: t.text() }, { ai: "read-only", description: "Append-only trail." }),
+        billing: t.table({ card: t.text() }, { ai: "hidden" }),
       },
       migrations,
     });
@@ -156,7 +156,7 @@ describe("createSchemaDoc", () => {
     const syncDbSchema = defineSyncSchema({
       tables: {
         todos: t.table({ title: t.text() }),
-        billing: t.table({ card: t.text() }).ai("hidden"),
+        billing: t.table({ card: t.text() }, { ai: "hidden" }),
       },
       migrations,
     });
@@ -170,7 +170,7 @@ describe("createSchemaDoc", () => {
   it("keeps the change history when tables are read-only but none are hidden", () => {
     const syncDbSchema = defineSyncSchema({
       tables: {
-        todos: t.table({ title: t.text() }).ai("read-only"),
+        todos: t.table({ title: t.text() }, { ai: "read-only" }),
       },
       migrations,
     });

@@ -56,7 +56,7 @@ describe("defineSyncSchema", () => {
     const schema = defineSyncSchema({
       tables: {
         todo: t.table({ title: t.text() }),
-        job: t.table({ status: t.text() }).writes("server"),
+        job: t.table({ status: t.text() }, { writes: "server" }),
       },
       migrations,
     });

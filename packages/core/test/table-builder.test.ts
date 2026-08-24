@@ -66,7 +66,22 @@ describe("column metadata", () => {
     expect(described.baseName).toBe("raw_item");
   });
 
-  it("records AI access and carries it through the other modifiers in either order", () => {
+  it("records AI access and write origin from table options", () => {
+    const defaults = t.table({ title: t.text() });
+    expect(defaults.aiAccess).toBe("read-write");
+    expect(defaults.writeOrigin).toBe("any");
+
+    const narrowed = t.table(
+      { title: t.text() },
+      { baseName: "raw_item", ai: "hidden", writes: "server", description: "Server job rows." },
+    );
+    expect(narrowed.aiAccess).toBe("hidden");
+    expect(narrowed.writeOrigin).toBe("server");
+    expect(narrowed.description).toBe("Server job rows.");
+    expect(narrowed.baseName).toBe("raw_item");
+  });
+
+  it("records AI access via .ai() and carries it through the other modifiers in either order", () => {
     const base = t.table({ title: t.text() }, { baseName: "raw_item" });
 
     expect(base.aiAccess).toBe("read-write");
@@ -83,7 +98,7 @@ describe("column metadata", () => {
     }
   });
 
-  it("records write origin and carries it through the other modifiers in either order", () => {
+  it("records write origin via .writes() and carries it through the other modifiers in either order", () => {
     const base = t.table({ title: t.text() }, { baseName: "raw_item" });
 
     expect(base.writeOrigin).toBe("any");

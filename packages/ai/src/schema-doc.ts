@@ -5,17 +5,16 @@ export type SchemaDocContext = {
   overview?: string;
 };
 
-// Library mechanics every generated doc should explain, so consumers only have to describe
-// their own domain in `context`. Kept free of tombstone-column details the agent never sees.
+// Mechanics every generated doc should explain, so `context` only needs domain notes.
+// Skips tombstone-column details the agent never sees.
 const SCHEMA_DOC_PREAMBLE = [
-  "This is a synced SQLite database — data replicates automatically between the user's devices.",
+  "This is a synced SQLite database. Data replicates automatically between the user's devices.",
   "All writes go through a sync event log, which is why the tables listed below are exposed as",
   "read-only SQL views; soft-deleted rows are already filtered out, so query them directly",
   "without any tombstone filtering. Every table has a unique `id` text primary key.",
 ].join("\n");
 
-// Added when the schema hides a table, because then reads are restricted to an allow-list and a
-// query touching anything else fails. Worth spending tokens on to save the agent a wasted turn.
+// Added when any table is hidden: reads become an allow-list, and anything else fails.
 const RESTRICTED_READS_NOTE = [
   "Only the tables documented below are readable. Queries that touch any other table are",
   "rejected, including the internal sync event log, so there is no change history available.",
@@ -35,17 +34,16 @@ function renderColumn(name: string, meta: ColumnMeta): string {
 }
 
 /**
- * Generates a markdown schema doc for an AI agent from the declared sync schema's table
- * builders — no database access needed. Tables are presented under the view names the agent
- * queries; descriptions come from `.describe()` on the table and column builders.
- * The internal `tombstone` column is omitted.
+ * Builds a markdown schema doc for an AI agent from the declared sync schema.
+ * No database access. Tables use the view names the agent queries. Descriptions come from
+ * `.describe()` on the table and column builders. The internal `tombstone` column is omitted.
  *
- * Tables declared `.ai("hidden")` are left out entirely, and read-only ones are labelled so the
- * agent does not attempt a mutation that would be rejected.
+ * Tables with `{ ai: "hidden" }` are left out. Read-only tables are labelled so the agent
+ * does not try a mutation that would be rejected.
  *
- * The doc always includes a built-in preamble explaining sqlite-sync mechanics (read-only
- * views, soft-deletes already filtered) after the consumer's `overview` — consumers only
- * need to describe their own domain.
+ * After the consumer's `overview`, the doc always adds a short preamble about sqlite-sync
+ * (read-only views, soft-deletes already filtered). Put domain notes in `overview` or
+ * `.describe()`.
  */
 export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: SchemaDocContext }): string {
   const policy = resolveAiPolicy({ syncDbSchema: opts.syncDbSchema });
@@ -86,16 +84,16 @@ export function createSchemaDoc(opts: { syncDbSchema: SyncDbSchema; context?: Sc
   return sections.join("\n\n");
 }
 
-// Documents the curated `change_history` view created over the sync event log. Unlike the table
-// views above, it is NOT tombstone-filtered — it intentionally surfaces the full change log,
-// including the contents of since-deleted items. Omitted when any table is hidden: the view reads
-// the raw event log, which holds every dataset's payloads, so it cannot be filtered per table.
+// Documents the curated `change_history` view over the sync event log. Unlike the table
+// views above, it is NOT tombstone-filtered: it shows the full change log, including
+// since-deleted items. Omitted when any table is hidden, because the view reads the raw
+// event log (every dataset's payloads) and cannot be filtered per table.
 const CHANGE_HISTORY_DOC = [
   "## change_history",
   "",
   "A read-only, append-only log of every change across all tables, one row per sync event.",
   "Query it like any other view. Unlike the tables above, soft-delete filtering does NOT apply",
-  "here — it includes changes to items that were later deleted, so treat it as an audit log.",
+  "here. It includes changes to items that were later deleted, so treat it as an audit log.",
   "",
   "Columns:",
   "- `seq` INTEGER NOT NULL — monotonic sequence number; **order history by this** (ascending = oldest first)",

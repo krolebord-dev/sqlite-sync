@@ -23,8 +23,8 @@ export function buildWriteOriginByName(
 }
 
 /**
- * Splits a client push into events the hub should persist and events for tables declared
- * `.writes("server")`. Unknown datasets stay admitted. Resolves either the crdt or the base
+ * Splits a client push into events the hub should persist and events for tables with
+ * `{ writes: "server" }`. Unknown datasets stay admitted. Matches either the crdt or the base
  * table name.
  */
 export function admitClientEvents<T extends { dataset: string }>(opts: {
