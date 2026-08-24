@@ -171,8 +171,8 @@ Each column builder chains `.nullable()`, `.default(value)`,
 `.$type<Narrowed>()` (type-only narrowing, e.g. `t.text().$type<"a" | (string & {})>()`), and
 `.describe(text)` for generated schema docs.
 
-Table options cover `baseName`, `description`, `ai`, and `writes`. Defaults are
-`ai: "read-write"` and `writes: "any"`. See
+Table options cover `baseName`, `description`, `ai`, `writes`, and `exportImport`.
+Defaults are `ai: "read-write"`, `writes: "any"`, and `exportImport: "include"`. See
 [AI access control](#limiting-what-an-agent-may-touch) and
 [Server-only tables](#server-only-tables). `.describe()` is the same as `{ description }`.
 
@@ -581,6 +581,20 @@ keeps its `id` and drops the internal `tombstone` column. Pass `{ tables: ["todo
 to export a subset — the filter accepts either the public or the base table
 name. The data is read from the local in-memory database — the state the current
 tab sees.
+
+Pass `{ exportImport: "ignore" }` as a table option for data that must stay out
+of backup and restore. Ignored tables are omitted even when selected explicitly,
+and matching rows in an imported dump are skipped.
+
+```ts
+const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({ title: t.text() }),
+    session: t.table({ token: t.text() }, { exportImport: "ignore" }),
+  },
+  migrations,
+});
+```
 
 `importData(data, opts?)` replays each row as an `item-created` CRDT event,
 seeding it through the worker and propagating to the server like any other write.

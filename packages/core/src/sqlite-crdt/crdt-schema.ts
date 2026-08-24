@@ -1,10 +1,12 @@
 import type { ColumnType } from "kysely";
 import type { Migrations } from "../migrations/migrator";
-import type { SyncSchemaTables } from "../schema/table-builder";
+import type { ExportImportMode, SyncSchemaTables } from "../schema/table-builder";
 
 export type CrdtTableConfig = {
   baseTableName: string;
   crdtTableName: string;
+  /** Defaults to `"include"`. */
+  exportImport?: ExportImportMode;
 };
 
 // biome-ignore lint/complexity/noBannedTypes: required generic

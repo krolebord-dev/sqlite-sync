@@ -67,6 +67,21 @@ describe("defineSyncSchema", () => {
     expect(schema.writeOriginByName.get("_job")).toBe("server");
   });
 
+  it("carries export/import policy into the table configuration", () => {
+    const schema = defineSyncSchema({
+      tables: {
+        todo: t.table({ title: t.text() }),
+        session: t.table({ token: t.text() }, { exportImport: "ignore" }),
+      },
+      migrations,
+    });
+
+    expect(schema.tablesConfig).toEqual([
+      { baseTableName: "_todo", crdtTableName: "todo" },
+      { baseTableName: "_session", crdtTableName: "session", exportImport: "ignore" },
+    ]);
+  });
+
   it("rejects colliding table names", () => {
     expect(() =>
       defineSyncSchema({

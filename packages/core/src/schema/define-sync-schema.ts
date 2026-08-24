@@ -81,6 +81,7 @@ export function defineSyncSchema<Tables extends SyncSchemaTables>({
   const tablesConfig: CrdtTableConfig[] = Object.entries(tables).map(([crdtTableName, table]) => ({
     crdtTableName,
     baseTableName: table.baseName ?? `_${crdtTableName}`,
+    ...(table.exportImport === "ignore" ? { exportImport: "ignore" } : {}),
   }));
 
   const seenNames = new Set<string>();

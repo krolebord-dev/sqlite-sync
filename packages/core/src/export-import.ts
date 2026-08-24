@@ -40,12 +40,19 @@ type CreateImportDataOptions = {
 };
 
 function createTableNameNormalizer(tablesConfig: CrdtTableConfig[] | undefined) {
-  const baseNamesByAlias = new Map<string, string>();
-  for (const { baseTableName, crdtTableName } of tablesConfig ?? []) {
-    baseNamesByAlias.set(baseTableName, baseTableName);
-    baseNamesByAlias.set(crdtTableName, baseTableName);
+  const tablesByAlias = new Map<string, CrdtTableConfig>();
+  for (const table of tablesConfig ?? []) {
+    const { baseTableName, crdtTableName } = table;
+    tablesByAlias.set(baseTableName, table);
+    tablesByAlias.set(crdtTableName, table);
   }
-  return (tableName: string) => baseNamesByAlias.get(tableName) ?? tableName;
+  return (tableName: string) => {
+    const table = tablesByAlias.get(tableName);
+    if (table?.exportImport === "ignore") {
+      return null;
+    }
+    return table?.baseTableName ?? tableName;
+  };
 }
 
 export function createImportData({ migrator, tablesConfig, applyEvents }: CreateImportDataOptions) {
@@ -84,11 +91,15 @@ export function createImportData({ migrator, tablesConfig, applyEvents }: Create
 
     const sourceEvents: MigratableEvent[] = [];
     for (const [tableName, rows] of Object.entries(data.tables)) {
+      const normalizedTableName = normalizeTableName(tableName);
+      if (normalizedTableName === null) {
+        continue;
+      }
       for (const row of rows) {
         sourceEvents.push({
           schema_version: data.schemaVersion,
           type: "item-created",
-          dataset: normalizeTableName(tableName),
+          dataset: normalizedTableName,
           item_id: row.id as string,
           payload: JSON.stringify(row),
         });
@@ -148,7 +159,10 @@ export function createExportData({ reactiveDb, tablesConfig, schemaVersion }: Cr
   return (opts?: { tables?: string[] }): SyncedDbExport => {
     const tables: Record<string, Array<Record<string, unknown>>> = {};
 
-    for (const { baseTableName, crdtTableName } of resolveTables(opts?.tables)) {
+    for (const { baseTableName, crdtTableName, exportImport } of resolveTables(opts?.tables)) {
+      if (exportImport === "ignore") {
+        continue;
+      }
       const { rows } = reactiveDb.db.execute<Record<string, unknown>>(`select * from ${quoteId(crdtTableName)}`, {
         loggerLevel: "system",
       });

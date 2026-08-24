@@ -120,6 +120,54 @@ async function createReplica(nodeId: string) {
 }
 
 describe("export/import", () => {
+  it("omits ignored tables from exports and skips them during imports", () => {
+    const tablesConfig = [
+      { baseTableName: "_todo", crdtTableName: "todo" },
+      { baseTableName: "_session", crdtTableName: "session", exportImport: "ignore" as const },
+    ];
+    const queriedTables: string[] = [];
+    const exportData = createExportData({
+      reactiveDb: {
+        db: {
+          execute(sql) {
+            queriedTables.push(sql);
+            return { rows: [{ id: "1", title: "buy milk", tombstone: 0 }] };
+          },
+        },
+      },
+      tablesConfig,
+      schemaVersion: SCHEMA_VERSION,
+    });
+    const appliedEvents: unknown[] = [];
+    const importData = createImportData({
+      migrator: {
+        currentSchemaVersion: SCHEMA_VERSION,
+        migrateEvents: (events) => events,
+      },
+      tablesConfig,
+      applyEvents: (events) => appliedEvents.push(...events),
+    });
+
+    expect(exportData({ tables: ["todo", "session"] }).tables).toEqual({
+      _todo: [{ id: "1", title: "buy milk" }],
+    });
+    expect(queriedTables).toEqual(['select * from "todo"']);
+
+    expect(
+      importData({
+        schemaVersion: SCHEMA_VERSION,
+        exportedAt: "2026-01-01T00:00:00.000Z",
+        tables: {
+          _todo: [{ id: "1", title: "buy milk" }],
+          session: [{ id: "2", token: "secret" }],
+        },
+      }),
+    ).toEqual({ imported: 1 });
+    expect(appliedEvents).toEqual([
+      { type: "item-created", dataset: "_todo", item_id: "1", payload: '{"id":"1","title":"buy milk"}' },
+    ]);
+  });
+
   it("exports active rows in a versioned envelope, excluding tombstone", async () => {
     const replica = await createReplica("a");
     await replica.createTodo({ id: "1", title: "buy milk", completed: false });

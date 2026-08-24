@@ -15,6 +15,9 @@ export type AiAccess = "read-write" | "read-only" | "hidden";
  */
 export type WriteOrigin = "any" | "server";
 
+/** Whether backup and restore include a table. */
+export type ExportImportMode = "include" | "ignore";
+
 export type ColumnMeta = {
   kind: ColumnKind;
   /** Storage type used in generated DDL. Booleans store as integer 0/1. */
@@ -73,6 +76,8 @@ export type TableOptions<
   ai?: AiAccess;
   /** Defaults to `"any"`. See {@link WriteOrigin}. */
   writes?: Writes;
+  /** Defaults to `"include"`. Ignored tables are omitted from export and skipped on import. */
+  exportImport?: ExportImportMode;
 };
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -120,6 +125,8 @@ export class TableBuilder<
   readonly aiAccess: AiAccess;
   /** Resolved {@link WriteOrigin}; defaults to `"any"`. */
   readonly writeOrigin: Writes;
+  /** Resolved {@link ExportImportMode}; defaults to `"include"`. */
+  readonly exportImport: ExportImportMode;
 
   constructor(
     readonly userColumns: Cols,
@@ -140,6 +147,7 @@ export class TableBuilder<
     this.description = options?.description;
     this.aiAccess = options?.ai ?? "read-write";
     this.writeOrigin = (options?.writes ?? "any") as Writes;
+    this.exportImport = options?.exportImport ?? "include";
   }
 
   describe(description: string): TableBuilder<Cols, BaseName, Writes> {
@@ -148,6 +156,7 @@ export class TableBuilder<
       description,
       ai: this.aiAccess,
       writes: this.writeOrigin,
+      exportImport: this.exportImport,
     });
   }
 

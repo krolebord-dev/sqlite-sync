@@ -63,6 +63,7 @@ export {
   ColumnBuilder,
   type ColumnKind,
   type ColumnMeta,
+  type ExportImportMode,
   type InferRow,
   type PayloadValidationResult,
   type SqliteStorageType,

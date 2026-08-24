@@ -58,7 +58,10 @@ describe("column metadata", () => {
   });
 
   it("records table descriptions without mutating the original builder", () => {
-    const base = t.table({ title: t.text() }, { baseName: "raw_item", ai: "read-only", writes: "server" });
+    const base = t.table(
+      { title: t.text() },
+      { baseName: "raw_item", ai: "read-only", writes: "server", exportImport: "ignore" },
+    );
     const described = base.describe("Items the user tracks.");
 
     expect(base.description).toBeUndefined();
@@ -66,19 +69,28 @@ describe("column metadata", () => {
     expect(described.baseName).toBe("raw_item");
     expect(described.aiAccess).toBe("read-only");
     expect(described.writeOrigin).toBe("server");
+    expect(described.exportImport).toBe("ignore");
   });
 
-  it("records AI access and write origin from table options", () => {
+  it("records table policies from table options", () => {
     const defaults = t.table({ title: t.text() });
     expect(defaults.aiAccess).toBe("read-write");
     expect(defaults.writeOrigin).toBe("any");
+    expect(defaults.exportImport).toBe("include");
 
     const narrowed = t.table(
       { title: t.text() },
-      { baseName: "raw_item", ai: "hidden", writes: "server", description: "Server job rows." },
+      {
+        baseName: "raw_item",
+        ai: "hidden",
+        writes: "server",
+        exportImport: "ignore",
+        description: "Server job rows.",
+      },
     );
     expect(narrowed.aiAccess).toBe("hidden");
     expect(narrowed.writeOrigin).toBe("server");
+    expect(narrowed.exportImport).toBe("ignore");
     expect(narrowed.description).toBe("Server job rows.");
     expect(narrowed.baseName).toBe("raw_item");
   });
