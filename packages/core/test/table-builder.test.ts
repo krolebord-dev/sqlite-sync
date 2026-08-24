@@ -58,12 +58,14 @@ describe("column metadata", () => {
   });
 
   it("records table descriptions without mutating the original builder", () => {
-    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
+    const base = t.table({ title: t.text() }, { baseName: "raw_item", ai: "read-only", writes: "server" });
     const described = base.describe("Items the user tracks.");
 
     expect(base.description).toBeUndefined();
     expect(described.description).toBe("Items the user tracks.");
     expect(described.baseName).toBe("raw_item");
+    expect(described.aiAccess).toBe("read-only");
+    expect(described.writeOrigin).toBe("server");
   });
 
   it("records AI access and write origin from table options", () => {
@@ -81,56 +83,12 @@ describe("column metadata", () => {
     expect(narrowed.baseName).toBe("raw_item");
   });
 
-  it("records AI access via .ai() and carries it through the other modifiers in either order", () => {
-    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
-
-    expect(base.aiAccess).toBe("read-write");
-    expect(base.ai("hidden").aiAccess).toBe("hidden");
-    expect(base.aiAccess).toBe("read-write");
-
-    const aiThenDescribe = base.ai("read-only").describe("Items the user tracks.");
-    const describeThenAi = base.describe("Items the user tracks.").ai("read-only");
-
-    for (const table of [aiThenDescribe, describeThenAi]) {
-      expect(table.aiAccess).toBe("read-only");
-      expect(table.description).toBe("Items the user tracks.");
-      expect(table.baseName).toBe("raw_item");
-    }
-  });
-
-  it("records write origin via .writes() and carries it through the other modifiers in either order", () => {
-    const base = t.table({ title: t.text() }, { baseName: "raw_item" });
-
-    expect(base.writeOrigin).toBe("any");
-    expect(base.writes("server").writeOrigin).toBe("server");
-    expect(base.writeOrigin).toBe("any");
-
-    const writesThenAi = base.writes("server").ai("read-only").describe("Server job rows.");
-    const aiThenWrites = base.ai("read-only").describe("Server job rows.").writes("server");
-
-    for (const table of [writesThenAi, aiThenWrites]) {
-      expect(table.writeOrigin).toBe("server");
-      expect(table.aiAccess).toBe("read-only");
-      expect(table.description).toBe("Server job rows.");
-      expect(table.baseName).toBe("raw_item");
-    }
-  });
-
   it("captures write origin as a type-level phantom", () => {
     const defaults = t.table({ title: t.text() });
     expectTypeOf<(typeof defaults)["~writeOrigin"]>().toEqualTypeOf<"any">();
 
     const fromOptions = t.table({ title: t.text() }, { writes: "server" });
     expectTypeOf<(typeof fromOptions)["~writeOrigin"]>().toEqualTypeOf<"server">();
-
-    const fromMethod = defaults.writes("server");
-    expectTypeOf<(typeof fromMethod)["~writeOrigin"]>().toEqualTypeOf<"server">();
-
-    const chained = fromMethod.ai("read-only").describe("Server job rows.");
-    expectTypeOf<(typeof chained)["~writeOrigin"]>().toEqualTypeOf<"server">();
-
-    const restored = fromMethod.writes("any");
-    expectTypeOf<(typeof restored)["~writeOrigin"]>().toEqualTypeOf<"any">();
   });
 });
 

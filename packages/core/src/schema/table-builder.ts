@@ -142,33 +142,12 @@ export class TableBuilder<
     this.writeOrigin = (options?.writes ?? "any") as Writes;
   }
 
-  /** Rebuilds the table with `overrides` applied over the current options. */
-  private withOptions(overrides: Partial<TableOptions<BaseName, Writes>>): TableBuilder<Cols, BaseName, Writes> {
+  describe(description: string): TableBuilder<Cols, BaseName, Writes> {
     return new TableBuilder<Cols, BaseName, Writes>(this.userColumns, {
       baseName: this.baseName,
-      description: this.description,
+      description,
       ai: this.aiAccess,
       writes: this.writeOrigin,
-      ...overrides,
-    });
-  }
-
-  describe(description: string): TableBuilder<Cols, BaseName, Writes> {
-    return this.withOptions({ description });
-  }
-
-  /** Same as `{ ai }` in {@link TableOptions}. */
-  ai(access: AiAccess): TableBuilder<Cols, BaseName, Writes> {
-    return this.withOptions({ ai: access });
-  }
-
-  /** Same as `{ writes }` in {@link TableOptions}. */
-  writes<const Origin extends WriteOrigin>(origin: Origin): TableBuilder<Cols, BaseName, Origin> {
-    return new TableBuilder<Cols, BaseName, Origin>(this.userColumns, {
-      baseName: this.baseName,
-      description: this.description,
-      ai: this.aiAccess,
-      writes: origin,
     });
   }
 

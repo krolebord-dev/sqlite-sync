@@ -174,8 +174,7 @@ Each column builder chains `.nullable()`, `.default(value)`,
 Table options cover `baseName`, `description`, `ai`, and `writes`. Defaults are
 `ai: "read-write"` and `writes: "any"`. See
 [AI access control](#limiting-what-an-agent-may-touch) and
-[Server-only tables](#server-only-tables). `.describe()`, `.ai()`, and `.writes()` set the
-same fields.
+[Server-only tables](#server-only-tables). `.describe()` is the same as `{ description }`.
 
 The table builders also expose runtime metadata: `syncDbSchema.tables.todo.columns` (per-column
 kind, nullability, defaults) and `validatePayload(payload, { event })` for checking CRDT event
