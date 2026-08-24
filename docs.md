@@ -200,9 +200,9 @@ In the browser, pass `verifySchema: import.meta.env.DEV` to `startDbWorker` — 
 worker throws with the full issue list and refuses to start.
 
 The schema carries three phantom types used for type inference:
-- `~clientSchema` — Used by React hooks. Includes both base tables (read-only) and CRDT views (read-write).
-- `~serverSchema` — Used by server-side `executeKysely`. Includes both base tables and read-only CRDT views.
-- `~mutationsSchema` — Used by `enqueueEvent` for typed CRDT payloads.
+- `~clientSchema` — Used by React hooks and client `executeKysely`. Base tables are read-only. CRDT views are read-write, except tables with `{ writes: "server" }`, which are read-only.
+- `~serverSchema` — Used by server-side `executeKysely`. CRDT views are read-write, including server-only tables. Base tables are read-only.
+- `~mutationsSchema` — Used by `enqueueEvent` for typed CRDT payloads. Server-only tables stay writable.
 
 ---
 
@@ -1039,7 +1039,8 @@ server-only datasets, accepts the rest of the batch, and still returns `ok: true
 unless you also pass `ai: "read-only"`.
 
 A client that already applied the event locally keeps that row. Other replicas never see it.
-Client types and write triggers are not restricted yet.
+Client types treat server-only CRDT views as read-only. Raw SQL still runs if types are ignored;
+write triggers are not restricted.
 
 ### Listening to Events
 

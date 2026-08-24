@@ -115,6 +115,23 @@ describe("column metadata", () => {
       expect(table.baseName).toBe("raw_item");
     }
   });
+
+  it("captures write origin as a type-level phantom", () => {
+    const defaults = t.table({ title: t.text() });
+    expectTypeOf<(typeof defaults)["~writeOrigin"]>().toEqualTypeOf<"any">();
+
+    const fromOptions = t.table({ title: t.text() }, { writes: "server" });
+    expectTypeOf<(typeof fromOptions)["~writeOrigin"]>().toEqualTypeOf<"server">();
+
+    const fromMethod = defaults.writes("server");
+    expectTypeOf<(typeof fromMethod)["~writeOrigin"]>().toEqualTypeOf<"server">();
+
+    const chained = fromMethod.ai("read-only").describe("Server job rows.");
+    expectTypeOf<(typeof chained)["~writeOrigin"]>().toEqualTypeOf<"server">();
+
+    const restored = fromMethod.writes("any");
+    expectTypeOf<(typeof restored)["~writeOrigin"]>().toEqualTypeOf<"any">();
+  });
 });
 
 describe("row type inference", () => {

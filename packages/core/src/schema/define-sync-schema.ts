@@ -24,7 +24,7 @@ const RESERVED_TABLE_NAMES = new Set<string>([
 ]);
 
 type RowOf<Table extends AnyTableBuilder> =
-  Table extends TableBuilder<infer Cols extends TableColumns, any> ? InferRow<Cols> : never;
+  Table extends TableBuilder<infer Cols extends TableColumns, any, WriteOrigin> ? InferRow<Cols> : never;
 
 // Falls back to the "_" convention unless ~baseName is a string *literal* — inference can
 // resolve an omitted override to its constraint (string | undefined) rather than undefined.
@@ -35,13 +35,17 @@ type BaseNameOf<CrdtName, Table extends AnyTableBuilder> = string extends Table[
     : `_${CrdtName & string}`;
 
 type ClientSchemaOf<Tables extends SyncSchemaTables> = Simplify<
-  { [K in keyof Tables]: RowOf<Tables[K]> } & {
+  {
+    [K in keyof Tables]: Tables[K]["~writeOrigin"] extends "server"
+      ? ReadonlyTable<RowOf<Tables[K]>>
+      : RowOf<Tables[K]>;
+  } & {
     [K in keyof Tables as BaseNameOf<K, Tables[K]>]: ReadonlyTable<RowOf<Tables[K]>>;
   }
 >;
 
 type ServerSchemaOf<Tables extends SyncSchemaTables> = Simplify<
-  { [K in keyof Tables]: ReadonlyTable<RowOf<Tables[K]>> } & {
+  { [K in keyof Tables]: RowOf<Tables[K]> } & {
     [K in keyof Tables as BaseNameOf<K, Tables[K]>]: ReadonlyTable<RowOf<Tables[K]>>;
   }
 >;

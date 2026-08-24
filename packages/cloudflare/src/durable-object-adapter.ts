@@ -72,7 +72,7 @@ export type ServerSyncDbExecuteResult<TResult> = {
 export type ServerSyncDbSqlExecutor<Schema extends SyncDbSchema> = {
   execute<TResult = unknown>(query: ExecuteParams): ServerSyncDbExecuteResult<TResult>;
   executeKysely<TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
-    factory: KyselyQueryFactory<Schema[`~clientSchema`], TQuery, TResult>,
+    factory: KyselyQueryFactory<Schema[`~serverSchema`], TQuery, TResult>,
   ): ServerSyncDbExecuteResult<TResult>;
 };
 
@@ -191,7 +191,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
   const syncDbExecutor: ServerSyncDbSqlExecutor<Schema> = {
     execute: (query) => executeAndDrain(() => unsafeExecutor.execute(query)),
     executeKysely: (factory) => {
-      const query = factory(dummyKysely as unknown as Kysely<Schema[`~clientSchema`]>).compile();
+      const query = factory(dummyKysely as unknown as Kysely<Schema[`~serverSchema`]>).compile();
       return executeAndDrain(() => unsafeExecutor.execute(query));
     },
   };

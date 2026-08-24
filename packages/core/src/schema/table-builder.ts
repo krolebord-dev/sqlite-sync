@@ -58,18 +58,21 @@ export type AnyColumnBuilder = ColumnBuilder<any, boolean>;
 
 export type TableColumns = Record<string, AnyColumnBuilder>;
 
-export type AnyTableBuilder = TableBuilder<any, any>;
+export type AnyTableBuilder = TableBuilder<any, any, WriteOrigin>;
 
 export type SyncSchemaTables = Record<string, AnyTableBuilder>;
 
-export type TableOptions<BaseName extends string | undefined = string | undefined> = {
+export type TableOptions<
+  BaseName extends string | undefined = string | undefined,
+  Writes extends WriteOrigin = "any",
+> = {
   /** Override the materialized base table name (defaults to the crdt table name prefixed with "_"). */
   baseName?: BaseName;
   description?: string;
   /** Defaults to `"read-write"`. See {@link AiAccess}. */
   ai?: AiAccess;
   /** Defaults to `"any"`. See {@link WriteOrigin}. */
-  writes?: WriteOrigin;
+  writes?: Writes;
 };
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
@@ -101,8 +104,13 @@ const tombstoneColumnMeta: ColumnMeta = {
   description: "Soft-delete marker",
 };
 
-export class TableBuilder<Cols extends TableColumns, BaseName extends string | undefined = undefined> {
+export class TableBuilder<
+  Cols extends TableColumns,
+  BaseName extends string | undefined = undefined,
+  Writes extends WriteOrigin = "any",
+> {
   declare readonly "~baseName": BaseName;
+  declare readonly "~writeOrigin": Writes;
 
   /** All columns in DDL order, including the auto-injected `id` and `tombstone`. */
   readonly columns: Record<string, ColumnMeta>;
@@ -111,11 +119,11 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
   /** Resolved {@link AiAccess}; defaults to `"read-write"`. */
   readonly aiAccess: AiAccess;
   /** Resolved {@link WriteOrigin}; defaults to `"any"`. */
-  readonly writeOrigin: WriteOrigin;
+  readonly writeOrigin: Writes;
 
   constructor(
     readonly userColumns: Cols,
-    options?: TableOptions<BaseName>,
+    options?: TableOptions<BaseName, Writes>,
   ) {
     for (const reserved of RESERVED_COLUMNS) {
       if (reserved in userColumns) {
@@ -131,12 +139,12 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
     this.baseName = options?.baseName as BaseName;
     this.description = options?.description;
     this.aiAccess = options?.ai ?? "read-write";
-    this.writeOrigin = options?.writes ?? "any";
+    this.writeOrigin = (options?.writes ?? "any") as Writes;
   }
 
   /** Rebuilds the table with `overrides` applied over the current options. */
-  private withOptions(overrides: Partial<TableOptions<BaseName>>): TableBuilder<Cols, BaseName> {
-    return new TableBuilder<Cols, BaseName>(this.userColumns, {
+  private withOptions(overrides: Partial<TableOptions<BaseName, Writes>>): TableBuilder<Cols, BaseName, Writes> {
+    return new TableBuilder<Cols, BaseName, Writes>(this.userColumns, {
       baseName: this.baseName,
       description: this.description,
       ai: this.aiAccess,
@@ -145,18 +153,23 @@ export class TableBuilder<Cols extends TableColumns, BaseName extends string | u
     });
   }
 
-  describe(description: string): TableBuilder<Cols, BaseName> {
+  describe(description: string): TableBuilder<Cols, BaseName, Writes> {
     return this.withOptions({ description });
   }
 
   /** Same as `{ ai }` in {@link TableOptions}. */
-  ai(access: AiAccess): TableBuilder<Cols, BaseName> {
+  ai(access: AiAccess): TableBuilder<Cols, BaseName, Writes> {
     return this.withOptions({ ai: access });
   }
 
   /** Same as `{ writes }` in {@link TableOptions}. */
-  writes(origin: WriteOrigin): TableBuilder<Cols, BaseName> {
-    return this.withOptions({ writes: origin });
+  writes<const Origin extends WriteOrigin>(origin: Origin): TableBuilder<Cols, BaseName, Origin> {
+    return new TableBuilder<Cols, BaseName, Origin>(this.userColumns, {
+      baseName: this.baseName,
+      description: this.description,
+      ai: this.aiAccess,
+      writes: origin,
+    });
   }
 
   /** Type-only: the row shape returned by queries. Do not access at runtime. */
@@ -279,8 +292,12 @@ export const t = {
       hasDefault: false,
       enumValues: values,
     }),
-  table: <Cols extends TableColumns, const BaseName extends string | undefined = undefined>(
+  table: <
+    Cols extends TableColumns,
+    const BaseName extends string | undefined = undefined,
+    const Writes extends WriteOrigin = "any",
+  >(
     columns: Cols,
-    options?: TableOptions<BaseName>,
+    options?: TableOptions<BaseName, Writes>,
   ) => new TableBuilder(columns, options),
 };

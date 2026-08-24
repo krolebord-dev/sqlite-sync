@@ -133,8 +133,9 @@ describe("schema type inference", () => {
     expectTypeOf<Client["_todo"]["title"]>().toEqualTypeOf<ColumnType<string, never, never>>();
   });
 
-  it("server schema is readonly for both tables", () => {
-    expectTypeOf<Server["todo"]["title"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+  it("server schema has a writable crdt table and a readonly base table", () => {
+    expectTypeOf<keyof Server>().toEqualTypeOf<"todo" | "_todo">();
+    expectTypeOf<Server["todo"]["title"]>().toEqualTypeOf<string>();
     expectTypeOf<Server["_todo"]["title"]>().toEqualTypeOf<ColumnType<string, never, never>>();
   });
 
@@ -169,5 +170,43 @@ describe("schema type inference", () => {
 
     type OverriddenClient = (typeof overridden)["~clientSchema"];
     expectTypeOf<keyof OverriddenClient>().toEqualTypeOf<"todo" | "raw_todo">();
+  });
+});
+
+describe("write origin schema split", () => {
+  const schema = defineSyncSchema({
+    tables: {
+      todo: t.table({ title: t.text() }),
+      job: t.table({ status: t.text() }, { writes: "server" }),
+      queued: t.table({ status: t.text() }).writes("server"),
+    },
+    migrations,
+  });
+
+  type Client = (typeof schema)["~clientSchema"];
+  type Server = (typeof schema)["~serverSchema"];
+  type Mutations = (typeof schema)["~mutationsSchema"];
+
+  it("client schema makes server-only crdt views readonly", () => {
+    expectTypeOf<Client["todo"]["title"]>().toEqualTypeOf<string>();
+    expectTypeOf<Client["job"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+    expectTypeOf<Client["queued"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+    expectTypeOf<Client["_job"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+    expectTypeOf<Client["_queued"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+  });
+
+  it("server schema keeps every crdt view writable, including server-only tables", () => {
+    expectTypeOf<Server["todo"]["title"]>().toEqualTypeOf<string>();
+    expectTypeOf<Server["job"]["status"]>().toEqualTypeOf<string>();
+    expectTypeOf<Server["queued"]["status"]>().toEqualTypeOf<string>();
+    expectTypeOf<Server["_job"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+    expectTypeOf<Server["_queued"]["status"]>().toEqualTypeOf<ColumnType<string, never, never>>();
+  });
+
+  it("mutations schema keeps server-only base tables writable", () => {
+    expectTypeOf<keyof Mutations>().toEqualTypeOf<"_todo" | "_job" | "_queued">();
+    expectTypeOf<Mutations["_todo"]["title"]>().toEqualTypeOf<string>();
+    expectTypeOf<Mutations["_job"]["status"]>().toEqualTypeOf<string>();
+    expectTypeOf<Mutations["_queued"]["status"]>().toEqualTypeOf<string>();
   });
 });
