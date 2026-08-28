@@ -1,1 +1,1 @@
-export { SQLiteSyncDevtools } from "./devtools";
+export { SQLiteSyncDevtools, type SQLiteSyncDevtoolsProps } from "./devtools";

@@ -638,9 +638,15 @@ function Root({ children }: { children: React.ReactNode }) {
 }
 ```
 
-The component renders a floating `SQLite Sync` button. Clicking it opens a dialog with:
-- a left sidebar for navigation and database selection
-- a main pane for the active tool
+A `SQLite Sync` button floats over the app. Click it and you get a dialog: sidebar on the left, the active tool on the right. The UI is isolated in a shadow root, so Tailwind (or any other host CSS) does not restyle the launcher or dialog. `className` styles the light-DOM host element only. It cannot reach internals.
+
+If your app has its own toggle, pass `hidden` and `onHiddenChange`:
+
+```tsx
+<SQLiteSyncDevtools hidden={devtoolsHidden} onHiddenChange={setDevtoolsHidden} />
+```
+
+Leave those off if the button should manage itself. `Ctrl+Alt+S` (⌘⌥S on macOS) toggles it and the choice sticks in `localStorage`. Hide in the dialog does the same.
 
 ### Instance Discovery
 
@@ -650,9 +656,13 @@ You do not need to pass instances manually to the devtools component. Mounting `
 
 ### Current Tools
 
-The current devtools prototype includes:
-- an overview tab for selecting a detected database
-- a query runner tab for executing SQL against the selected instance
+Tabs:
+
+- Overview: instance details, memory and worker DB sizes, CRDT event counts by status, backup and reset
+- Schema: declared tables (columns, descriptions, write/AI/export policy) and the applied migration version
+- Live queries
+- Event log: filters plus the matching total
+- Query runner
 
 ### Query Runner Rules
 
@@ -1331,17 +1341,21 @@ function createDbContext<Schema extends SyncDbSchema>(schema: Schema): {
 
 #### `SQLiteSyncDevtools`
 
-Renders a floating browser devtools button and dialog for databases created with `createSyncedDb()`.
+Floating button and dialog for databases created with `createSyncedDb()`.
 
 ```tsx
-function SQLiteSyncDevtools(props?: { className?: string }): React.ReactElement
+function SQLiteSyncDevtools(props?: {
+  className?: string;
+  hidden?: boolean;
+  onHiddenChange?: (hidden: boolean) => void;
+}): React.ReactElement
 ```
 
-Behavior:
-- auto-discovers currently registered `SyncedDb` instances
-- updates when instances are created or disposed
-- provides a sidebar-based dialog UI
-- includes the prototype query runner described above
+The dialog and launcher render inside a shadow root. `className` is for the host wrapper in the light DOM, not for restyling tabs, buttons, or the overlay.
+
+`SyncedDb` instances show up as they initialize and drop off on `dispose()`. Overview shows memory and worker DB sizes plus remaining CRDT event counts (pending, applied, failed, deduped). Event log shows the filtered total, not just the loaded page.
+
+Set `hidden` to hide the button. `Ctrl+Alt+S` (⌘⌥S on macOS) works when you pass `onHiddenChange`, and when you pass neither prop.
 
 ### `@sqlite-sync/cloudflare`
 

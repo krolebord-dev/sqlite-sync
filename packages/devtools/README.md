@@ -1,8 +1,8 @@
 # @sqlite-sync/devtools
 
-Embeddable browser devtools for [sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) — a local-first SQLite sync engine for web apps, with reactive queries, offline persistence, and CRDT-based replication.
+Embeddable browser devtools for [sqlite-sync](https://github.com/krolebord-dev/sqlite-sync), a local-first SQLite sync engine for web apps.
 
-This package renders a floating **SQLite Sync** button that opens a dialog with a sidebar, database selector, and query tooling for inspecting databases registered through [`@sqlite-sync/core`](https://www.npmjs.com/package/@sqlite-sync/core).
+Mount `<SQLiteSyncDevtools />` and you get a floating SQLite Sync button. It opens a dialog against databases registered through [`@sqlite-sync/core`](https://www.npmjs.com/package/@sqlite-sync/core). The UI renders in a shadow root, so host-app CSS (including Tailwind preflight) does not restyle it. `className` applies to the light-DOM host, not the launcher or dialog internals.
 
 ## Install
 
@@ -25,7 +25,9 @@ export function AppShell() {
 }
 ```
 
-Database instances register automatically when `createSyncedDb()` completes and unregister on `dispose()`, so mounting the component once near the app root is enough.
+Database instances register when `createSyncedDb()` completes and unregister on `dispose()`. Mount the component once near the app root.
+
+Pass `hidden` and `onHiddenChange` if your app has its own toggle. Skip them and `Ctrl+Alt+S` (⌘⌥S on macOS) hides the button. That choice is stored in `localStorage`.
 
 Query runner rules:
 

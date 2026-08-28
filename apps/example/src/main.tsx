@@ -1,4 +1,3 @@
-import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
 import { StrictMode, Suspense, use } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
@@ -16,7 +15,6 @@ createRoot(rootElement).render(
       <Root>
         <App />
       </Root>
-      <SQLiteSyncDevtools />
     </Suspense>
   </StrictMode>,
 );

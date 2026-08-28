@@ -2,7 +2,6 @@ import { generateId } from "@sqlite-sync/core";
 import { SQLiteSyncDevtools } from "@sqlite-sync/devtools";
 import { useEffect, useRef, useState } from "react";
 import { useDb, useDbQuery, useDbState } from "./db";
-import { QueryShell } from "./QueryShell";
 
 export function App() {
   const { db } = useDb();
@@ -10,7 +9,6 @@ export function App() {
   const [newTodoTitle, setNewTodoTitle] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [randomCount, setRandomCount] = useState(10);
-  const [debugOpen, setDebugOpen] = useState(false);
 
   const { data: todos } = useDbQuery((db) => {
     let query = db.selectFrom("todo").selectAll().orderBy("id");
@@ -90,14 +88,11 @@ export function App() {
           </h1>
           <div className="header-actions">
             <SyncStatus />
-            <button type="button" className="btn btn-sm" onClick={() => setDebugOpen((o) => !o)}>
-              {debugOpen ? "Hide devtools" : "Devtools"}
-            </button>
           </div>
         </div>
       </header>
 
-      <main className={debugOpen ? "main main--debug" : "main"}>
+      <main className="main">
         <form
           className="add-form"
           onSubmit={(e) => {
@@ -164,20 +159,7 @@ export function App() {
         </div>
       </main>
 
-      {debugOpen && (
-        <div className="debug-panel">
-          <div className="debug-panel-header">
-            <span>Developer tools</span>
-            <button type="button" onClick={() => setDebugOpen(false)} aria-label="Close">
-              ×
-            </button>
-          </div>
-          <div className="debug-panel-body">
-            <QueryShell />
-            <SQLiteSyncDevtools />
-          </div>
-        </div>
-      )}
+      <SQLiteSyncDevtools />
     </div>
   );
 }

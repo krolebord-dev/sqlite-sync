@@ -1,4 +1,4 @@
-import type { SharedLiveQuerySnapshot, SyncedDbExport } from "@sqlite-sync/core";
+import type { ColumnMeta, SharedLiveQuerySnapshot, SyncedDbExport } from "@sqlite-sync/core";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -6,9 +6,13 @@ import {
   type SQLiteSyncDevtoolsInstance,
   type SQLiteSyncDevtoolsSnapshot,
 } from "./devtools-registry";
+import { ShadowRoot } from "./shadow-root";
 
-type SQLiteSyncDevtoolsProps = {
+export type SQLiteSyncDevtoolsProps = {
   className?: string;
+  /** Hide the floating launcher. Omit to let the user toggle it with Ctrl+Alt+S (⌘⌥S on macOS). */
+  hidden?: boolean;
+  onHiddenChange?: (hidden: boolean) => void;
 };
 
 type DevtoolsTab = "overview" | "schema" | "live-queries" | "event-log" | "query-runner";
@@ -41,8 +45,11 @@ type QueryState =
     };
 
 const TRIGGER_POSITION_STORAGE_KEY = "sqlite-sync-devtools.trigger-position";
+const TRIGGER_HIDDEN_STORAGE_KEY = "sqlite-sync-devtools.trigger-hidden";
 const DRAG_THRESHOLD_PX = 4;
 const VIEWPORT_MARGIN_PX = 8;
+const IS_APPLE_PLATFORM = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const TOGGLE_LAUNCHER_HINT = IS_APPLE_PLATFORM ? "⌘⌥S" : "Ctrl+Alt+S";
 
 type TriggerPosition = { x: number; y: number };
 
@@ -141,12 +148,67 @@ function useDraggableTrigger() {
   };
 }
 
-export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
+function readStoredTriggerHidden(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(TRIGGER_HIDDEN_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function isToggleLauncherShortcut(event: KeyboardEvent): boolean {
+  // Option/Alt remaps event.key (Option+S is "ß" on US Mac), so match the physical key.
+  if (event.shiftKey || !event.altKey || event.code !== "KeyS") return false;
+  return event.ctrlKey || event.metaKey;
+}
+
+function useLauncherVisibility({
+  hidden: hiddenProp,
+  onHiddenChange,
+}: Pick<SQLiteSyncDevtoolsProps, "hidden" | "onHiddenChange">) {
+  const isControlled = hiddenProp !== undefined;
+  const [uncontrolledHidden, setUncontrolledHidden] = useState(readStoredTriggerHidden);
+  const hidden = isControlled ? hiddenProp : uncontrolledHidden;
+  const canToggle = !isControlled || onHiddenChange !== undefined;
+
+  const setHidden = useCallback(
+    (next: boolean) => {
+      if (isControlled) {
+        onHiddenChange?.(next);
+        return;
+      }
+      setUncontrolledHidden(next);
+      try {
+        window.localStorage.setItem(TRIGGER_HIDDEN_STORAGE_KEY, next ? "1" : "0");
+      } catch {}
+    },
+    [isControlled, onHiddenChange],
+  );
+
+  useEffect(() => {
+    if (!canToggle) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isToggleLauncherShortcut(event)) return;
+      event.preventDefault();
+      setHidden(!hidden);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canToggle, hidden, setHidden]);
+
+  return { hidden, setHidden, canToggle };
+}
+
+export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChange }: SQLiteSyncDevtoolsProps) {
   const registry = getOrCreateSQLiteSyncDevtoolsRegistry();
   const snapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot, getEmptySnapshot);
   const instances = snapshot.instances;
 
   const { buttonRef, positionStyle, triggerHandlers, consumeDragClick } = useDraggableTrigger();
+  const { hidden, setHidden, canToggle } = useLauncherVisibility({ hidden: hiddenProp, onHiddenChange });
 
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DevtoolsTab>("overview");
@@ -156,6 +218,10 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
   const [queryState, setQueryState] = useState<QueryState>({
     status: "idle",
   });
+
+  useEffect(() => {
+    if (hidden) setIsOpen(false);
+  }, [hidden]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -261,52 +327,54 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
   };
 
   return (
-    <>
-      <div style={floatingRootStyles}>
-        <button
-          ref={buttonRef}
-          type="button"
-          style={{ ...triggerButtonStyles, ...positionStyle }}
-          onClick={() => {
-            if (consumeDragClick()) return;
-            setIsOpen(true);
-          }}
-          title="SQLite Sync Devtools"
-          {...triggerHandlers}
-        >
-          <span style={triggerIconStyles}>◈</span>
-          <span style={triggerCountStyles}>{instances.length}</span>
-        </button>
-      </div>
+    <ShadowRoot className={className}>
+      {hidden ? null : (
+        <div className="floatingRoot">
+          <button
+            ref={buttonRef}
+            type="button"
+            className="triggerButton"
+            style={positionStyle}
+            onClick={() => {
+              if (consumeDragClick()) return;
+              setIsOpen(true);
+            }}
+            title={`SQLite Sync Devtools (${TOGGLE_LAUNCHER_HINT} to hide)`}
+            {...triggerHandlers}
+          >
+            <span className="triggerIcon">◈</span>
+            <span className="triggerCount">{instances.length}</span>
+          </button>
+        </div>
+      )}
 
       {isOpen ? (
-        <div style={overlayStyles} onClick={() => setIsOpen(false)}>
+        <div className="overlay" onClick={() => setIsOpen(false)}>
           <section
-            className={className}
             role="dialog"
             aria-modal="true"
             aria-label="SQLite Sync devtools"
-            style={dialogStyles}
+            className="dialog"
             onClick={(event) => event.stopPropagation()}
           >
             {/* Dialog header */}
-            <div style={headerStyles}>
-              <div style={headerLeftStyles}>
-                <span style={headerLogoStyles}>◈</span>
+            <div className="header">
+              <div className="headerLeft">
+                <span className="headerLogo">◈</span>
                 <div>
-                  <div style={eyebrowStyles}>sqlite-sync</div>
-                  <h2 style={titleStyles}>Devtools</h2>
+                  <div className="eyebrow">sqlite-sync</div>
+                  <h2 className="title">Devtools</h2>
                 </div>
               </div>
 
-              <div style={headerRightStyles}>
+              <div className="headerRight">
                 {instances.length > 0 && (
-                  <label style={instancePickerLabelStyles}>
-                    <span style={instancePickerTextStyles}>DB</span>
+                  <label className="instancePickerLabel">
+                    <span className="instancePickerText">DB</span>
                     <select
                       value={selectedInstanceId}
                       onChange={(event) => setSelectedInstanceId(event.target.value)}
-                      style={instancePickerSelectStyles}
+                      className="instancePickerSelect"
                     >
                       {instances.map((instance) => (
                         <option key={instance.instanceId} value={instance.instanceId}>
@@ -316,87 +384,102 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
                     </select>
                   </label>
                 )}
-                <span style={instanceCountBadgeStyles}>
+                <span className="instanceCountBadge">
                   {instances.length} instance{instances.length !== 1 ? "s" : ""}
                 </span>
-                <button type="button" style={closeButtonStyles} onClick={() => setIsOpen(false)} aria-label="Close">
+                {canToggle && (
+                  <button
+                    type="button"
+                    className="hideLauncherButton"
+                    onClick={() => setHidden(true)}
+                    title={`Hide launcher (${TOGGLE_LAUNCHER_HINT} to show again)`}
+                  >
+                    Hide
+                  </button>
+                )}
+                <button type="button" className="closeButton" onClick={() => setIsOpen(false)} aria-label="Close">
                   ✕
                 </button>
               </div>
             </div>
 
             {instances.length === 0 ? (
-              <div style={emptyStateStyles}>
-                <div style={emptyStateIconStyles}>◈</div>
-                <p style={emptyStateTextStyles}>No SQLite Sync database instances registered.</p>
-                <p style={emptyStateSubtextStyles}>
-                  Call <code style={inlineCodeStyles}>registerDevtools(db)</code> in your app to get started.
+              <div className="emptyState">
+                <div className="emptyStateIcon">◈</div>
+                <p className="emptyStateText">No SQLite Sync database instances registered.</p>
+                <p className="emptyStateSubtext">
+                  Call <code className="inlineCode">registerDevtools(db)</code> in your app to get started.
                 </p>
               </div>
             ) : (
-              <div style={contentLayoutStyles}>
+              <div className="contentLayout">
                 {/* Sidebar nav */}
-                <aside style={sidebarStyles}>
-                  <nav style={navStyles}>
+                <aside className="sidebar">
+                  <nav className="nav">
                     <button
                       type="button"
-                      style={getTabButtonStyles(activeTab === "overview")}
+                      className="tabButton"
+                      data-active={activeTab === "overview" ? "true" : undefined}
                       onClick={() => setActiveTab("overview")}
                     >
-                      <span style={navIconStyles}>▦</span>
+                      <span className="navIcon">▦</span>
                       Overview
                     </button>
                     <button
                       type="button"
-                      style={getTabButtonStyles(activeTab === "schema")}
+                      className="tabButton"
+                      data-active={activeTab === "schema" ? "true" : undefined}
                       onClick={() => setActiveTab("schema")}
                     >
-                      <span style={navIconStyles}>⬡</span>
+                      <span className="navIcon">⬡</span>
                       Schema
                     </button>
                     <button
                       type="button"
-                      style={getTabButtonStyles(activeTab === "live-queries")}
+                      className="tabButton"
+                      data-active={activeTab === "live-queries" ? "true" : undefined}
                       onClick={() => setActiveTab("live-queries")}
                     >
-                      <span style={navIconStyles}>◉</span>
+                      <span className="navIcon">◉</span>
                       Live Queries
                     </button>
                     <button
                       type="button"
-                      style={getTabButtonStyles(activeTab === "event-log")}
+                      className="tabButton"
+                      data-active={activeTab === "event-log" ? "true" : undefined}
                       onClick={() => setActiveTab("event-log")}
                     >
-                      <span style={navIconStyles}>≡</span>
+                      <span className="navIcon">≡</span>
                       Event Log
                     </button>
                     <button
                       type="button"
-                      style={getTabButtonStyles(activeTab === "query-runner")}
+                      className="tabButton"
+                      data-active={activeTab === "query-runner" ? "true" : undefined}
                       onClick={() => setActiveTab("query-runner")}
                     >
-                      <span style={navIconStyles}>▶</span>
+                      <span className="navIcon">▶</span>
                       Query Runner
                     </button>
                   </nav>
 
                   {selectedInstance && (
-                    <div style={sidebarInfoStyles}>
-                      <div style={sidebarInfoLabelStyles}>Active instance</div>
-                      <div style={sidebarInfoValueStyles}>
+                    <div className="sidebarInfo">
+                      <div className="sidebarInfoLabel">Active instance</div>
+                      <div className="sidebarInfoValue">
                         {formatInstanceLabel(
                           selectedInstance.dbId,
                           selectedInstance.instanceId,
                           dbIdCounts.get(selectedInstance.dbId) ?? 0,
                         )}
                       </div>
-                      <div style={sidebarInfoSubStyles}>id: {selectedInstance.instanceId.slice(0, 12)}…</div>
+                      <div className="sidebarInfoSub">id: {selectedInstance.instanceId.slice(0, 12)}…</div>
                     </div>
                   )}
                 </aside>
 
                 {/* Main pane */}
-                <div style={mainPaneStyles}>
+                <div className="mainPane">
                   {activeTab === "overview" ? (
                     <OverviewTab selectedInstance={selectedInstance} dbIdCounts={dbIdCounts} />
                   ) : activeTab === "schema" ? (
@@ -423,29 +506,104 @@ export function SQLiteSyncDevtools({ className }: SQLiteSyncDevtoolsProps) {
           </section>
         </div>
       ) : null}
-    </>
+    </ShadowRoot>
   );
 }
 
 const EVENT_HLC_ACCUMULATOR_KV_KEY = "crdt.consistency.event_hlc_sum.v2";
 const EVENT_HLC_ACCUMULATOR_QUERY = `SELECT value FROM "worker"."kv" WHERE key = '${EVENT_HLC_ACCUMULATOR_KV_KEY}'`;
+const EVENT_STATUS_COUNTS_QUERY = `SELECT status, COUNT(*) AS count FROM "worker"."crdt_events" GROUP BY status`;
+const MEMORY_DB_SIZE_QUERY =
+  "SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes";
+// Persisted main file plus the attached worker schema (event log, kv).
+const WORKER_DB_SIZE_QUERY = `SELECT
+  (SELECT page_count FROM pragma_page_count('main')) * (SELECT page_size FROM pragma_page_size('main'))
+  + (SELECT page_count FROM pragma_page_count('worker')) * (SELECT page_size FROM pragma_page_size('worker'))
+  AS bytes`;
+
+type EventStatus = "pending" | "applied" | "failed" | "deduped";
+type EventStatusCounts = { total: number } & Record<EventStatus, number>;
+
+const EVENT_STATUS_META: Record<EventStatus, { label: string; tone: "amber" | "success" | "error" | "muted" }> = {
+  pending: { label: "Pending", tone: "amber" },
+  applied: { label: "Applied", tone: "success" },
+  failed: { label: "Failed", tone: "error" },
+  deduped: { label: "Deduped", tone: "muted" },
+};
+
+function isEventStatus(value: unknown): value is EventStatus {
+  return value === "pending" || value === "applied" || value === "failed" || value === "deduped";
+}
+
+function emptyEventStatusCounts(): EventStatusCounts {
+  return { total: 0, pending: 0, applied: 0, failed: 0, deduped: 0 };
+}
+
+function parseEventStatusCounts(rows: readonly unknown[]): EventStatusCounts {
+  const counts = emptyEventStatusCounts();
+
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null || !("status" in row) || !("count" in row)) {
+      continue;
+    }
+    const { status, count } = row;
+    if (!isEventStatus(status)) continue;
+    const n = typeof count === "number" ? count : Number(count);
+    if (!Number.isFinite(n)) continue;
+    counts[status] = n;
+    counts.total += n;
+  }
+
+  return counts;
+}
+
+function readCount(rows: readonly unknown[]): number {
+  const row = rows[0];
+  if (typeof row !== "object" || row === null || !("count" in row)) return 0;
+  const n = typeof row.count === "number" ? row.count : Number(row.count);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function readBytes(rows: readonly unknown[]): number | null {
+  const row = rows[0];
+  if (typeof row !== "object" || row === null || !("bytes" in row)) return null;
+  const n = typeof row.bytes === "number" ? row.bytes : Number(row.bytes);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatByteSize(bytes: number): { label: string; exact: string } {
+  const exact = `${bytes.toLocaleString("en-US")} B`;
+  if (bytes < 1024) return { label: exact, exact };
+
+  const units = ["KB", "MB", "GB", "TB"] as const;
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const decimals = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return { label: `${Number(value.toFixed(decimals))} ${units[unitIndex]}`, exact };
+}
 
 function OverviewTab({
   selectedInstance,
   dbIdCounts,
 }: {
-  selectedInstance: ReturnType<typeof getOrCreateSQLiteSyncDevtoolsRegistry>["getSnapshot"] extends () => {
-    instances: infer I;
-  }
-    ? I extends readonly (infer T)[]
-      ? T | null
-      : never
-    : never;
+  selectedInstance: SQLiteSyncDevtoolsInstance | null;
   dbIdCounts: Map<string, number>;
 }) {
   const [eventHlcAccumulator, setEventHlcAccumulator] = useState<string | null>(null);
   const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
   const [isAccumulatorLoading, setIsAccumulatorLoading] = useState(false);
+  const [eventCounts, setEventCounts] = useState<EventStatusCounts | null>(null);
+  const [eventCountsError, setEventCountsError] = useState<string | null>(null);
+  const [isEventCountsLoading, setIsEventCountsLoading] = useState(false);
+  const [memoryBytes, setMemoryBytes] = useState<number | null>(null);
+  const [memorySizeError, setMemorySizeError] = useState<string | null>(null);
+  const [workerBytes, setWorkerBytes] = useState<number | null>(null);
+  const [workerSizeError, setWorkerSizeError] = useState<string | null>(null);
+  const [isSizeLoading, setIsSizeLoading] = useState(false);
 
   const refreshEventHlcAccumulator = useCallback(async () => {
     if (!selectedInstance) return;
@@ -456,8 +614,10 @@ function OverviewTab({
         sql: EVENT_HLC_ACCUMULATOR_QUERY,
         parameters: [],
       });
-      const row = result.rows[0] as { value?: string } | undefined;
-      setEventHlcAccumulator(row?.value ?? "");
+      const row = result.rows[0];
+      const value =
+        typeof row === "object" && row !== null && "value" in row && typeof row.value === "string" ? row.value : "";
+      setEventHlcAccumulator(value);
     } catch (error) {
       setAccumulatorError(error instanceof Error ? error.message : String(error));
       setEventHlcAccumulator(null);
@@ -466,11 +626,78 @@ function OverviewTab({
     }
   }, [selectedInstance]);
 
+  const refreshEventCounts = useCallback(async () => {
+    if (!selectedInstance) return;
+    setIsEventCountsLoading(true);
+    setEventCountsError(null);
+    try {
+      const result = await selectedInstance.instance._internal.executeAsync({
+        sql: EVENT_STATUS_COUNTS_QUERY,
+        parameters: [],
+      });
+      setEventCounts(parseEventStatusCounts(result.rows));
+    } catch (error) {
+      setEventCountsError(error instanceof Error ? error.message : String(error));
+      setEventCounts(null);
+    } finally {
+      setIsEventCountsLoading(false);
+    }
+  }, [selectedInstance]);
+
+  const refreshDbSizes = useCallback(async () => {
+    if (!selectedInstance) return;
+    setIsSizeLoading(true);
+    setMemorySizeError(null);
+    setWorkerSizeError(null);
+
+    const memoryResult = Promise.resolve()
+      .then(() => selectedInstance.instance.db.execute(MEMORY_DB_SIZE_QUERY))
+      .then((result) => {
+        const bytes = readBytes(result.rows);
+        if (bytes === null) throw new Error("Memory DB did not return a size.");
+        return bytes;
+      });
+    const workerResult = selectedInstance.instance._internal
+      .executeAsync({ sql: WORKER_DB_SIZE_QUERY, parameters: [] })
+      .then((result) => {
+        const bytes = readBytes(result.rows);
+        if (bytes === null) throw new Error("Worker DB did not return a size.");
+        return bytes;
+      });
+
+    const [memorySettled, workerSettled] = await Promise.allSettled([memoryResult, workerResult]);
+    if (memorySettled.status === "fulfilled") {
+      setMemoryBytes(memorySettled.value);
+    } else {
+      setMemoryBytes(null);
+      setMemorySizeError(
+        memorySettled.reason instanceof Error ? memorySettled.reason.message : String(memorySettled.reason),
+      );
+    }
+    if (workerSettled.status === "fulfilled") {
+      setWorkerBytes(workerSettled.value);
+    } else {
+      setWorkerBytes(null);
+      setWorkerSizeError(
+        workerSettled.reason instanceof Error ? workerSettled.reason.message : String(workerSettled.reason),
+      );
+    }
+    setIsSizeLoading(false);
+  }, [selectedInstance]);
+
   useEffect(() => {
     setEventHlcAccumulator(null);
     setAccumulatorError(null);
+    setEventCounts(null);
+    setEventCountsError(null);
+    setMemoryBytes(null);
+    setMemorySizeError(null);
+    setWorkerBytes(null);
+    setWorkerSizeError(null);
     void refreshEventHlcAccumulator();
-  }, [refreshEventHlcAccumulator]);
+    void refreshEventCounts();
+    void refreshDbSizes();
+  }, [refreshEventHlcAccumulator, refreshEventCounts, refreshDbSizes]);
 
   if (!selectedInstance) return null;
 
@@ -480,77 +707,90 @@ function OverviewTab({
     dbIdCounts.get(selectedInstance.dbId) ?? 0,
   );
 
-  const crdtTables = selectedInstance.instance._internal.crdtTableNames;
-
   return (
-    <div style={overviewLayoutStyles}>
-      <div style={overviewCardsRowStyles}>
-        <div style={overviewCardStyles}>
-          <div style={overviewCardLabelStyles}>Database</div>
-          <div style={overviewCardValueStyles}>{label}</div>
+    <div className="overviewLayout">
+      <div className="overviewCardsRow">
+        <div className="overviewCard">
+          <div className="overviewCardLabel">Database</div>
+          <div className="overviewCardValue">{label}</div>
         </div>
-        <div style={overviewCardStyles}>
-          <div style={overviewCardLabelStyles}>Instance ID</div>
-          <div style={{ ...overviewCardValueStyles, fontFamily: "ui-monospace, monospace", fontSize: "0.78rem" }}>
-            {selectedInstance.instanceId.slice(0, 16)}…
+        <div className="overviewCard">
+          <div className="overviewCardLabel">Instance ID</div>
+          <div className="overviewCardValue mono sm">{selectedInstance.instanceId.slice(0, 16)}…</div>
+        </div>
+        <DbSizeCard label="Memory DB" bytes={memoryBytes} error={memorySizeError} loading={isSizeLoading} />
+        <DbSizeCard label="Worker DB" bytes={workerBytes} error={workerSizeError} loading={isSizeLoading} />
+        <div className="overviewCard">
+          <div className="overviewCardLabel">CRDT Events</div>
+          <div className="overviewCardValue">
+            {eventCountsError ? "—" : isEventCountsLoading && eventCounts === null ? "…" : (eventCounts?.total ?? 0)}
           </div>
-        </div>
-        <div style={overviewCardStyles}>
-          <div style={overviewCardLabelStyles}>CRDT Tables</div>
-          <div style={overviewCardValueStyles}>{crdtTables.length}</div>
         </div>
       </div>
 
-      <div style={overviewSectionStyles}>
-        <div style={overviewSectionTitleStyles}>CRDT Tables</div>
-        {crdtTables.length === 0 ? (
-          <div style={overviewEmptyStyles}>No CRDT tables registered.</div>
-        ) : (
-          <div style={crdtTableListStyles}>
-            {[...crdtTables].map((name) => (
-              <div key={name} style={crdtTableRowStyles}>
-                <span style={crdtTableIconStyles}>▦</span>
-                <span style={crdtTableNameStyles}>{name}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={overviewSectionStyles}>
-        <div style={overviewSectionHeaderStyles}>
-          <div style={overviewSectionTitleStyles}>Event HLC accumulator</div>
+      <div className="overviewSection">
+        <div className="overviewSectionHeader">
+          <div className="overviewSectionTitle">CRDT events</div>
           <button
             type="button"
-            style={overviewRefreshButtonStyles}
+            className="refreshButton"
+            disabled={isEventCountsLoading || isSizeLoading}
+            title="Refresh event counts and DB sizes"
+            onClick={() => {
+              void refreshEventCounts();
+              void refreshDbSizes();
+            }}
+          >
+            {isEventCountsLoading || isSizeLoading ? "…" : "↻"} Refresh
+          </button>
+        </div>
+        {eventCountsError ? (
+          <div className="overviewAccumulatorError">{eventCountsError}</div>
+        ) : (
+          <div className="eventCountGrid">
+            {(["pending", "applied", "failed", "deduped"] satisfies EventStatus[]).map((status) => {
+              const item = EVENT_STATUS_META[status];
+              const value = eventCounts?.[status] ?? 0;
+              return (
+                <div key={status} className="eventCountCard">
+                  <div
+                    className="eventCountValue"
+                    data-tone={item.tone}
+                    data-emphasize={value > 0 ? "true" : undefined}
+                  >
+                    {isEventCountsLoading && eventCounts === null ? "…" : value}
+                  </div>
+                  <div className="overviewCardLabel">{item.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="overviewEmpty">Counts are remaining worker log rows after GC, not lifetime history.</div>
+      </div>
+
+      <div className="overviewSection">
+        <div className="overviewSectionHeader">
+          <div className="overviewSectionTitle">Event HLC accumulator</div>
+          <button
+            type="button"
+            className="refreshButton"
             disabled={isAccumulatorLoading}
             onClick={() => void refreshEventHlcAccumulator()}
           >
             {isAccumulatorLoading ? "…" : "↻"} Refresh
           </button>
         </div>
-        <div style={overviewAccumulatorValueStyles}>
+        <div className="overviewAccumulatorValue">
           {accumulatorError ? (
-            <span style={overviewAccumulatorErrorStyles}>{accumulatorError}</span>
+            <span className="overviewAccumulatorError">{accumulatorError}</span>
           ) : isAccumulatorLoading && eventHlcAccumulator === null ? (
             "Loading…"
           ) : eventHlcAccumulator === "" ? (
-            <span style={overviewAccumulatorEmptyStyles}>(empty)</span>
+            <span className="overviewAccumulatorEmpty">(empty)</span>
           ) : (
             eventHlcAccumulator
           )}
-        </div>
-      </div>
-
-      <div style={overviewSectionStyles}>
-        <div style={overviewSectionTitleStyles}>Write Permissions</div>
-        <div style={permissionRowStyles}>
-          <span style={permissionIconStyles}>✓</span>
-          <span style={permissionTextStyles}>Memory DB — CRDT tables only</span>
-        </div>
-        <div style={permissionRowStyles}>
-          <span style={{ ...permissionIconStyles, color: "#f59e0b" }}>⊘</span>
-          <span style={permissionTextStyles}>Worker DB — read-only (SELECT, PRAGMA, EXPLAIN)</span>
         </div>
       </div>
 
@@ -561,6 +801,42 @@ function OverviewTab({
       />
 
       <ResetSection dbId={selectedInstance.dbId} instance={selectedInstance.instance} />
+    </div>
+  );
+}
+
+function DbSizeCard({
+  label,
+  bytes,
+  error,
+  loading,
+}: {
+  label: string;
+  bytes: number | null;
+  error: string | null;
+  loading: boolean;
+}) {
+  let value = "…";
+  let sub: string | undefined;
+  let title: string | undefined;
+
+  if (error) {
+    value = "—";
+    title = error;
+  } else if (bytes !== null) {
+    const formatted = formatByteSize(bytes);
+    value = formatted.label;
+    title = formatted.exact;
+    sub = formatted.label === formatted.exact ? undefined : formatted.exact;
+  } else if (!loading) {
+    value = "—";
+  }
+
+  return (
+    <div className="overviewCard" title={title}>
+      <div className="overviewCardLabel">{label}</div>
+      <div className="overviewCardValue mono">{value}</div>
+      {sub ? <div className="overviewCardSub">{sub}</div> : null}
     </div>
   );
 }
@@ -603,19 +879,19 @@ function DataSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDev
   };
 
   return (
-    <div style={overviewSectionStyles}>
-      <div style={overviewSectionTitleStyles}>Backup &amp; Restore</div>
-      <div style={dangerZoneDescStyles}>
+    <div className="overviewSection">
+      <div className="overviewSectionTitle">Backup &amp; Restore</div>
+      <div className="dangerZoneDesc">
         Export the active rows of every CRDT table as JSON, or import a dump to seed/restore. Import overwrites rows
         with matching ids and is propagated to the server.
       </div>
-      <div style={dataActionsStyles}>
-        <button type="button" style={dataButtonStyles} onClick={handleExport}>
+      <div className="dataActions">
+        <button type="button" className="dataButton" onClick={handleExport}>
           ↓ Export JSON
         </button>
         <button
           type="button"
-          style={dataButtonStyles}
+          className="dataButton"
           disabled={isImporting}
           onClick={() => fileInputRef.current?.click()}
         >
@@ -625,7 +901,7 @@ function DataSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDev
           ref={fileInputRef}
           type="file"
           accept="application/json,.json"
-          style={{ display: "none" }}
+          className="hiddenInput"
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = "";
@@ -634,7 +910,7 @@ function DataSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDev
         />
       </div>
       {status && (
-        <div style={status.kind === "error" ? dataStatusErrorStyles : dataStatusSuccessStyles}>{status.message}</div>
+        <div className={status.kind === "error" ? "dataStatusError" : "dataStatusSuccess"}>{status.message}</div>
       )}
     </div>
   );
@@ -653,29 +929,29 @@ function ResetSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDe
   };
 
   return (
-    <div style={dangerZoneStyles}>
-      <div style={dangerZoneTitleStyles}>Danger Zone</div>
-      <div style={dangerZoneRowStyles}>
-        <div style={dangerZoneDescStyles}>
-          Requests a clean reload, so <code style={inlineCodeStyles}>{dbId}</code> is wiped on next load via{" "}
-          <code style={inlineCodeStyles}>clearOnInit</code>, then reloads all tabs.
+    <div className="dangerZone">
+      <div className="dangerZoneTitle">Danger Zone</div>
+      <div className="dangerZoneRow">
+        <div className="dangerZoneDesc">
+          Requests a clean reload, so <code className="inlineCode">{dbId}</code> is wiped on next load via{" "}
+          <code className="inlineCode">clearOnInit</code>, then reloads all tabs.
         </div>
         {confirming ? (
-          <div style={dangerZoneActionsStyles}>
+          <div className="dangerZoneActions">
             <button
               type="button"
-              style={resetCancelButtonStyles}
+              className="resetCancelButton"
               disabled={isResetting}
               onClick={() => setConfirming(false)}
             >
               Cancel
             </button>
-            <button type="button" style={resetConfirmButtonStyles} disabled={isResetting} onClick={handleReset}>
+            <button type="button" className="resetConfirmButton" disabled={isResetting} onClick={handleReset}>
               {isResetting ? "Resetting…" : "Confirm reset"}
             </button>
           </div>
         ) : (
-          <button type="button" style={resetButtonStyles} onClick={() => setConfirming(true)}>
+          <button type="button" className="resetButton" onClick={() => setConfirming(true)}>
             Reset DB
           </button>
         )}
@@ -684,77 +960,83 @@ function ResetSection({ dbId, instance }: { dbId: string; instance: SQLiteSyncDe
   );
 }
 
-function SchemaTab({
-  selectedInstance,
-}: {
-  selectedInstance: ReturnType<typeof getOrCreateSQLiteSyncDevtoolsRegistry>["getSnapshot"] extends () => {
-    instances: infer I;
-  }
-    ? I extends readonly (infer T)[]
-      ? T | null
-      : never
-    : never;
-}) {
+const SYSTEM_COLUMNS = new Set(["id", "tombstone"]);
+
+function formatDefaultValue(value: unknown): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean" || typeof value === "number") return String(value);
+  if (value === null) return "null";
+  return JSON.stringify(value);
+}
+
+function SchemaTab({ selectedInstance }: { selectedInstance: SQLiteSyncDevtoolsInstance | null }) {
   if (!selectedInstance) return null;
 
-  const { crdtTablesConfig, schemaVersion, migrationVersions } = selectedInstance.instance._internal;
-  const latestVersion = migrationVersions.at(-1) ?? 0;
+  const { tables, schemaVersion } = selectedInstance.instance._internal;
+  const tableEntries = Object.entries(tables);
 
   return (
-    <div style={schemaLayoutStyles}>
-      {/* CRDT Tables */}
-      <div style={schemaSectionStyles}>
-        <div style={schemaSectionHeaderStyles}>
-          <div style={schemaSectionTitleStyles}>CRDT Tables</div>
-          <span style={schemaBadgeStyles}>{crdtTablesConfig.length}</span>
+    <div className="schemaLayout">
+      <div className="schemaSection">
+        <div className="schemaSectionHeader">
+          <div className="schemaSectionTitle">Tables</div>
+          <span className="schemaBadge">{tableEntries.length}</span>
+          <span className="schemaVersionChip mlAuto" title="Latest applied migration version">
+            applied v{schemaVersion}
+          </span>
         </div>
-        <div style={schemaTableGridStyles}>
-          <div style={schemaTableHeaderRowStyles}>
-            <div style={schemaColHeaderStyles}>Base Table</div>
-            <div style={schemaColHeaderStyles}>CRDT Table</div>
-            <div style={{ ...schemaColHeaderStyles, textAlign: "center" }}>Status</div>
-          </div>
-          {crdtTablesConfig.map((table) => (
-            <div key={table.crdtTableName} style={schemaTableRowStyles}>
-              <div style={schemaTableNameStyles}>
-                <span style={schemaTableIconStyles}>▦</span>
-                {table.baseTableName}
-              </div>
-              <div style={schemaCrdtNameStyles}>{table.crdtTableName}</div>
-              <div style={schemaStatusCellStyles}>
-                <span style={schemaActiveTagStyles}>active</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Migrations */}
-      <div style={schemaSectionStyles}>
-        <div style={schemaSectionHeaderStyles}>
-          <div style={schemaSectionTitleStyles}>Migrations</div>
-          <div style={schemaMigrationsMetaStyles}>
-            <span style={schemaBadgeStyles}>{migrationVersions.length} total</span>
-            <span style={schemaVersionChipStyles}>
-              current: v{schemaVersion} / latest: v{latestVersion}
-            </span>
-          </div>
-        </div>
-        {migrationVersions.length === 0 ? (
-          <div style={schemaEmptyStyles}>No migrations defined.</div>
+        {tableEntries.length === 0 ? (
+          <div className="schemaEmpty">No tables declared on this schema.</div>
         ) : (
-          <div style={migrationListStyles}>
-            {migrationVersions.map((version) => {
-              const applied = version <= schemaVersion;
-              const isCurrent = version === schemaVersion;
+          <div className="schemaTableList">
+            {tableEntries.map(([crdtTableName, table]) => {
+              const baseTableName = table.baseName ?? `_${crdtTableName}`;
+              const columns = Object.entries(table.columns);
               return (
-                <div key={version} style={getMigrationRowStyles(applied)}>
-                  <div style={migrationVersionStyles}>v{version}</div>
-                  <div style={migrationBarTrackStyles}>
-                    <div style={getMigrationBarFillStyles(applied)} />
+                <div key={crdtTableName} className="schemaTableCard">
+                  <div className="schemaTableCardHeader">
+                    <div className="schemaTableCardTitleRow">
+                      <div className="schemaTableCardName">{crdtTableName}</div>
+                      <span className="schemaBadge">{columns.length}</span>
+                    </div>
+                    {table.description ? <p className="schemaTableCardDescription">{table.description}</p> : null}
+                    <div className="schemaTableCardMeta">
+                      <span className="schemaPolicyChip" title="Base table">
+                        {baseTableName}
+                      </span>
+                      <span
+                        className="schemaPolicyChip"
+                        data-tone={table.writeOrigin === "server" ? "warn" : undefined}
+                        title="Who may write CRDT events"
+                      >
+                        writes {table.writeOrigin}
+                      </span>
+                      <span
+                        className="schemaPolicyChip"
+                        data-tone={table.aiAccess === "read-write" ? undefined : "warn"}
+                        title="AI agent access"
+                      >
+                        ai {table.aiAccess}
+                      </span>
+                      <span
+                        className="schemaPolicyChip"
+                        data-tone={table.exportImport === "ignore" ? "warn" : undefined}
+                        title="Export / import"
+                      >
+                        export {table.exportImport}
+                      </span>
+                    </div>
                   </div>
-                  <div style={getMigrationTagStyles(applied, isCurrent)}>
-                    {isCurrent ? "current" : applied ? "applied" : "pending"}
+                  <div className="schemaColumnGrid">
+                    <div className="schemaColumnRow schemaColumnHeaderRow">
+                      <div className="schemaColHeader">Column</div>
+                      <div className="schemaColHeader">Type</div>
+                      <div className="schemaColHeader">Flags</div>
+                      <div className="schemaColHeader">Description</div>
+                    </div>
+                    {columns.map(([name, meta]) => (
+                      <SchemaColumnRow key={name} name={name} meta={meta} />
+                    ))}
                   </div>
                 </div>
               );
@@ -762,6 +1044,28 @@ function SchemaTab({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function SchemaColumnRow({ name, meta }: { name: string; meta: ColumnMeta }) {
+  const flags: string[] = [];
+  if (name === "id") flags.push("pk");
+  if (meta.nullable) flags.push("nullable");
+  if (meta.hasDefault) flags.push(`default ${formatDefaultValue(meta.defaultValue)}`);
+
+  return (
+    <div className="schemaColumnRow" data-system={SYSTEM_COLUMNS.has(name) ? "true" : undefined}>
+      <div className="schemaColumnName">{name}</div>
+      <div className="schemaColumnType">
+        <span>{meta.kind}</span>
+        {meta.kind === "boolean" ? <span className="schemaColumnTypeDetail">integer 0/1</span> : null}
+        {meta.kind === "enum" && meta.enumValues && meta.enumValues.length > 0 ? (
+          <span className="schemaColumnTypeDetail">{meta.enumValues.map((value) => `"${value}"`).join(" | ")}</span>
+        ) : null}
+      </div>
+      <div className="schemaColumnFlags">{flags.length > 0 ? flags.join(" · ") : "—"}</div>
+      <div className="schemaColumnDescription">{meta.description ?? ""}</div>
     </div>
   );
 }
@@ -793,43 +1097,38 @@ function LiveQueriesTab({ selectedInstance }: { selectedInstance: SQLiteSyncDevt
   const totalSubscribers = queries.reduce((total, query) => total + query.subscriberCount, 0);
 
   return (
-    <div style={schemaLayoutStyles}>
-      <div style={schemaSectionStyles}>
-        <div style={schemaSectionHeaderStyles}>
-          <div style={schemaSectionTitleStyles}>Shared Live Queries</div>
-          <span style={schemaBadgeStyles}>{queries.length}</span>
-          <span style={schemaVersionChipStyles}>
+    <div className="schemaLayout">
+      <div className="schemaSection">
+        <div className="schemaSectionHeader">
+          <div className="schemaSectionTitle">Shared Live Queries</div>
+          <span className="schemaBadge">{queries.length}</span>
+          <span className="schemaVersionChip">
             {totalSubscribers} subscriber{totalSubscribers !== 1 ? "s" : ""}
           </span>
-          <button
-            type="button"
-            style={{ ...eventLogRefreshButtonStyles, marginLeft: "auto" }}
-            onClick={refresh}
-            disabled={!selectedInstance}
-          >
+          <button type="button" className="refreshButton mlAuto" onClick={refresh} disabled={!selectedInstance}>
             ↻ Refresh
           </button>
         </div>
         {queries.length === 0 ? (
-          <div style={schemaEmptyStyles}>
-            No active live queries. Queries created via <code style={inlineCodeStyles}>useDbQuery</code> appear here
-            while components are subscribed.
+          <div className="schemaEmpty">
+            No active live queries. Queries created via <code className="inlineCode">useDbQuery</code> appear here while
+            components are subscribed.
           </div>
         ) : (
-          <div style={schemaTableGridStyles}>
-            <div style={liveQueryHeaderRowStyles}>
-              <div style={schemaColHeaderStyles}>SQL</div>
-              <div style={schemaColHeaderStyles}>Parameters</div>
-              <div style={{ ...schemaColHeaderStyles, textAlign: "center" }}>Subscribers</div>
+          <div className="schemaTableGrid">
+            <div className="liveQueryHeaderRow">
+              <div className="schemaColHeader">SQL</div>
+              <div className="schemaColHeader">Parameters</div>
+              <div className="schemaColHeader alignCenter">Subscribers</div>
             </div>
             {queries.map((query) => {
               const parameters = formatLiveQueryParameters(query.parameters);
               return (
-                <div key={`${query.sql}|${parameters}`} style={liveQueryRowStyles}>
-                  <div style={liveQuerySqlStyles}>{query.sql}</div>
-                  <div style={liveQueryParametersStyles}>{parameters}</div>
-                  <div style={schemaStatusCellStyles}>
-                    <span style={query.subscriberCount > 0 ? schemaActiveTagStyles : liveQueryIdleTagStyles}>
+                <div key={`${query.sql}|${parameters}`} className="liveQueryRow">
+                  <div className="liveQuerySql">{query.sql}</div>
+                  <div className="liveQueryParameters">{parameters}</div>
+                  <div className="schemaStatusCell">
+                    <span className={query.subscriberCount > 0 ? "schemaActiveTag" : "liveQueryIdleTag"}>
                       {query.subscriberCount}
                     </span>
                   </div>
@@ -864,6 +1163,28 @@ type PersistedCrdtEvent = {
   payload: string;
 };
 
+function isPersistedCrdtEvent(value: unknown): value is PersistedCrdtEvent {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    "sync_id" in value &&
+    typeof value.sync_id === "number" &&
+    "status" in value &&
+    typeof value.status === "string" &&
+    "type" in value &&
+    typeof value.type === "string" &&
+    "origin" in value &&
+    typeof value.origin === "string" &&
+    "dataset" in value &&
+    typeof value.dataset === "string" &&
+    "item_id" in value &&
+    typeof value.item_id === "string" &&
+    "payload" in value &&
+    typeof value.payload === "string" &&
+    "timestamp" in value &&
+    typeof value.timestamp === "string"
+  );
+}
+
 type EventLogFilters = {
   dataset: string;
   origin: string;
@@ -872,29 +1193,30 @@ type EventLogFilters = {
 
 const PAGE_SIZE = 50;
 
-function buildEventLogQuery(filters: EventLogFilters, afterSyncId: number | null): string {
-  const conditions: string[] = [];
-
-  if (filters.dataset) conditions.push(`dataset = '${filters.dataset}'`);
-  if (filters.origin) conditions.push(`origin = '${filters.origin}'`);
-  if (filters.status) conditions.push(`status = '${filters.status}'`);
-  if (afterSyncId !== null) conditions.push(`sync_id < ${afterSyncId}`);
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return `SELECT * FROM "worker"."crdt_events" ${where} ORDER BY sync_id DESC LIMIT ${PAGE_SIZE + 1}`;
+function sqlStringLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
-function EventLogTab({
-  selectedInstance,
-}: {
-  selectedInstance: ReturnType<typeof getOrCreateSQLiteSyncDevtoolsRegistry>["getSnapshot"] extends () => {
-    instances: infer I;
-  }
-    ? I extends readonly (infer T)[]
-      ? T | null
-      : never
-    : never;
-}) {
+function eventLogWhereClause(filters: EventLogFilters, afterSyncId: number | null): string {
+  const conditions: string[] = [];
+
+  if (filters.dataset) conditions.push(`dataset = ${sqlStringLiteral(filters.dataset)}`);
+  if (filters.origin) conditions.push(`origin = ${sqlStringLiteral(filters.origin)}`);
+  if (filters.status) conditions.push(`status = ${sqlStringLiteral(filters.status)}`);
+  if (afterSyncId !== null) conditions.push(`sync_id < ${afterSyncId}`);
+
+  return conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+}
+
+function buildEventLogQuery(filters: EventLogFilters, afterSyncId: number | null): string {
+  return `SELECT * FROM "worker"."crdt_events" ${eventLogWhereClause(filters, afterSyncId)} ORDER BY sync_id DESC LIMIT ${PAGE_SIZE + 1}`;
+}
+
+function buildEventLogCountQuery(filters: EventLogFilters): string {
+  return `SELECT COUNT(*) AS count FROM "worker"."crdt_events" ${eventLogWhereClause(filters, null)}`;
+}
+
+function EventLogTab({ selectedInstance }: { selectedInstance: SQLiteSyncDevtoolsInstance | null }) {
   const baseTableNames = useMemo(
     () => selectedInstance?.instance._internal.crdtTablesConfig.map((table) => table.baseTableName) ?? [],
     [selectedInstance],
@@ -902,17 +1224,18 @@ function EventLogTab({
 
   const [filters, setFilters] = useState<EventLogFilters>({ dataset: "", origin: "", status: "" });
   const [events, setEvents] = useState<PersistedCrdtEvent[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const afterSyncIdRef = useRef<number | null>(null);
   const isLoadingRef = useRef(false);
 
-  const executeQuery = useCallback(
-    async (sql: string): Promise<PersistedCrdtEvent[]> => {
+  const executeRows = useCallback(
+    async (sql: string): Promise<unknown[]> => {
       if (!selectedInstance) return [];
       const result = await selectedInstance.instance._internal.executeAsync({ sql, parameters: [] });
-      return result.rows as PersistedCrdtEvent[];
+      return result.rows;
     },
     [selectedInstance],
   );
@@ -925,11 +1248,14 @@ function EventLogTab({
       try {
         const afterSyncId = reset ? null : afterSyncIdRef.current;
         const sql = buildEventLogQuery(currentFilters, afterSyncId);
-        const rows = await executeQuery(sql);
-        const page = rows.slice(0, PAGE_SIZE);
+        const rowsPromise = executeRows(sql);
+        const countPromise = reset ? executeRows(buildEventLogCountQuery(currentFilters)) : Promise.resolve(null);
+        const [rows, countRows] = await Promise.all([rowsPromise, countPromise]);
+        const page = rows.filter(isPersistedCrdtEvent).slice(0, PAGE_SIZE);
         setHasMore(rows.length > PAGE_SIZE);
         if (reset) {
           setEvents(page);
+          setTotalCount(countRows ? readCount(countRows) : null);
         } else {
           setEvents((prev) => [...prev, ...page]);
         }
@@ -939,13 +1265,14 @@ function EventLogTab({
         setIsLoading(false);
       }
     },
-    [selectedInstance, executeQuery],
+    [selectedInstance, executeRows],
   );
 
   // Initial load and reload on instance or filter change
   useEffect(() => {
     afterSyncIdRef.current = null;
     setEvents([]);
+    setTotalCount(null);
     void load(true, filters);
   }, [filters, load]);
 
@@ -956,13 +1283,13 @@ function EventLogTab({
   if (!selectedInstance) return null;
 
   return (
-    <div style={eventLogLayoutStyles}>
+    <div className="eventLogLayout">
       {/* Toolbar */}
-      <div style={eventLogToolbarStyles}>
+      <div className="eventLogToolbar">
         <select
           value={filters.dataset}
           onChange={(e) => applyFilters({ ...filters, dataset: e.target.value })}
-          style={eventLogFilterSelectStyles}
+          className="eventLogFilterSelect"
         >
           <option value="">All datasets</option>
           {baseTableNames.map((name) => (
@@ -974,7 +1301,7 @@ function EventLogTab({
         <select
           value={filters.origin}
           onChange={(e) => applyFilters({ ...filters, origin: e.target.value })}
-          style={eventLogFilterSelectStyles}
+          className="eventLogFilterSelect"
         >
           <option value="">All origins</option>
           <option value="own">own</option>
@@ -984,7 +1311,7 @@ function EventLogTab({
         <select
           value={filters.status}
           onChange={(e) => applyFilters({ ...filters, status: e.target.value })}
-          style={eventLogFilterSelectStyles}
+          className="eventLogFilterSelect"
         >
           <option value="">All statuses</option>
           <option value="applied">applied</option>
@@ -992,54 +1319,50 @@ function EventLogTab({
           <option value="failed">failed</option>
           <option value="deduped">deduped</option>
         </select>
-        <button
-          type="button"
-          style={eventLogRefreshButtonStyles}
-          disabled={isLoading}
-          onClick={() => void load(true, filters)}
-        >
+        <button type="button" className="refreshButton" disabled={isLoading} onClick={() => void load(true, filters)}>
           {isLoading ? "…" : "↻"} Refresh
         </button>
-        {events.length > 0 && (
-          <span style={eventLogCountStyles}>
-            {events.length}
-            {hasMore ? "+" : ""} events
+        {totalCount !== null && (
+          <span className="eventLogCount">
+            {events.length === totalCount
+              ? `${totalCount} event${totalCount === 1 ? "" : "s"}`
+              : `${events.length} of ${totalCount}`}
           </span>
         )}
       </div>
 
       {/* Event list */}
       {events.length === 0 && !isLoading ? (
-        <div style={eventLogEmptyStyles}>No events match the current filters.</div>
+        <div className="eventLogEmpty">No events match the current filters.</div>
       ) : (
-        <div style={eventLogListStyles}>
+        <div className="eventLogList">
           {events.map((event) => {
             const isExpanded = expandedId === event.sync_id;
             return (
-              <div key={event.sync_id} style={getEventRowStyles(isExpanded)}>
+              <div key={event.sync_id} className="eventRow" data-expanded={isExpanded ? "true" : undefined}>
                 <button
                   type="button"
-                  style={eventRowHeaderStyles}
+                  className="eventRowHeader"
                   onClick={() => setExpandedId(isExpanded ? null : event.sync_id)}
                 >
-                  <span style={eventSyncIdStyles}>#{event.sync_id}</span>
+                  <span className="eventSyncId">#{event.sync_id}</span>
                   <EventTypeBadge type={event.type} />
                   <EventOriginBadge origin={event.origin} />
                   <EventStatusBadge status={event.status} />
-                  <span style={eventDatasetStyles}>{event.dataset}</span>
-                  <span style={eventItemIdStyles}>{event.item_id}</span>
-                  <span style={eventTimestampStyles}>{formatHlcTimestamp(event.timestamp)}</span>
-                  <span style={eventChevronStyles}>{isExpanded ? "▲" : "▼"}</span>
+                  <span className="eventDataset">{event.dataset}</span>
+                  <span className="eventItemId">{event.item_id}</span>
+                  <span className="eventTimestamp">{formatHlcTimestamp(event.timestamp)}</span>
+                  <span className="eventChevron">{isExpanded ? "▲" : "▼"}</span>
                 </button>
 
                 {isExpanded && (
-                  <div style={eventPayloadStyles}>
-                    <div style={eventPayloadMetaStyles}>
-                      <span style={eventMetaItemStyles}>schema v{event.schema_version}</span>
-                      <span style={eventMetaItemStyles}>node: {event.source_node_id || "—"}</span>
-                      <span style={eventMetaItemStyles}>ts: {event.timestamp}</span>
+                  <div className="eventPayload">
+                    <div className="eventPayloadMeta">
+                      <span className="eventMetaItem">schema v{event.schema_version}</span>
+                      <span className="eventMetaItem">node: {event.source_node_id || "—"}</span>
+                      <span className="eventMetaItem">ts: {event.timestamp}</span>
                     </div>
-                    <pre style={eventPayloadPreStyles}>{formatPayload(event.payload)}</pre>
+                    <pre className="eventPayloadPre">{formatPayload(event.payload)}</pre>
                   </div>
                 )}
               </div>
@@ -1049,7 +1372,7 @@ function EventLogTab({
           {hasMore && (
             <button
               type="button"
-              style={loadMoreButtonStyles}
+              className="loadMoreButton"
               disabled={isLoading}
               onClick={() => void load(false, filters)}
             >
@@ -1063,31 +1386,36 @@ function EventLogTab({
 }
 
 function EventTypeBadge({ type }: { type: string }) {
-  const { style, label } =
+  const { variant, label } =
     type === "item-created"
-      ? { style: eventTypeCreateStyles, label: "create" }
+      ? { variant: "create", label: "create" }
       : type === "item-deleted"
-        ? { style: eventTypeDeleteStyles, label: "delete" }
-        : { style: eventTypeUpdateStyles, label: "update" };
-  return <span style={style}>{label}</span>;
+        ? { variant: "delete", label: "delete" }
+        : { variant: "update", label: "update" };
+  return (
+    <span className="eventBadge" data-variant={variant}>
+      {label}
+    </span>
+  );
 }
 
 function EventOriginBadge({ origin }: { origin: string }) {
-  const style =
-    origin === "own" ? eventOriginOwnStyles : origin === "remote" ? eventOriginRemoteStyles : eventOriginLocalStyles;
-  return <span style={style}>{origin}</span>;
+  const variant = origin === "own" ? "own" : origin === "remote" ? "remote" : "local";
+  return (
+    <span className="eventBadge" data-variant={variant}>
+      {origin}
+    </span>
+  );
 }
 
 function EventStatusBadge({ status }: { status: string }) {
-  const style =
-    status === "applied"
-      ? eventStatusAppliedStyles
-      : status === "pending"
-        ? eventStatusPendingStyles
-        : status === "failed"
-          ? eventStatusFailedStyles
-          : eventStatusSkippedStyles;
-  return <span style={style}>{status}</span>;
+  const variant =
+    status === "applied" ? "applied" : status === "pending" ? "pending" : status === "failed" ? "failed" : "skipped";
+  return (
+    <span className="eventBadge" data-variant={variant}>
+      {status}
+    </span>
+  );
 }
 
 function formatHlcTimestamp(ts: string): string {
@@ -1127,38 +1455,42 @@ function QueryRunnerTab({
   runQuery: () => Promise<void>;
 }) {
   return (
-    <div style={queryRunnerLayoutStyles}>
+    <div className="queryRunnerLayout">
       {/* Top toolbar */}
-      <div style={queryToolbarStyles}>
-        <div style={targetToggleStyles}>
+      <div className="queryToolbar">
+        <div className="targetToggle">
           <button
             type="button"
-            style={getTargetButtonStyles(queryTarget === "memory")}
+            className="targetButton"
+            data-active={queryTarget === "memory" ? "true" : undefined}
             onClick={() => setQueryTarget("memory")}
           >
             Memory DB
           </button>
           <button
             type="button"
-            style={getTargetButtonStyles(queryTarget === "worker")}
+            className="targetButton"
+            data-active={queryTarget === "worker" ? "true" : undefined}
             onClick={() => setQueryTarget("worker")}
           >
             Worker DB
           </button>
         </div>
 
-        <div style={queryToolbarRightStyles}>
-          {!selectedInstance && <span style={noInstanceWarningStyles}>No instance selected</span>}
-          <span style={shortcutHintStyles}>⌘↵ to run</span>
+        <div className="queryToolbarRight">
+          {!selectedInstance && <span className="noInstanceWarning">No instance selected</span>}
+          <span className="shortcutHint">⌘↵ to run</span>
           <button
             type="button"
-            style={runButtonStyles(canRunQuery, queryState.status === "running")}
+            className="runButton"
+            data-enabled={canRunQuery ? "true" : undefined}
+            data-running={queryState.status === "running" ? "true" : undefined}
             disabled={!canRunQuery}
             onClick={() => void runQuery()}
           >
             {queryState.status === "running" ? (
               <>
-                <span style={runningDotStyles} />
+                <span className="runningDot" />
                 Running…
               </>
             ) : (
@@ -1169,7 +1501,7 @@ function QueryRunnerTab({
       </div>
 
       {/* SQL textarea */}
-      <div style={editorWrapperStyles}>
+      <div className="editorWrapper">
         <textarea
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -1179,14 +1511,14 @@ function QueryRunnerTab({
               void runQuery();
             }
           }}
-          style={textareaStyles}
+          className="textarea"
           placeholder="SELECT * FROM your_table LIMIT 100"
           spellCheck={false}
         />
       </div>
 
       {/* Constraint hint */}
-      <div style={helperTextStyles}>
+      <div className="helperText">
         {queryTarget === "worker"
           ? "Worker DB is read-only — only SELECT, PRAGMA, and EXPLAIN are allowed."
           : "Memory DB allows writes only to CRDT tables."}
@@ -1194,24 +1526,24 @@ function QueryRunnerTab({
 
       {/* Results */}
       {queryState.status === "error" && (
-        <div style={errorPanelStyles}>
-          <div style={resultHeaderStyles}>
-            <span style={errorBadgeStyles}>Error</span>
-            <span style={resultMetaStyles}>
+        <div className="errorPanel">
+          <div className="resultHeader">
+            <span className="errorBadge">Error</span>
+            <span className="resultMeta">
               {queryState.error.target} · {queryState.error.sql}
             </span>
           </div>
-          <pre style={errorMessageStyles}>{queryState.error.message}</pre>
+          <pre className="errorMessage">{queryState.error.message}</pre>
         </div>
       )}
 
       {queryState.status === "success" && (
-        <div style={resultPanelStyles}>
-          <div style={resultHeaderStyles}>
-            <span style={successBadgeStyles}>
+        <div className="resultPanel">
+          <div className="resultHeader">
+            <span className="successBadge">
               {queryState.output.rowCount} row{queryState.output.rowCount !== 1 ? "s" : ""}
             </span>
-            <span style={resultMetaStyles}>
+            <span className="resultMeta">
               {queryState.output.target} · {queryState.output.durationMs}ms
             </span>
           </div>
@@ -1224,24 +1556,24 @@ function QueryRunnerTab({
 
 function ResultTable({ rows }: { rows: unknown[] }) {
   if (rows.length === 0) {
-    return <div style={resultEmptyStyles}>Query returned 0 rows.</div>;
+    return <div className="resultEmpty">Query returned 0 rows.</div>;
   }
 
   const firstRow = rows[0];
   if (typeof firstRow !== "object" || firstRow === null) {
-    return <pre style={resultRawStyles}>{JSON.stringify(rows, null, 2)}</pre>;
+    return <pre className="resultRaw">{JSON.stringify(rows, null, 2)}</pre>;
   }
 
   const columns = Object.keys(firstRow as object);
 
   return (
-    <div style={tableWrapperStyles}>
-      <table style={tableStyles}>
+    <div className="tableWrapper">
+      <table className="table">
         <thead>
           <tr>
-            <th style={thRowNumStyles}>#</th>
+            <th className="thRowNum">#</th>
             {columns.map((col) => (
-              <th key={col} style={thStyles}>
+              <th key={col} className="th">
                 {col}
               </th>
             ))}
@@ -1249,16 +1581,16 @@ function ResultTable({ rows }: { rows: unknown[] }) {
         </thead>
         <tbody>
           {rows.map((row, rowIdx) => (
-            <tr key={rowIdx} style={rowIdx % 2 === 0 ? trStyles : trAltStyles}>
-              <td style={tdRowNumStyles}>{rowIdx + 1}</td>
+            <tr key={rowIdx}>
+              <td className="tdRowNum">{rowIdx + 1}</td>
               {columns.map((col) => {
                 const val = (row as Record<string, unknown>)[col];
                 return (
-                  <td key={col} style={tdStyles}>
+                  <td key={col} className="td">
                     {val === null ? (
-                      <span style={nullValueStyles}>NULL</span>
+                      <span className="nullValue">NULL</span>
                     ) : typeof val === "object" ? (
-                      <span style={jsonValueStyles}>{JSON.stringify(val)}</span>
+                      <span className="jsonValue">{JSON.stringify(val)}</span>
                     ) : (
                       String(val)
                     )}
@@ -1312,1343 +1644,4 @@ function getEmptySnapshot(): SQLiteSyncDevtoolsSnapshot {
 
 const emptySnapshot: SQLiteSyncDevtoolsSnapshot = {
   instances: [],
-};
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const C = {
-  bg: "#0e1015",
-  bgPanel: "#161921",
-  bgCard: "#1c2030",
-  bgInput: "#111318",
-  border: "#2a2f3e",
-  borderLight: "#343a4f",
-  text: "#e2e8f0",
-  textMuted: "#6b7280",
-  textDim: "#9ca3af",
-  teal: "#2dd4bf",
-  tealDim: "rgba(45,212,191,0.12)",
-  tealGlow: "rgba(45,212,191,0.06)",
-  error: "#f87171",
-  errorBg: "rgba(248,113,113,0.08)",
-  errorBorder: "rgba(248,113,113,0.25)",
-  success: "#34d399",
-  successBg: "rgba(52,211,153,0.08)",
-  amber: "#fbbf24",
-};
-
-const floatingRootStyles: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  pointerEvents: "none",
-  zIndex: 9998,
-};
-
-const triggerButtonStyles: CSSProperties = {
-  position: "absolute",
-  right: "16px",
-  bottom: "16px",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.3rem",
-  border: `1px solid ${C.border}`,
-  borderRadius: "8px",
-  padding: "0.3rem 0.45rem",
-  background: C.bgPanel,
-  color: C.text,
-  boxShadow: `0 0 0 1px ${C.border}, 0 4px 16px rgba(0,0,0,0.5)`,
-  cursor: "grab",
-  touchAction: "none",
-  userSelect: "none",
-  pointerEvents: "auto",
-};
-
-const triggerIconStyles: CSSProperties = {
-  color: C.teal,
-  fontSize: "0.9rem",
-  lineHeight: 1,
-};
-
-const triggerCountStyles: CSSProperties = {
-  minWidth: "1.1rem",
-  borderRadius: "4px",
-  padding: "0.05rem 0.25rem",
-  backgroundColor: C.tealDim,
-  color: C.teal,
-  fontSize: "0.65rem",
-  fontWeight: 700,
-  textAlign: "center",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const overlayStyles: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  zIndex: 9999,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "1.5rem",
-  backgroundColor: "rgba(0,0,0,0.72)",
-  backdropFilter: "blur(8px)",
-};
-
-const dialogStyles: CSSProperties = {
-  width: "min(72rem, 100%)",
-  height: "min(90vh, 860px)",
-  display: "flex",
-  flexDirection: "column",
-  border: `1px solid ${C.border}`,
-  borderRadius: "16px",
-  background: C.bg,
-  boxShadow: `0 0 0 1px ${C.border}, 0 40px 80px rgba(0,0,0,0.8), 0 0 60px rgba(45,212,191,0.04)`,
-  overflow: "hidden",
-  fontFamily: "ui-sans-serif, system-ui, sans-serif",
-  color: C.text,
-  fontSize: "0.88rem",
-};
-
-const headerStyles: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "1rem",
-  padding: "0.85rem 1.1rem",
-  borderBottom: `1px solid ${C.border}`,
-  background: C.bgPanel,
-  flexShrink: 0,
-};
-
-const headerLeftStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.75rem",
-};
-
-const headerLogoStyles: CSSProperties = {
-  fontSize: "1.3rem",
-  color: C.teal,
-  lineHeight: 1,
-};
-
-const eyebrowStyles: CSSProperties = {
-  fontSize: "0.65rem",
-  fontWeight: 600,
-  letterSpacing: "0.1em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-  fontFamily: "ui-monospace, monospace",
-};
-
-const titleStyles: CSSProperties = {
-  margin: "0.05rem 0 0",
-  fontSize: "0.95rem",
-  fontWeight: 700,
-  color: C.text,
-  letterSpacing: "-0.01em",
-};
-
-const headerRightStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-};
-
-const instancePickerLabelStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-};
-
-const instancePickerTextStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 600,
-  color: C.textMuted,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-
-const instancePickerSelectStyles: CSSProperties = {
-  borderRadius: "7px",
-  border: `1px solid ${C.border}`,
-  padding: "0.35rem 0.6rem",
-  backgroundColor: C.bgCard,
-  color: C.text,
-  fontSize: "0.82rem",
-  fontFamily: "ui-monospace, monospace",
-  cursor: "pointer",
-};
-
-const instanceCountBadgeStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 600,
-  color: C.teal,
-  backgroundColor: C.tealDim,
-  borderRadius: "5px",
-  padding: "0.2rem 0.5rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const closeButtonStyles: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: "7px",
-  width: "28px",
-  height: "28px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  backgroundColor: "transparent",
-  color: C.textMuted,
-  fontSize: "0.82rem",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const emptyStateStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "4rem 2rem",
-  gap: "0.75rem",
-  flex: 1,
-};
-
-const emptyStateIconStyles: CSSProperties = {
-  fontSize: "2.5rem",
-  color: C.textMuted,
-  opacity: 0.4,
-};
-
-const emptyStateTextStyles: CSSProperties = {
-  margin: 0,
-  fontSize: "0.95rem",
-  fontWeight: 600,
-  color: C.textDim,
-};
-
-const emptyStateSubtextStyles: CSSProperties = {
-  margin: 0,
-  fontSize: "0.82rem",
-  color: C.textMuted,
-  textAlign: "center",
-};
-
-const inlineCodeStyles: CSSProperties = {
-  fontFamily: "ui-monospace, monospace",
-  backgroundColor: C.bgCard,
-  border: `1px solid ${C.border}`,
-  borderRadius: "4px",
-  padding: "0.1em 0.4em",
-  fontSize: "0.88em",
-  color: C.teal,
-};
-
-const contentLayoutStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "200px minmax(0, 1fr)",
-  flex: 1,
-  minHeight: 0,
-  overflow: "hidden",
-};
-
-const sidebarStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0",
-  padding: "0.75rem",
-  borderRight: `1px solid ${C.border}`,
-  background: C.bgPanel,
-  overflowY: "auto",
-};
-
-const navStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  marginBottom: "1rem",
-};
-
-const navIconStyles: CSSProperties = {
-  fontSize: "0.7rem",
-  opacity: 0.7,
-};
-
-const sidebarInfoStyles: CSSProperties = {
-  marginTop: "auto",
-  padding: "0.75rem",
-  borderRadius: "8px",
-  background: C.bgCard,
-  border: `1px solid ${C.border}`,
-};
-
-const sidebarInfoLabelStyles: CSSProperties = {
-  fontSize: "0.65rem",
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-  marginBottom: "0.3rem",
-};
-
-const sidebarInfoValueStyles: CSSProperties = {
-  fontSize: "0.88rem",
-  fontWeight: 600,
-  color: C.text,
-  wordBreak: "break-word",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const sidebarInfoSubStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  color: C.textMuted,
-  fontFamily: "ui-monospace, monospace",
-  marginTop: "0.25rem",
-};
-
-const mainPaneStyles: CSSProperties = {
-  minWidth: 0,
-  overflowY: "auto",
-  padding: "1rem",
-};
-
-// ─── Overview tab styles ───────────────────────────────────────────────────────
-
-const overviewLayoutStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "1.25rem",
-};
-
-const overviewCardsRowStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(11rem, 1fr))",
-  gap: "0.75rem",
-};
-
-const overviewCardStyles: CSSProperties = {
-  padding: "0.9rem 1rem",
-  borderRadius: "10px",
-  border: `1px solid ${C.border}`,
-  background: C.bgCard,
-};
-
-const overviewCardLabelStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-  marginBottom: "0.4rem",
-};
-
-const overviewCardValueStyles: CSSProperties = {
-  fontSize: "1rem",
-  fontWeight: 700,
-  color: C.text,
-  wordBreak: "break-word",
-};
-
-const overviewSectionStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.5rem",
-};
-
-const overviewSectionTitleStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 600,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-};
-
-const overviewSectionHeaderStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "0.75rem",
-};
-
-const overviewRefreshButtonStyles: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: "7px",
-  padding: "0.35rem 0.7rem",
-  backgroundColor: "transparent",
-  color: C.textDim,
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  cursor: "pointer",
-  flexShrink: 0,
-};
-
-const overviewAccumulatorValueStyles: CSSProperties = {
-  padding: "0.75rem",
-  borderRadius: "8px",
-  border: `1px solid ${C.border}`,
-  background: C.bgCard,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: "0.78rem",
-  color: C.text,
-  lineHeight: 1.5,
-  wordBreak: "break-all",
-};
-
-const overviewAccumulatorEmptyStyles: CSSProperties = {
-  color: C.textMuted,
-  fontStyle: "italic",
-};
-
-const overviewAccumulatorErrorStyles: CSSProperties = {
-  color: C.error,
-};
-
-const overviewEmptyStyles: CSSProperties = {
-  fontSize: "0.82rem",
-  color: C.textMuted,
-  fontStyle: "italic",
-};
-
-const crdtTableListStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-};
-
-const crdtTableRowStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-  padding: "0.5rem 0.75rem",
-  borderRadius: "7px",
-  background: C.bgCard,
-  border: `1px solid ${C.border}`,
-};
-
-const crdtTableIconStyles: CSSProperties = {
-  color: C.teal,
-  fontSize: "0.72rem",
-};
-
-const crdtTableNameStyles: CSSProperties = {
-  fontFamily: "ui-monospace, monospace",
-  fontSize: "0.85rem",
-  color: C.text,
-};
-
-const permissionRowStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-  fontSize: "0.82rem",
-  color: C.textDim,
-};
-
-const permissionIconStyles: CSSProperties = {
-  color: C.success,
-  fontWeight: 700,
-  fontSize: "0.85rem",
-  lineHeight: 1,
-};
-
-const permissionTextStyles: CSSProperties = {
-  color: C.textDim,
-};
-
-const dataActionsStyles: CSSProperties = {
-  display: "flex",
-  gap: "0.4rem",
-};
-
-const dataButtonStyles: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: "7px",
-  padding: "0.4rem 0.8rem",
-  backgroundColor: "transparent",
-  color: C.teal,
-  fontSize: "0.78rem",
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const dataStatusSuccessStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  color: C.success,
-};
-
-const dataStatusErrorStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  color: C.error,
-  wordBreak: "break-word",
-};
-
-const dangerZoneStyles: CSSProperties = {
-  marginTop: "auto",
-  borderRadius: "10px",
-  border: `1px solid ${C.errorBorder}`,
-  padding: "0.75rem 1rem",
-  background: C.errorBg,
-};
-
-const dangerZoneTitleStyles: CSSProperties = {
-  fontSize: "0.65rem",
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: C.error,
-  marginBottom: "0.5rem",
-};
-
-const dangerZoneRowStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "1rem",
-};
-
-const dangerZoneDescStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  color: C.textMuted,
-  lineHeight: 1.5,
-};
-
-const dangerZoneActionsStyles: CSSProperties = {
-  display: "flex",
-  gap: "0.4rem",
-  flexShrink: 0,
-};
-
-const resetButtonStyles: CSSProperties = {
-  flexShrink: 0,
-  border: `1px solid ${C.errorBorder}`,
-  borderRadius: "7px",
-  padding: "0.35rem 0.75rem",
-  backgroundColor: "transparent",
-  color: C.error,
-  fontSize: "0.78rem",
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const resetCancelButtonStyles: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: "7px",
-  padding: "0.35rem 0.65rem",
-  backgroundColor: "transparent",
-  color: C.textDim,
-  fontSize: "0.78rem",
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const resetConfirmButtonStyles: CSSProperties = {
-  border: "none",
-  borderRadius: "7px",
-  padding: "0.35rem 0.75rem",
-  backgroundColor: C.error,
-  color: "#0e1015",
-  fontSize: "0.78rem",
-  fontWeight: 700,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-// ─── Query runner tab styles ───────────────────────────────────────────────────
-
-const queryRunnerLayoutStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.75rem",
-  height: "100%",
-};
-
-const queryToolbarStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "0.75rem",
-  flexWrap: "wrap",
-};
-
-const targetToggleStyles: CSSProperties = {
-  display: "flex",
-  gap: "0",
-  borderRadius: "8px",
-  border: `1px solid ${C.border}`,
-  overflow: "hidden",
-  background: C.bgCard,
-};
-
-const queryToolbarRightStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-};
-
-const noInstanceWarningStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  color: C.amber,
-  fontWeight: 500,
-};
-
-const shortcutHintStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  color: C.textMuted,
-  fontFamily: "ui-monospace, monospace",
-  padding: "0.2rem 0.5rem",
-  borderRadius: "5px",
-  border: `1px solid ${C.border}`,
-  background: C.bgCard,
-};
-
-const editorWrapperStyles: CSSProperties = {
-  borderRadius: "10px",
-  border: `1px solid ${C.border}`,
-  overflow: "hidden",
-  background: C.bgInput,
-};
-
-const textareaStyles: CSSProperties = {
-  width: "100%",
-  minHeight: "9rem",
-  resize: "vertical",
-  border: "none",
-  padding: "0.85rem 1rem",
-  backgroundColor: "transparent",
-  color: C.text,
-  fontSize: "0.875rem",
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  lineHeight: 1.6,
-  outline: "none",
-  boxSizing: "border-box",
-};
-
-const helperTextStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  lineHeight: 1.5,
-  color: C.textMuted,
-};
-
-const resultPanelStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.6rem",
-  borderRadius: "10px",
-  border: `1px solid ${C.border}`,
-  overflow: "hidden",
-  background: C.bgPanel,
-};
-
-const errorPanelStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.6rem",
-  padding: "0.85rem 1rem",
-  borderRadius: "10px",
-  border: `1px solid ${C.errorBorder}`,
-  background: C.errorBg,
-};
-
-const resultHeaderStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-  padding: "0.6rem 0.85rem",
-  borderBottom: `1px solid ${C.border}`,
-  background: C.bgCard,
-};
-
-const successBadgeStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 700,
-  color: C.success,
-  backgroundColor: C.successBg,
-  borderRadius: "5px",
-  padding: "0.15rem 0.5rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const errorBadgeStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 700,
-  color: C.error,
-  backgroundColor: C.errorBg,
-  borderRadius: "5px",
-  padding: "0.15rem 0.5rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const resultMetaStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  color: C.textMuted,
-  fontFamily: "ui-monospace, monospace",
-};
-
-const resultEmptyStyles: CSSProperties = {
-  padding: "1.5rem",
-  fontSize: "0.82rem",
-  color: C.textMuted,
-  fontStyle: "italic",
-  textAlign: "center",
-};
-
-const resultRawStyles: CSSProperties = {
-  margin: 0,
-  padding: "0.85rem 1rem",
-  overflowX: "auto",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-  fontSize: "0.8rem",
-  lineHeight: 1.5,
-  color: C.text,
-  fontFamily: "ui-monospace, monospace",
-};
-
-const errorMessageStyles: CSSProperties = {
-  margin: 0,
-  fontSize: "0.82rem",
-  lineHeight: 1.6,
-  color: C.error,
-  fontFamily: "ui-monospace, monospace",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-};
-
-const tableWrapperStyles: CSSProperties = {
-  overflowX: "auto",
-  maxHeight: "320px",
-  overflowY: "auto",
-};
-
-const tableStyles: CSSProperties = {
-  width: "100%",
-  borderCollapse: "collapse",
-  fontSize: "0.8rem",
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-};
-
-const thStyles: CSSProperties = {
-  padding: "0.5rem 0.85rem",
-  textAlign: "left",
-  fontWeight: 600,
-  fontSize: "0.7rem",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-  borderBottom: `1px solid ${C.border}`,
-  borderRight: `1px solid ${C.border}`,
-  background: C.bgCard,
-  whiteSpace: "nowrap",
-  position: "sticky",
-  top: 0,
-};
-
-const thRowNumStyles: CSSProperties = {
-  ...thStyles,
-  color: C.textMuted,
-  opacity: 0.5,
-  width: "2.5rem",
-  textAlign: "right",
-};
-
-const trStyles: CSSProperties = {
-  background: "transparent",
-};
-
-const trAltStyles: CSSProperties = {
-  background: C.tealGlow,
-};
-
-const tdStyles: CSSProperties = {
-  padding: "0.45rem 0.85rem",
-  borderBottom: `1px solid ${C.border}`,
-  borderRight: `1px solid ${C.border}`,
-  color: C.text,
-  whiteSpace: "nowrap",
-  maxWidth: "300px",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
-const tdRowNumStyles: CSSProperties = {
-  ...tdStyles,
-  color: C.textMuted,
-  opacity: 0.5,
-  textAlign: "right",
-  userSelect: "none",
-};
-
-const nullValueStyles: CSSProperties = {
-  color: C.textMuted,
-  fontStyle: "italic",
-  opacity: 0.6,
-};
-
-const jsonValueStyles: CSSProperties = {
-  color: C.textDim,
-};
-
-function getTabButtonStyles(isActive: boolean): CSSProperties {
-  return {
-    display: "flex",
-    alignItems: "center",
-    gap: "0.5rem",
-    width: "100%",
-    border: "none",
-    borderRadius: "7px",
-    padding: "0.6rem 0.75rem",
-    background: isActive ? C.tealDim : "transparent",
-    color: isActive ? C.teal : C.textDim,
-    fontSize: "0.82rem",
-    fontWeight: isActive ? 700 : 500,
-    textAlign: "left",
-    cursor: "pointer",
-    transition: "background 0.15s",
-    borderLeft: isActive ? `2px solid ${C.teal}` : "2px solid transparent",
-  };
-}
-
-function getTargetButtonStyles(isActive: boolean): CSSProperties {
-  return {
-    border: "none",
-    borderRight: `1px solid ${C.border}`,
-    padding: "0.45rem 0.85rem",
-    background: isActive ? C.tealDim : "transparent",
-    color: isActive ? C.teal : C.textMuted,
-    fontSize: "0.78rem",
-    fontWeight: isActive ? 700 : 500,
-    cursor: "pointer",
-    fontFamily: "ui-monospace, monospace",
-    transition: "background 0.1s",
-    whiteSpace: "nowrap",
-  };
-}
-
-function runButtonStyles(enabled: boolean, running: boolean): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    border: "none",
-    borderRadius: "7px",
-    padding: "0.45rem 0.9rem",
-    background: enabled ? C.teal : C.bgCard,
-    color: enabled ? "#0e1015" : C.textMuted,
-    fontSize: "0.82rem",
-    fontWeight: 700,
-    fontFamily: "ui-monospace, monospace",
-    cursor: enabled ? "pointer" : "not-allowed",
-    opacity: running ? 0.75 : 1,
-    transition: "background 0.15s",
-    whiteSpace: "nowrap",
-  };
-}
-
-const runningDotStyles: CSSProperties = {
-  width: "6px",
-  height: "6px",
-  borderRadius: "50%",
-  backgroundColor: "currentColor",
-};
-
-// ─── Schema tab styles ────────────────────────────────────────────────────────
-
-const schemaLayoutStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "1.5rem",
-};
-
-const schemaSectionStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.65rem",
-};
-
-const schemaSectionHeaderStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.6rem",
-};
-
-const schemaSectionTitleStyles: CSSProperties = {
-  fontSize: "0.72rem",
-  fontWeight: 700,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-};
-
-const schemaBadgeStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontWeight: 700,
-  color: C.teal,
-  backgroundColor: C.tealDim,
-  borderRadius: "4px",
-  padding: "0.1rem 0.4rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const schemaMigrationsMetaStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  marginLeft: "auto",
-};
-
-const schemaVersionChipStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-  backgroundColor: C.bgCard,
-  border: `1px solid ${C.border}`,
-  borderRadius: "4px",
-  padding: "0.1rem 0.5rem",
-};
-
-const schemaTableGridStyles: CSSProperties = {
-  borderRadius: "10px",
-  border: `1px solid ${C.border}`,
-  overflow: "hidden",
-};
-
-const schemaTableHeaderRowStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 90px",
-  gap: 0,
-  backgroundColor: C.bgCard,
-  borderBottom: `1px solid ${C.border}`,
-};
-
-const schemaColHeaderStyles: CSSProperties = {
-  padding: "0.5rem 0.85rem",
-  fontSize: "0.68rem",
-  fontWeight: 700,
-  letterSpacing: "0.07em",
-  textTransform: "uppercase",
-  color: C.textMuted,
-  borderRight: `1px solid ${C.border}`,
-};
-
-const schemaTableRowStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr 90px",
-  gap: 0,
-  borderBottom: `1px solid ${C.border}`,
-};
-
-const schemaTableNameStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  padding: "0.6rem 0.85rem",
-  fontSize: "0.82rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.text,
-  borderRight: `1px solid ${C.border}`,
-};
-
-const schemaTableIconStyles: CSSProperties = {
-  color: C.teal,
-  fontSize: "0.68rem",
-  opacity: 0.8,
-};
-
-const schemaCrdtNameStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  padding: "0.6rem 0.85rem",
-  fontSize: "0.82rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textDim,
-  borderRight: `1px solid ${C.border}`,
-};
-
-const schemaStatusCellStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "0.6rem 0.5rem",
-};
-
-const schemaActiveTagStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontWeight: 700,
-  color: C.success,
-  backgroundColor: C.successBg,
-  borderRadius: "4px",
-  padding: "0.15rem 0.45rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const schemaEmptyStyles: CSSProperties = {
-  fontSize: "0.82rem",
-  color: C.textMuted,
-  fontStyle: "italic",
-};
-
-const migrationListStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.35rem",
-};
-
-function getMigrationRowStyles(applied: boolean): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: "3.5rem 1fr 70px",
-    alignItems: "center",
-    gap: "0.75rem",
-    padding: "0.55rem 0.85rem",
-    borderRadius: "8px",
-    background: applied ? C.bgCard : "transparent",
-    border: `1px solid ${applied ? C.border : C.borderLight}`,
-    opacity: applied ? 1 : 0.55,
-  };
-}
-
-const migrationVersionStyles: CSSProperties = {
-  fontSize: "0.78rem",
-  fontWeight: 700,
-  fontFamily: "ui-monospace, monospace",
-  color: C.textDim,
-};
-
-const migrationBarTrackStyles: CSSProperties = {
-  height: "4px",
-  borderRadius: "2px",
-  backgroundColor: C.border,
-  overflow: "hidden",
-};
-
-function getMigrationBarFillStyles(applied: boolean): CSSProperties {
-  return {
-    height: "100%",
-    width: applied ? "100%" : "0%",
-    borderRadius: "2px",
-    backgroundColor: C.teal,
-    transition: "width 0.3s ease",
-  };
-}
-
-function getMigrationTagStyles(applied: boolean, isCurrent: boolean): CSSProperties {
-  if (isCurrent) {
-    return {
-      fontSize: "0.68rem",
-      fontWeight: 700,
-      color: C.teal,
-      backgroundColor: C.tealDim,
-      borderRadius: "4px",
-      padding: "0.15rem 0.45rem",
-      fontFamily: "ui-monospace, monospace",
-      textAlign: "center",
-    };
-  }
-  if (applied) {
-    return {
-      fontSize: "0.68rem",
-      fontWeight: 600,
-      color: C.success,
-      backgroundColor: C.successBg,
-      borderRadius: "4px",
-      padding: "0.15rem 0.45rem",
-      fontFamily: "ui-monospace, monospace",
-      textAlign: "center",
-    };
-  }
-  return {
-    fontSize: "0.68rem",
-    fontWeight: 600,
-    color: C.amber,
-    backgroundColor: "rgba(251,191,36,0.08)",
-    borderRadius: "4px",
-    padding: "0.15rem 0.45rem",
-    fontFamily: "ui-monospace, monospace",
-    textAlign: "center",
-  };
-}
-
-// ─── Event log tab styles ─────────────────────────────────────────────────────
-
-const liveQueryHeaderRowStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 220px 110px",
-  gap: 0,
-  backgroundColor: C.bgCard,
-  borderBottom: `1px solid ${C.border}`,
-};
-
-const liveQueryRowStyles: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) 220px 110px",
-  gap: 0,
-  borderBottom: `1px solid ${C.border}`,
-};
-
-const liveQuerySqlStyles: CSSProperties = {
-  padding: "0.6rem 0.85rem",
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.text,
-  borderRight: `1px solid ${C.border}`,
-  whiteSpace: "pre-wrap",
-  overflowWrap: "anywhere",
-};
-
-const liveQueryParametersStyles: CSSProperties = {
-  padding: "0.6rem 0.85rem",
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textDim,
-  borderRight: `1px solid ${C.border}`,
-  whiteSpace: "pre-wrap",
-  overflowWrap: "anywhere",
-};
-
-const liveQueryIdleTagStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontWeight: 700,
-  color: C.textMuted,
-  backgroundColor: C.bgCard,
-  border: `1px solid ${C.border}`,
-  borderRadius: "4px",
-  padding: "0.15rem 0.45rem",
-  fontFamily: "ui-monospace, monospace",
-};
-
-const eventLogLayoutStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.75rem",
-  height: "100%",
-};
-
-const eventLogToolbarStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  flexWrap: "wrap",
-  flexShrink: 0,
-};
-
-const eventLogFilterSelectStyles: CSSProperties = {
-  borderRadius: "7px",
-  border: `1px solid ${C.border}`,
-  padding: "0.35rem 0.6rem",
-  backgroundColor: C.bgCard,
-  color: C.text,
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  cursor: "pointer",
-};
-
-const eventLogRefreshButtonStyles: CSSProperties = {
-  border: `1px solid ${C.border}`,
-  borderRadius: "7px",
-  padding: "0.35rem 0.7rem",
-  backgroundColor: "transparent",
-  color: C.textDim,
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  cursor: "pointer",
-};
-
-const eventLogCountStyles: CSSProperties = {
-  marginLeft: "auto",
-  fontSize: "0.72rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-};
-
-const eventLogEmptyStyles: CSSProperties = {
-  padding: "2rem",
-  textAlign: "center",
-  fontSize: "0.82rem",
-  color: C.textMuted,
-  fontStyle: "italic",
-};
-
-const eventLogListStyles: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  overflowY: "auto",
-  flex: 1,
-};
-
-function getEventRowStyles(isExpanded: boolean): CSSProperties {
-  return {
-    borderRadius: "8px",
-    border: `1px solid ${isExpanded ? `${C.teal}40` : C.border}`,
-    background: isExpanded ? C.tealGlow : C.bgCard,
-    overflow: "hidden",
-    flexShrink: 0,
-  };
-}
-
-const eventRowHeaderStyles: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  width: "100%",
-  padding: "0.5rem 0.75rem",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  textAlign: "left",
-  flexWrap: "wrap",
-};
-
-const eventSyncIdStyles: CSSProperties = {
-  fontSize: "0.7rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-  minWidth: "3.5rem",
-};
-
-const eventDatasetStyles: CSSProperties = {
-  fontSize: "0.8rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.text,
-  fontWeight: 600,
-};
-
-const eventItemIdStyles: CSSProperties = {
-  fontSize: "0.75rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-  flex: 1,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  minWidth: 0,
-};
-
-const eventTimestampStyles: CSSProperties = {
-  fontSize: "0.7rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-  marginLeft: "auto",
-};
-
-const eventChevronStyles: CSSProperties = {
-  fontSize: "0.6rem",
-  color: C.textMuted,
-  marginLeft: "0.25rem",
-};
-
-const eventPayloadStyles: CSSProperties = {
-  borderTop: `1px solid ${C.border}`,
-  padding: "0.6rem 0.75rem",
-};
-
-const eventPayloadMetaStyles: CSSProperties = {
-  display: "flex",
-  gap: "0.75rem",
-  marginBottom: "0.5rem",
-};
-
-const eventMetaItemStyles: CSSProperties = {
-  fontSize: "0.68rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.textMuted,
-};
-
-const eventPayloadPreStyles: CSSProperties = {
-  margin: 0,
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  color: C.text,
-  lineHeight: 1.5,
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
-};
-
-const loadMoreButtonStyles: CSSProperties = {
-  width: "100%",
-  border: `1px solid ${C.border}`,
-  borderRadius: "8px",
-  padding: "0.6rem",
-  backgroundColor: "transparent",
-  color: C.textDim,
-  fontSize: "0.78rem",
-  fontFamily: "ui-monospace, monospace",
-  cursor: "pointer",
-  flexShrink: 0,
-};
-
-// Event type badges
-const eventTypeBadgeBase: CSSProperties = {
-  fontSize: "0.65rem",
-  fontWeight: 700,
-  borderRadius: "4px",
-  padding: "0.1rem 0.4rem",
-  fontFamily: "ui-monospace, monospace",
-  whiteSpace: "nowrap",
-};
-
-const eventTypeCreateStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.teal,
-  backgroundColor: C.tealDim,
-};
-
-const eventTypeUpdateStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: "#a78bfa",
-  backgroundColor: "rgba(167,139,250,0.12)",
-};
-
-const eventTypeDeleteStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.error,
-  backgroundColor: "rgba(248,113,113,0.12)",
-};
-
-// Origin badges
-const eventOriginOwnStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.success,
-  backgroundColor: C.successBg,
-};
-
-const eventOriginRemoteStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.amber,
-  backgroundColor: "rgba(251,191,36,0.1)",
-};
-
-const eventOriginLocalStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.textDim,
-  backgroundColor: C.bgCard,
-  border: `1px solid ${C.border}`,
-};
-
-// Status badges
-const eventStatusAppliedStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.success,
-  backgroundColor: C.successBg,
-};
-
-const eventStatusPendingStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.amber,
-  backgroundColor: "rgba(251,191,36,0.1)",
-};
-
-const eventStatusFailedStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.error,
-  backgroundColor: C.errorBg,
-};
-
-const eventStatusSkippedStyles: CSSProperties = {
-  ...eventTypeBadgeBase,
-  color: C.textMuted,
-  backgroundColor: C.bgCard,
 };

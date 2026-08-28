@@ -270,6 +270,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       getSharedLiveQueriesSnapshot: reactiveDb.getSharedLiveQueriesSnapshot.bind(reactiveDb),
       crdtTableNames: options.syncDbSchema.tablesConfig.map((table) => table.crdtTableName),
       crdtTablesConfig: options.syncDbSchema.tablesConfig,
+      tables: options.syncDbSchema.tables,
       schemaVersion: workerClientSnapshot.schemaVersion,
       migrationVersions: Object.keys(options.syncDbSchema.migrations)
         .map(Number)

@@ -12,6 +12,6 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   deps: {
-    neverBundle: ["react", "@sqlite-sync/core"],
+    neverBundle: ["react", "react-dom", "@sqlite-sync/core"],
   },
 });
