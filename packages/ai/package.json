@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/ai",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "AI agent tools for @sqlite-sync databases",
   "type": "module",
   "license": "MIT",
@@ -48,7 +48,7 @@
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
-    "@sqlite-sync/core": "^0.9.3",
+    "@sqlite-sync/core": "^0.9.4",
     "ai": "^6.0.0"
   },
   "devDependencies": {
