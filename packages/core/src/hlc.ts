@@ -47,6 +47,16 @@ export class HLCCounter {
     return this.getCurrentHLC();
   }
 
+  /** Restore already-persisted causal state, regardless of wall-clock drift. */
+  restoreHLC(hlc: HLC) {
+    if (hlc.timestamp > this.timestamp) {
+      this.timestamp = hlc.timestamp;
+      this.counter = hlc.counter;
+    } else if (hlc.timestamp === this.timestamp) {
+      this.counter = Math.max(this.counter, hlc.counter);
+    }
+  }
+
   mergeHLC(hlc: HLC) {
     const now = this.getTimestamp();
     if (hlc.timestamp - now > this.maxDrift) {

@@ -1335,6 +1335,33 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 });
 
+it.each([60_000, 86_400_000])("restores snapshot timestamps ahead of the wall clock by %i ms", async (futureTime) => {
+  const original = await createReplica("original", futureTime);
+  await original.createTodo({ id: "one", title: "old", completed: false, tombstone: false });
+  original.db.execute("DELETE FROM persisted_crdt_events");
+  const reactiveDb = await createSQLiteReactiveDb({ snapshot: original.db.createSnapshot(), logger: noopLogger });
+  const { crdtStorage } = await createMemoryDb({
+    nodeId: "new-tab",
+    reactiveDb,
+    hlcCounter: new HLCCounter("new-tab", () => 1_000),
+    migrator: createMigrator({ migrations: createMigrations(() => ({ 0: [] })), schemaVersion: { current: 0 } }),
+    crdtTables: todoSyncSchema.tablesConfig,
+    syncDbSchema: todoSyncSchema,
+    initializeSchema: false,
+  });
+  try {
+    reactiveDb.db.execute(`UPDATE "_todo" SET title = 'new' WHERE id = 'one'`);
+    await crdtStorage.internal.processEnqueuedEvents();
+    expect(reactiveDb.db.execute("SELECT title FROM todo").rows).toEqual([{ title: "new" }]);
+    const [event] = reactiveDb.db.execute<PersistedCrdtEvent>("SELECT * FROM persisted_crdt_events").rows;
+    const [meta] = original.db.execute<CrdtUpdateLogItem>("SELECT * FROM crdt_update_log").rows;
+    expect(event.timestamp > JSON.parse(meta.payload).title).toBe(true);
+  } finally {
+    reactiveDb.dispose();
+    original.db.close();
+  }
+});
+
 it("concurrent creates and a delete converge without explicit tombstones", async () => {
   const a = await createReplica("a", 1_000);
   const b = await createReplica("b", 1_000);

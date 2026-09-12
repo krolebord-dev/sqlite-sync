@@ -103,7 +103,7 @@ export type EventUpdate = {
   payload: string;
 };
 
-type StorageHLC = Pick<HLCCounter, "getNextHLC" | "mergeHLC">;
+type StorageHLC = Pick<HLCCounter, "getNextHLC" | "mergeHLC" | "restoreHLC">;
 
 type DbSyncerStorage = {
   nodeId: string;
@@ -141,6 +141,20 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   const crdtEventsTable = storage.dbConfig.eventsTable.fullIdentifier as "_crdt_events";
   const quotedEventsTable = quoteId(storage.dbConfig.eventsTable.fullIdentifier);
   const noOpPayloadSqlLiteral = `'${CRDT_EVENT_NO_OP_PAYLOAD}'`;
+
+  const [persistedClock] = db.executePreparedRaw<[], { timestamp: string | null }>({
+    key: "get-persisted-hlc",
+    sql: `select max("timestamp") as "timestamp" from (
+      select max("timestamp") as "timestamp" from ${quotedEventsTable} where "status" = 'applied'
+      union all
+      select max(fields.value) as "timestamp"
+      from ${quoteId(storage.dbConfig.updateLogTable.fullIdentifier)} as updates, json_each(updates.payload) as fields
+    )`,
+    meta: { loggerLevel: "system" },
+  });
+  if (persistedClock?.timestamp) {
+    storage.hlc.restoreHLC(deserializeHLC(persistedClock.timestamp));
+  }
 
   const getInitialSequentialSyncId = () => {
     const [firstPendingEvent] = db.executePrepared(
