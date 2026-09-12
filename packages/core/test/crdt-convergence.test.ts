@@ -1334,3 +1334,27 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaA.getEventHlcAccumulator()).toBe(replicaB.getEventHlcAccumulator());
   });
 });
+
+it("concurrent creates and a delete converge without explicit tombstones", async () => {
+  const a = await createReplica("a", 1_000);
+  const b = await createReplica("b", 1_000);
+  const makeEvent = (type: RemoteEvent["type"], time: number): RemoteEvent => ({
+    type,
+    dataset: BASE_TABLE,
+    item_id: "one",
+    schema_version: 0,
+    timestamp: serializeHLC({ timestamp: time, counter: 0, nodeId: "remote" }),
+    payload: JSON.stringify(type === "item-created" ? { id: "one", title: "row", completed: false } : {}),
+  });
+  const early = makeEvent("item-created", 1_000);
+  const deletion = makeEvent("item-deleted", 1_500);
+  const late = makeEvent("item-created", 2_000);
+  try {
+    await a.importEvents([early, deletion, late]);
+    await b.importEvents([late, early, deletion]);
+    expect(a.getTodo("one")).toEqual(b.getTodo("one"));
+  } finally {
+    a.db.close();
+    b.db.close();
+  }
+});

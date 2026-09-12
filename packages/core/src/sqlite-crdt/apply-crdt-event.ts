@@ -164,6 +164,9 @@ export function createCrdtApplyFunction({
     // materialization of the soft-delete, stamped here with the event's HLC so
     // it competes with concurrent field edits under the same last-write-wins rule.
     const eventPayload = event.type === "item-deleted" ? { tombstone: 1 } : JSON.parse(event.payload);
+    if (event.type === "item-created") {
+      eventPayload.tombstone = 0;
+    }
 
     const updatePayload = {} as Record<string, unknown>;
     let hasUpdates = false;
