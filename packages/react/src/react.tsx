@@ -75,12 +75,9 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
 
     const data = useSyncExternalStore(sharedQuery.subscribe, sharedQuery.getRows) as TResult[];
 
-    const mapDataRef = useRef(mapData);
-    mapDataRef.current = mapData;
-
     const mappedData = useMemo(() => {
-      return mapDataRef.current ? mapDataRef.current(data) : data;
-    }, [data]) as TMapResult;
+      return mapData ? mapData(data) : data;
+    }, [data, mapData]) as TMapResult;
 
     return { data: mappedData, refresh: sharedQuery.refresh };
   };

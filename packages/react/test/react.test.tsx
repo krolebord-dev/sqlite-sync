@@ -398,3 +398,25 @@ function createFakeDb() {
 function buildRows(sql: string, parameters: readonly unknown[], revision: number) {
   return [{ sql, parameters: [...parameters], revision }];
 }
+
+it("mapData changes when its captured props change", () => {
+  const fakeDb = createFakeDb();
+  const query = { sql: "select * from todo", parameters: [] };
+  const { rerender } = renderWithDb(
+    fakeDb.db,
+    <QueryView label="result" query={query} mapData={(rows) => rows.length * 2} />,
+  );
+  expect(screen.getByTestId("result").textContent).toBe("2");
+  rerender(
+    <DbProvider db={fakeDb.db}>
+      <QueryView label="result" query={query} mapData={(rows) => rows.length * 3} />
+    </DbProvider>,
+  );
+  expect(screen.getByTestId("result").textContent).toBe("3");
+  rerender(
+    <DbProvider db={fakeDb.db}>
+      <QueryView label="result" query={query} />
+    </DbProvider>,
+  );
+  expect(screen.getByTestId("result").textContent).toBe(JSON.stringify(fakeDb.entries[0]?.getRows()));
+});
