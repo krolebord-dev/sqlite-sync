@@ -1055,7 +1055,7 @@ const syncDbSchema = defineSyncSchema({
 ```
 
 Clients still receive and query the table. On push, the Durable Object drops events for
-server-only datasets, accepts the rest of the batch, and still returns `ok: true`. Server
+server-only and undeclared datasets, accepts the rest of the batch, and still returns `ok: true`. Server
 `enqueueEvent`, `applyOwnEvents`, and SQL writes are not filtered.
 
 `writes` and `ai` are separate knobs. A server-side agent can still mutate a server-only table
@@ -1252,9 +1252,10 @@ function createMigrations(
 
 #### `admitClientEvents(options)`
 
-Splits a client push into events the hub should persist and events for tables declared
-`{ writes: "server" }`. The Durable Object adapter calls this on `push-events`. Unknown datasets
-stay admitted.
+Splits a client push into events the hub should persist and events it drops. The Durable Object
+adapter calls this on `push-events`. Only datasets that exactly match the crdt or base name of a
+declared table without `{ writes: "server" }` are admitted; server-only and undeclared datasets
+(including other spellings such as `_JOB` or `main._job`) are skipped.
 
 ```ts
 function admitClientEvents<T extends { dataset: string }>(options: {

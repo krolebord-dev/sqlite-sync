@@ -23,9 +23,9 @@ export function buildWriteOriginByName(
 }
 
 /**
- * Splits a client push into events the hub should persist and events for tables with
- * `{ writes: "server" }`. Unknown datasets stay admitted. Matches either the crdt or the base
- * table name.
+ * Splits a client push into events the hub should persist and events it must drop. Only
+ * datasets that exactly match the crdt or base name of a declared table without
+ * `{ writes: "server" }` are admitted; server-only and undeclared datasets are skipped.
  */
 export function admitClientEvents<T extends { dataset: string }>(opts: {
   syncDbSchema: SchemaForAdmitClientEvents;
@@ -36,10 +36,10 @@ export function admitClientEvents<T extends { dataset: string }>(opts: {
   const admitted: T[] = [];
   const skipped: T[] = [];
   for (const event of opts.events) {
-    if (writeOriginByName.get(event.dataset) === "server") {
-      skipped.push(event);
-    } else {
+    if (writeOriginByName.get(event.dataset) === "any") {
       admitted.push(event);
+    } else {
+      skipped.push(event);
     }
   }
   return { admitted, skipped };

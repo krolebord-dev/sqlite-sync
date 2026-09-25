@@ -304,7 +304,7 @@ function createDurableObjectRemoteHandler({
     });
     if (skipped.length > 0) {
       console.warn(
-        "Skipped client events for server-only tables",
+        "Skipped client events for server-only or undeclared tables",
         skipped.map((event) => ({ dataset: event.dataset, type: event.type, item_id: event.item_id })),
       );
     }

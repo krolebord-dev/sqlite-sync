@@ -54,12 +54,12 @@ describe("admitClientEvents", () => {
     expect(result.skipped.map((item) => item.dataset)).toEqual(["_job"]);
   });
 
-  it("admits unknown datasets so undeclared tables keep the previous push behavior", () => {
-    const unknown = event("scratch", "s1");
+  it("skips undeclared datasets, including other spellings of declared tables", () => {
+    const events = ["scratch", "JOB", "_Job", "main._job", "TODO", "main.todo"].map((dataset) => event(dataset, "x1"));
 
-    expect(admitClientEvents({ syncDbSchema, events: [unknown] })).toEqual({
-      admitted: [unknown],
-      skipped: [],
+    expect(admitClientEvents({ syncDbSchema, events })).toEqual({
+      admitted: [],
+      skipped: events,
     });
   });
 
