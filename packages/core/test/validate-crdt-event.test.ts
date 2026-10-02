@@ -198,6 +198,23 @@ describe("validateNewCrdtEvent", () => {
     ]);
   });
 
+  it("treats Object.prototype keys as unknown datasets and columns", () => {
+    expect(
+      validateNewCrdtEvent(schema, { type: "item-created", dataset: "constructor", item_id: "i1", payload: {} }),
+    ).toEqual({ success: false, errors: ['Unknown dataset "constructor"'] });
+
+    const result = validateNewCrdtEvent(schema, {
+      type: "item-updated",
+      dataset: "_item",
+      item_id: "i1",
+      payload: '{"toString":"x","__proto__":"y"}',
+    });
+    expect(result.success === false && result.errors).toEqual([
+      'payload: Unknown column "toString"',
+      'payload: Unknown column "__proto__"',
+    ]);
+  });
+
   it("accepts a JSON string payload and returns it parsed", () => {
     const result = validateNewCrdtEvent(schema, {
       type: "item-created",

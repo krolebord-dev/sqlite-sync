@@ -5,7 +5,7 @@ export interface HLC {
 }
 
 const MAX_COUNTER = 36 ** 5 - 1; // 60,466,175 — max value that fits in 5-char base36
-const DEFAULT_MAX_DRIFT_MS = 6 * 60 * 60 * 1000; // 6 hours
+export const DEFAULT_MAX_DRIFT_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 export class HLCCounter {
   private timestamp: number;

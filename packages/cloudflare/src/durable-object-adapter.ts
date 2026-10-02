@@ -1,5 +1,4 @@
 import {
-  admitClientEvents,
   type CrdtEventOrigin,
   type CrdtEventStatus,
   type CrdtEventType,
@@ -31,14 +30,16 @@ import {
   runSystemMigrations,
 } from "@sqlite-sync/core/internal";
 import {
+  admitClientPush,
   type ExtractSyncServerRequest,
+  type PushRejection,
   type SyncServerMessage,
   type SyncServerRequest,
   syncServerZodSchema,
 } from "@sqlite-sync/core/server";
 import type { Compilable, Kysely } from "kysely";
 import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "./kysely-executor";
-import { createMigrator } from "./migrator";
+import { createMigrator, type SyncDbMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
 
@@ -166,6 +167,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     crdtStorage,
     broadcastPayload,
     syncDbSchema,
+    migrator,
   });
 
   const syncDbMutator = createCrdtStorageMutator<Schema[`~mutationsSchema`]>({
@@ -220,11 +222,13 @@ function createDurableObjectRemoteHandler({
   crdtStorage,
   broadcastPayload,
   syncDbSchema,
+  migrator,
 }: {
   bufferSize?: number;
   crdtStorage: CrdtStorage;
   broadcastPayload: (payload: string) => void;
   syncDbSchema: SyncDbSchema;
+  migrator: SyncDbMigrator;
 }): RemoteHandler {
   createCrdtSyncProducer({
     storage: crdtStorage,
@@ -298,15 +302,14 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePushEvents = (request: ExtractSyncServerRequest<"push-events">): MessageResult => {
-    const { admitted, skipped } = admitClientEvents({
+    const { admitted, rejected } = admitClientPush({
       syncDbSchema,
+      migrator,
       events: request.events,
+      now: Date.now(),
     });
-    if (skipped.length > 0) {
-      console.warn(
-        "Skipped client events for server-only or undeclared tables",
-        skipped.map((event) => ({ dataset: event.dataset, type: event.type, item_id: event.item_id })),
-      );
+    if (rejected.length > 0) {
+      console.warn("Rejected client events", groupRejectionsByReason(rejected));
     }
     const { beforeSyncId, afterSyncId } = crdtStorage.enqueueLocalEvents(admitted, request.nodeId);
     const eventsAppliedMessage: SyncServerMessage = {
@@ -326,6 +329,20 @@ function createDurableObjectRemoteHandler({
   };
 
   return { handleMessage };
+}
+
+function groupRejectionsByReason(rejected: PushRejection<{ dataset: string; type: string; item_id: string }>[]) {
+  const byReason: Record<string, { dataset: string; type: string; item_id: string; errors?: string[] }[]> = {};
+  for (const { event, reason, errors } of rejected) {
+    byReason[reason] ??= [];
+    byReason[reason].push({
+      dataset: event.dataset,
+      type: event.type,
+      item_id: event.item_id,
+      ...(errors && { errors }),
+    });
+  }
+  return byReason;
 }
 
 function getLatestSyncId(executor: KyselyExecutor<any>) {

@@ -178,7 +178,7 @@ export class TableBuilder<
     const errors: string[] = [];
 
     for (const key of Object.keys(payload)) {
-      if (!(key in this.columns)) {
+      if (!Object.hasOwn(this.columns, key)) {
         errors.push(`Unknown column "${key}"`);
       }
     }
@@ -194,7 +194,7 @@ export class TableBuilder<
 
     if (event === "item-created") {
       for (const [name, meta] of Object.entries(this.columns)) {
-        if (name in payload || name === "tombstone" || meta.nullable || meta.hasDefault) {
+        if (Object.hasOwn(payload, name) || name === "tombstone" || meta.nullable || meta.hasDefault) {
           continue;
         }
         errors.push(`Missing required column "${name}"`);
@@ -202,7 +202,7 @@ export class TableBuilder<
     }
 
     for (const [name, value] of Object.entries(payload)) {
-      const meta = this.columns[name];
+      const meta = Object.hasOwn(this.columns, name) ? this.columns[name] : undefined;
       if (!meta || (event === "item-updated" && name === "id")) {
         continue;
       }

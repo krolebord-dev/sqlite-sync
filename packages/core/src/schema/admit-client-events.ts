@@ -6,9 +6,9 @@ export type AdmitClientEventsResult<T> = {
   skipped: T[];
 };
 
-type SchemaForAdmitClientEvents = Pick<SyncDbSchema, "tables" | "tablesConfig"> & {
-  writeOriginByName?: ReadonlyMap<string, WriteOrigin>;
-};
+type SchemaForAdmitClientEvents = Pick<SyncDbSchema, "tables" | "tablesConfig">;
+
+export type ClientDatasetRejectionReason = "server-only-dataset" | "undeclared-dataset";
 
 export function buildWriteOriginByName(
   schema: Pick<SyncDbSchema, "tables" | "tablesConfig">,
@@ -24,23 +24,33 @@ export function buildWriteOriginByName(
 
 /**
  * Splits a client push into events the hub should persist and events it must drop. Only
- * datasets that exactly match the crdt or base name of a declared table without
- * `{ writes: "server" }` are admitted; server-only and undeclared datasets are skipped.
+ * datasets that exactly match the base table name of a declared table without
+ * `{ writes: "server" }` are admitted; server-only tables, crdt view names, and undeclared
+ * datasets are skipped.
  */
 export function admitClientEvents<T extends { dataset: string }>(opts: {
   syncDbSchema: SchemaForAdmitClientEvents;
   events: readonly T[];
 }): AdmitClientEventsResult<T> {
-  const writeOriginByName = opts.syncDbSchema.writeOriginByName ?? buildWriteOriginByName(opts.syncDbSchema);
-
   const admitted: T[] = [];
   const skipped: T[] = [];
   for (const event of opts.events) {
-    if (writeOriginByName.get(event.dataset) === "any") {
-      admitted.push(event);
-    } else {
+    if (getClientDatasetRejection(opts.syncDbSchema, event.dataset)) {
       skipped.push(event);
+    } else {
+      admitted.push(event);
     }
   }
   return { admitted, skipped };
+}
+
+export function getClientDatasetRejection(
+  schema: SchemaForAdmitClientEvents,
+  dataset: string,
+): ClientDatasetRejectionReason | null {
+  const config = schema.tablesConfig.find((tableConfig) => tableConfig.baseTableName === dataset);
+  if (!config) {
+    return "undeclared-dataset";
+  }
+  return schema.tables[config.crdtTableName]?.writeOrigin === "server" ? "server-only-dataset" : null;
 }

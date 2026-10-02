@@ -111,7 +111,7 @@ function findTableForDataset(
     const table = schema.tables[config.crdtTableName];
     return table ? { table, baseTableName: config.baseTableName } : null;
   }
-  const table = schema.tables[dataset];
+  const table = Object.hasOwn(schema.tables, dataset) ? schema.tables[dataset] : undefined;
   return table ? { table, baseTableName: dataset } : null;
 }
 

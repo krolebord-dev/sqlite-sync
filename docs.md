@@ -712,7 +712,7 @@ function SyncStatus() {
 
 sqlite-sync detects two recovery conditions while syncing:
 
-- **De-sync detected** — the local worker is caught up to the remote sync ID and no local events are waiting to push, but the local and remote HLC checksums differ. This means the applied event sets have diverged. It can also be raised if applying a remote event fails.
+- **De-sync detected** — the local worker is caught up to the remote sync ID and no local events are waiting to push, but the local and remote HLC checksums differ. This means the applied event sets have diverged, for example because the server rejected some of this client's pushed events (see [Client push validation](#client-push-validation)). It can also be raised if applying a remote event fails.
 - **Schema version mismatch** — the remote sends an event with a `schema_version` greater than the local migrator's current schema version. This usually means another client has already written data with newer app code.
 
 You can react to these conditions through `useDbState()` for UI state, or subscribe to the underlying worker notifications with `useDbEvent()`:
@@ -747,7 +747,7 @@ Prompt the user before calling `requestReload`. Both recovery paths can reload e
 
 Use `requestReload({ clean: false })` for schema mismatch first: it reloads all tabs for the `dbId` without wiping the persisted worker DB, letting the app load newer code and migrations. If the user is already on the latest code and the mismatch persists, deploy compatibility migrations or treat it as a recovery incident.
 
-Use `requestReload({ clean: true })` for de-sync recovery: it records a reset request, reloads all tabs for the `dbId`, wipes the persisted worker DB on the next worker startup, and rehydrates from the remote event log. This is destructive to pending in-memory tab events and any local-only durable events that had not reached the remote.
+sqlite-sync only reports de-sync; it does not recover on its own. Apps need a `de-sync-detected` handler like the one above. Use `requestReload({ clean: true })` for de-sync recovery: it records a reset request, reloads all tabs for the `dbId`, wipes the persisted worker DB on the next worker startup, and rehydrates from the remote event log. This is destructive to pending in-memory tab events and any local-only durable events that had not reached the remote.
 
 ### Controlling Sync
 
@@ -1054,8 +1054,8 @@ const syncDbSchema = defineSyncSchema({
 });
 ```
 
-Clients still receive and query the table. On push, the Durable Object drops events for
-server-only and undeclared datasets, accepts the rest of the batch, and still returns `ok: true`. Server
+Clients still receive and query the table. On push, the Durable Object drops client events for
+server-only tables (see [Client push validation](#client-push-validation)). Server
 `enqueueEvent`, `applyOwnEvents`, and SQL writes are not filtered.
 
 `writes` and `ai` are separate knobs. A server-side agent can still mutate a server-only table
@@ -1064,6 +1064,31 @@ unless you also pass `ai: "read-only"`.
 A client that already applied the event locally keeps that row. Other replicas never see it.
 Client types treat server-only CRDT views as read-only. Raw SQL still runs if types are ignored;
 write triggers are not restricted.
+
+### Client push validation
+
+The Durable Object checks every pushed event with
+[`admitClientPush`](#admitclientpushoptions) before persisting it. Rejected events are dropped
+and logged with `console.warn`, grouped by reason. The rest of the batch is persisted, and the
+push still returns `ok: true`. An event is rejected when:
+
+- its `timestamp` is not a canonical HLC string, or is more than 6 hours ahead of the server clock
+- its `schema_version` is not a non-negative integer, or is newer than the server's latest version
+- its payload is not a JSON object
+- migrating it to the server's latest version throws
+- after migration, its dataset is not the base table name of a declared table that clients can
+  write. Server-only tables, CRDT view names, and other spellings such as `_TODO` or
+  `main._todo` are rejected.
+- after migration, its payload does not match the table schema: unknown or missing columns,
+  values of the wrong type, an `id` that differs from `item_id`, or `id`/`tombstone` changes in an
+  update
+
+Older-version events are migrated before they are checked. Events whose table was dropped by a
+migration, and events with a no-op payload, are stored as no-ops.
+
+The client that pushed a rejected event keeps its local copy. Its checksum no longer matches the
+server's, so it reports a [de-sync](#de-sync-and-schema-mismatch) once it is caught up. A device
+whose clock runs more than 6 hours fast cannot sync until its clock is corrected.
 
 ### Listening to Events
 
@@ -1252,10 +1277,10 @@ function createMigrations(
 
 #### `admitClientEvents(options)`
 
-Splits a client push into events the hub should persist and events it drops. The Durable Object
-adapter calls this on `push-events`. Only datasets that exactly match the crdt or base name of a
-declared table without `{ writes: "server" }` are admitted; server-only and undeclared datasets
-(including other spellings such as `_JOB` or `main._job`) are skipped.
+Splits events into those whose dataset clients may write and those to drop. Only datasets that
+exactly match the base table name of a declared table without `{ writes: "server" }` are admitted.
+Server-only tables, CRDT view names, undeclared datasets, and other spellings such as `_JOB` or
+`main._job` are skipped. [`admitClientPush`](#admitclientpushoptions) uses the same rule.
 
 ```ts
 function admitClientEvents<T extends { dataset: string }>(options: {
@@ -1314,6 +1339,38 @@ Creates a WebSocket-based remote sync source for the worker.
 function createWsRemoteSource(options: {
   createWebSocket: () => WebSocket;
 }): CreateRemoteSourceFactory
+```
+
+### `@sqlite-sync/core/server`
+
+#### `admitClientPush(options)`
+
+Checks a client push before a server persists it; see
+[Client push validation](#client-push-validation) for the rules. The Durable Object adapter calls
+this on `push-events`. Admitted events are migrated to the latest schema version and keep their
+push order. Pass the server's current time as `now`.
+
+```ts
+function admitClientPush<T extends PushedCrdtEvent>(options: {
+  syncDbSchema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
+  migrator: Pick<SyncDbMigrator, "migrateEvent" | "latestSchemaVersion">;
+  events: readonly T[];
+  now: number;
+}): {
+  admitted: T[];
+  rejected: { event: T; reason: PushRejectionReason; errors?: string[] }[];
+}
+
+type PushRejectionReason =
+  | "invalid-timestamp"
+  | "timestamp-too-far-in-future"
+  | "invalid-schema-version"
+  | "schema-version-too-new"
+  | "invalid-payload"
+  | "migration-failed"
+  | "server-only-dataset"
+  | "undeclared-dataset"
+  | "schema-validation-failed";
 ```
 
 ### `@sqlite-sync/react`

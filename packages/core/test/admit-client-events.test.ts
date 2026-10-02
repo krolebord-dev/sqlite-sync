@@ -35,8 +35,8 @@ function event(dataset: string, item_id: string) {
 
 describe("admitClientEvents", () => {
   it("admits client-writable tables and skips server-only ones", () => {
-    const todo = event("todo", "t1");
-    const job = event("job", "j1");
+    const todo = event("_todo", "t1");
+    const job = event("_job", "j1");
 
     expect(admitClientEvents({ syncDbSchema, events: [todo, job] })).toEqual({
       admitted: [todo],
@@ -44,18 +44,8 @@ describe("admitClientEvents", () => {
     });
   });
 
-  it("resolves base and crdt table names to the same write origin", () => {
-    const result = admitClientEvents({
-      syncDbSchema,
-      events: [event("_todo", "t1"), event("_job", "j1")],
-    });
-
-    expect(result.admitted.map((item) => item.dataset)).toEqual(["_todo"]);
-    expect(result.skipped.map((item) => item.dataset)).toEqual(["_job"]);
-  });
-
-  it("skips undeclared datasets, including other spellings of declared tables", () => {
-    const events = ["scratch", "JOB", "_Job", "main._job", "TODO", "main.todo"].map((dataset) => event(dataset, "x1"));
+  it("skips crdt view names", () => {
+    const events = [event("todo", "t1"), event("job", "j1")];
 
     expect(admitClientEvents({ syncDbSchema, events })).toEqual({
       admitted: [],
@@ -63,19 +53,21 @@ describe("admitClientEvents", () => {
     });
   });
 
-  it("returns an empty enqueue when every event is server-only", () => {
-    const job = event("job", "j1");
+  it("skips undeclared datasets, including other spellings of declared tables", () => {
+    const events = ["scratch", "JOB", "_Job", "main._job", "TODO", "main.todo", "constructor"].map((dataset) =>
+      event(dataset, "x1"),
+    );
 
-    expect(admitClientEvents({ syncDbSchema, events: [job] })).toEqual({
+    expect(admitClientEvents({ syncDbSchema, events })).toEqual({
       admitted: [],
-      skipped: [job],
+      skipped: events,
     });
   });
 
   it("keeps admitted events in push order", () => {
-    const first = event("todo", "t1");
-    const skipped = event("job", "j1");
-    const second = event("todo", "t2");
+    const first = event("_todo", "t1");
+    const skipped = event("_job", "j1");
+    const second = event("_todo", "t2");
 
     expect(admitClientEvents({ syncDbSchema, events: [first, skipped, second] })).toEqual({
       admitted: [first, second],
