@@ -80,6 +80,7 @@ async function setup() {
   };
 
   return {
+    db,
     async apply(events: RemoteEvent[]) {
       storage.enqueueRemoteEvents(events);
       await waitForProcessing();
@@ -128,5 +129,13 @@ describe("insertItem prepared-statement cache key", () => {
     // The stale dataset-only key would have reused the column-less statement here,
     // silently dropping `note` instead of inserting "explicit note".
     expect(replica.getTodo("todo-full")).toEqual({ id: "todo-full", title: "Full", note: "explicit note" });
+  });
+
+  it("applies a local view insert that omits a NOT NULL default column", async () => {
+    const replica = await setup();
+
+    replica.db.execute(`INSERT INTO "${CRDT_TABLE}" ("id", "title") VALUES ('todo-local', 'Local')`);
+
+    expect(replica.getTodo("todo-local")).toEqual({ id: "todo-local", title: "Local", note: "" });
   });
 });

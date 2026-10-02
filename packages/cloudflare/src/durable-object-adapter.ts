@@ -24,6 +24,7 @@ import {
 } from "@sqlite-sync/core";
 import {
   baseSystemMigrations,
+  crdtViewColumnsFromTable,
   createCrdtViewStatements,
   createSystemDbConfig,
   drainCrdtChangeIntents,
@@ -366,7 +367,7 @@ function createCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: SyncDbSche
       for (const sql of createCrdtViewStatements({
         baseTableName,
         crdtTableName,
-        columnNames: Object.keys(table.columns),
+        columns: crdtViewColumnsFromTable(table),
       })) {
         tx.execute({ sql, parameters: [] });
       }

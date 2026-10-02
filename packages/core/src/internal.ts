@@ -8,6 +8,7 @@ export { baseSystemMigrations, createSystemDbConfig, runSystemMigrations } from 
 export type { CrdtChangeIntent } from "./sqlite-crdt/crdt-storage";
 export {
   CRDT_CHANGE_INTENTS_TABLE,
+  crdtViewColumnsFromTable,
   createCrdtViewStatements,
   drainCrdtChangeIntents,
 } from "./sqlite-crdt/make-crdt-table";

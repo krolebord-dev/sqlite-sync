@@ -481,6 +481,7 @@ db.executeKysely((db) =>
 ```
 
 You must always provide an `id` (UUID) for new items. The `tombstone` column is managed automatically — do not set it.
+A NOT NULL column left out of the insert is left out of the event too, and each replica fills it with its table default, so defaults must be constants.
 
 ### Update
 

@@ -167,7 +167,8 @@ export class TableBuilder<
 
   /**
    * Validate a CRDT event payload against the declared columns.
-   * `item-created` payloads must contain every column without a default (nullable columns may be omitted);
+   * `item-created` payloads must contain every column without a default (nullable columns may be omitted)
+   * and their `tombstone` value is ignored, since applying a create always sets it to 0;
    * `item-updated` payloads are partial and must not touch `id` or set `tombstone` to a deleted value.
    */
   validatePayload(
@@ -203,7 +204,7 @@ export class TableBuilder<
 
     for (const [name, value] of Object.entries(payload)) {
       const meta = Object.hasOwn(this.columns, name) ? this.columns[name] : undefined;
-      if (!meta || (event === "item-updated" && name === "id")) {
+      if (!meta || (event === "item-updated" && name === "id") || (event === "item-created" && name === "tombstone")) {
         continue;
       }
       const error = validateValue(name, value, meta);

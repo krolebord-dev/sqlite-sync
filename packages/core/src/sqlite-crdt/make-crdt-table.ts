@@ -1,4 +1,5 @@
 import type { SQLiteReactiveDb } from "../memory-db/sqlite-reactive-db";
+import type { AnyTableBuilder } from "../schema/table-builder";
 import type { InternalSQLiteTransactionWrapper, SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { quoteId } from "../utils";
 import type { CrdtChangeIntent, InternalCrdtStorage } from "./crdt-storage";
@@ -50,7 +51,7 @@ export function makeCrdtTable({
   for (const sql of createCrdtViewStatements({
     baseTableName,
     crdtTableName,
-    columnNames: tableSchema.columns.map((column) => column.name),
+    columns: tableSchema.columns.map((column) => ({ name: column.name, nullable: column.isNullable })),
   })) {
     db.execute(sql, { loggerLevel: "system" });
   }
@@ -72,16 +73,27 @@ function sqlStringLiteral(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function fullRowPayloadSql(columnNames: string[]) {
-  return concatSql([
-    "'{'",
-    ...columnNames.flatMap((columnName, index) => [
-      ...(index > 0 ? ["','"] : []),
-      sqlStringLiteral(`${JSON.stringify(columnName)}:`),
-      `json_quote(new.${quoteId(columnName)})`,
-    ]),
-    "'}'",
-  ]);
+export type CrdtViewColumn = {
+  name: string;
+  nullable: boolean;
+};
+
+export function crdtViewColumnsFromTable(table: AnyTableBuilder): CrdtViewColumn[] {
+  return Object.entries(table.columns).map(([name, meta]) => ({ name, nullable: meta.nullable }));
+}
+
+// Columns omitted from an insert are NULL in an INSTEAD OF trigger. NULLs of NOT NULL columns are
+// left out of the payload so applying it falls back to the table DEFAULT on every replica.
+// The tombstone is left out: applying a create always sets it to 0.
+function createdPayloadSql(columns: CrdtViewColumn[]) {
+  const fields = columns
+    .filter((column) => column.name !== "tombstone")
+    .map((column) => {
+      const quoted = quoteId(column.name);
+      const field = `${sqlStringLiteral(`${JSON.stringify(column.name)}:`)}||json_quote(new.${quoted})||','`;
+      return column.nullable ? field : `case when new.${quoted} is null then '' else ${field} end`;
+    });
+  return concatSql(["'{'", `rtrim(${concatSql(fields)}, ',')`, "'}'"]);
 }
 
 function sparseUpdatePayloadSql(columnNames: string[]) {
@@ -98,14 +110,14 @@ function sparseUpdatePayloadSql(columnNames: string[]) {
 export function createCrdtViewStatements({
   baseTableName,
   crdtTableName,
-  columnNames,
+  columns,
 }: {
   baseTableName: string;
   crdtTableName: string;
-  columnNames: string[];
+  columns: CrdtViewColumn[];
 }) {
-  const fullPayload = fullRowPayloadSql(columnNames);
-  const updatePayload = sparseUpdatePayloadSql(columnNames);
+  const createdPayload = createdPayloadSql(columns);
+  const updatePayload = sparseUpdatePayloadSql(columns.map((column) => column.name));
 
   return [
     `create table if not exists ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
@@ -126,7 +138,7 @@ begin
   insert into ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
     "dataset", "type", "item_id", "new_item_id", "payload_json"
   ) values (
-    ${sqlStringLiteral(baseTableName)}, 'item-created', new."id", null, ${fullPayload}
+    ${sqlStringLiteral(baseTableName)}, 'item-created', new."id", null, ${createdPayload}
   );
 end`,
     `create trigger ${quoteId(`${crdtTableName}_updated`)}

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MAX_DRIFT_MS, serializeHLC } from "../src/hlc";
+import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";
 import { admitClientPush, type PushedCrdtEvent } from "../src/server/admit-client-push";
+import type { CrdtChangeIntent } from "../src/sqlite-crdt/crdt-storage";
 import { CRDT_EVENT_NO_OP_PAYLOAD } from "../src/sqlite-crdt/crdt-table-schema";
+import { CRDT_CHANGE_INTENTS_TABLE, makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
 
 const migrations = createMigrations((b) => ({
   0: [
@@ -12,6 +15,7 @@ const migrations = createMigrations((b) => ({
       table
         .addColumn("id", "text", (col) => col.primaryKey().notNull())
         .addColumn("title", "text", (col) => col.notNull())
+        .addColumn("done", "boolean", (col) => col.notNull().defaultTo(false))
         .addColumn("tombstone", "boolean", (col) => col.notNull().defaultTo(false)),
     ),
     b.createTable("_job", (table) =>
@@ -52,7 +56,7 @@ const migrations = createMigrations((b) => ({
 
 const syncDbSchema = defineSyncSchema({
   tables: {
-    todo: t.table({ title: t.text() }),
+    todo: t.table({ title: t.text(), done: t.boolean().default(false) }),
     job: t.table({ status: t.text() }, { writes: "server" }),
     tag: t.table({ name: t.text() }),
   },
@@ -94,6 +98,33 @@ describe("admitClientPush", () => {
     const remove = pushed({ type: "item-deleted", payload: "{}" });
 
     expect(admit([create, update, remove])).toEqual({ admitted: [create, update, remove], rejected: [] });
+  });
+
+  it("admits creates produced by the CRDT view insert trigger", async () => {
+    const reactiveDb = await createSQLiteReactiveDb({ snapshot: new Uint8Array(), logger: () => {} });
+    const db = reactiveDb.db;
+    db.execute(`
+      create table "_todo" (
+        "id" text primary key not null,
+        "title" text not null,
+        "done" boolean not null default false,
+        "tombstone" boolean not null default false
+      )
+    `);
+    makeCrdtTable({ db, baseTableName: "_todo", crdtTableName: "todo" });
+
+    db.execute(`insert into "todo" ("id", "title") values ('t1', 'Buy milk')`);
+
+    const [intent] = db.execute<CrdtChangeIntent>(`select * from "${CRDT_CHANGE_INTENTS_TABLE}"`).rows;
+    expect(JSON.parse(intent.payload_json)).toEqual({ id: "t1", title: "Buy milk" });
+    const create = pushed({ payload: intent.payload_json });
+    expect(admit([create])).toEqual({ admitted: [create], rejected: [] });
+  });
+
+  it("admits creates from older clients that send a null tombstone", () => {
+    const create = pushed({ payload: JSON.stringify({ id: "t1", title: "Buy milk", done: 0, tombstone: null }) });
+
+    expect(admit([create])).toEqual({ admitted: [create], rejected: [] });
   });
 
   it("rejects non-canonical timestamps", () => {
