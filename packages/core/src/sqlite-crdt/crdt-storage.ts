@@ -413,16 +413,30 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         status: "pending",
       };
 
-      tx.executePreparedRaw<[string, string, string], never>({
-        key: "replace-crdt-row-history-with-no-ops",
-        // Keep the no-op sentinel literal in this predicate so SQLite can use the
-        // matching partial index. A bound parameter does not imply its predicate.
-        sql: `update ${quotedEventsTable}
-set "payload" = ?
-where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`,
-        params: [CRDT_EVENT_NO_OP_PAYLOAD, event.dataset, event.item_id],
+      // An event newer than the snapshot (e.g. a pending remote event stamped by a clock ahead of
+      // ours) still wins LWW, and fresh replicas can only replay it on top of the row's original
+      // history, so the history is kept intact until a later snapshot outranks every event.
+      const [newerEvent] = tx.executePreparedRaw<[string, string, string], { sync_id: number }>({
+        key: "get-crdt-row-event-newer-than-snapshot",
+        sql: `select "sync_id" from ${quotedEventsTable}
+where "dataset" = ? and "item_id" = ? and "timestamp" > ? and "payload" <> ${noOpPayloadSqlLiteral}
+limit 1`,
+        params: [event.dataset, event.item_id, event.timestamp],
         meta: { loggerLevel: "system" },
       });
+
+      if (!newerEvent) {
+        tx.executePreparedRaw<[string, string, string], never>({
+          key: "replace-crdt-row-history-with-no-ops",
+          // Keep the no-op sentinel literal in this predicate so SQLite can use the
+          // matching partial index. A bound parameter does not imply its predicate.
+          sql: `update ${quotedEventsTable}
+set "payload" = ?
+where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`,
+          params: [CRDT_EVENT_NO_OP_PAYLOAD, event.dataset, event.item_id],
+          meta: { loggerLevel: "system" },
+        });
+      }
       persistEvents(tx, [event]);
       applyCrdtEvent(event);
     });

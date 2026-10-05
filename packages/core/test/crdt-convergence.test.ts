@@ -1098,6 +1098,62 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replica.getPersistedEvent(1)?.item_id).toBe("todo-1");
   });
 
+  it("keeps pending remote events newer than a snapshot", async () => {
+    const server = await createReplica("server", 1_000, { trackEventHlcAccumulator: true });
+    const client = await createReplica("client", 1_000, { trackEventHlcAccumulator: true });
+    await client.createTodo({ id: "todo-1", title: "Initial", completed: false, tombstone: false });
+    const clientSyncId = await syncOneWay(client, server, 0);
+
+    client.setTime(4_000);
+    server.setTime(1_500);
+    await client.updateTodo("todo-1", { title: "Client edit" });
+
+    server.storage.enqueueRemoteEvents(client.exportEvents(clientSyncId).events);
+    server.storage.applyOwnSnapshot({ dataset: BASE_TABLE, item_id: "todo-1", patch: { completed: true } });
+    await server.waitForProcessing();
+    await syncOneWay(server, client, 0);
+
+    const freshReplica = await createReplica("fresh", 1_000, { trackEventHlcAccumulator: true });
+    await freshReplica.importEvents(
+      server.getPersistedEvents().map(({ type, dataset, item_id, payload, timestamp, schema_version }) => ({
+        type,
+        dataset,
+        item_id,
+        payload,
+        timestamp,
+        schema_version,
+      })),
+    );
+
+    const expected = { id: "todo-1", title: "Client edit", completed: true, tombstone: false };
+    expect(server.getTodo("todo-1")).toEqual(expected);
+    expect(client.getTodo("todo-1")).toEqual(expected);
+    expect(freshReplica.getTodo("todo-1")).toEqual(expected);
+    expect(client.getEventHlcAccumulator()).toBe(server.getEventHlcAccumulator());
+    expect(freshReplica.getEventHlcAccumulator()).toBe(server.getEventHlcAccumulator());
+
+    server.storage.applyOwnSnapshot({ dataset: BASE_TABLE, item_id: "todo-1", patch: { title: "Server edit" } });
+    await server.waitForProcessing();
+
+    expect(
+      server
+        .getPersistedEvents()
+        .slice(0, -1)
+        .every((event) => event.payload === CRDT_EVENT_NO_OP_PAYLOAD),
+    ).toBe(true);
+  });
+
+  it("revives a deleted row from a snapshot", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    await replica.createTodo({ id: "todo-1", title: "Deleted", completed: false, tombstone: false });
+    await replica.deleteTodo("todo-1");
+
+    replica.storage.applyOwnSnapshot({ dataset: BASE_TABLE, item_id: "todo-1", patch: { completed: true } });
+    await replica.waitForProcessing();
+
+    expect(replica.getTodo("todo-1")).toEqual({ id: "todo-1", title: "Deleted", completed: true, tombstone: false });
+  });
+
   it("rejects an invalid batch without mutating state or consuming sync ids", async () => {
     const replica = await createReplica("node-a", 1_000);
 
