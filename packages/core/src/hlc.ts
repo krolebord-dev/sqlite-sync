@@ -41,9 +41,7 @@ export class HLCCounter {
     }
 
     this.counter++;
-    if (this.counter > MAX_COUNTER) {
-      throw new Error(`HLC counter overflow: exceeded max value ${MAX_COUNTER}`);
-    }
+    this.rollOverCounter();
     return this.getCurrentHLC();
   }
 
@@ -74,8 +72,13 @@ export class HLCCounter {
       this.timestamp = hlc.timestamp;
       this.counter = hlc.counter + 1;
     }
+    this.rollOverCounter();
+  }
+
+  private rollOverCounter() {
     if (this.counter > MAX_COUNTER) {
-      throw new Error(`HLC counter overflow: exceeded max value ${MAX_COUNTER}`);
+      this.timestamp += 1;
+      this.counter = 0;
     }
   }
 }

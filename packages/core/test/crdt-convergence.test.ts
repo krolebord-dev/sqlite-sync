@@ -1333,6 +1333,31 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaB.getTodo("todo-1")?.title).toBe(`${trickyTitle} edited`);
     expect(replicaA.getEventHlcAccumulator()).toBe(replicaB.getEventHlcAccumulator());
   });
+
+  it("keeps applying and writing after a remote event with the max HLC counter", async () => {
+    const replica = await createReplica("hub", 1_000);
+    const maxCounter = serializeHLC({ timestamp: 61_000, counter: parseInt("zzzzz", 36), nodeId: "attacker" });
+    const event = (id: string, timestamp: string): RemoteEvent => ({
+      type: "item-created",
+      dataset: BASE_TABLE,
+      item_id: id,
+      timestamp,
+      schema_version: 0,
+      payload: JSON.stringify({ id, title: id, completed: 0 }),
+    });
+
+    await replica.importEvents([event("todo-max", maxCounter)]);
+    await replica.importEvents([
+      event("todo-honest", serializeHLC({ timestamp: 1_001, counter: 0, nodeId: "honest" })),
+    ]);
+    await replica.createTodo({ id: "todo-local", title: "todo-local", completed: false, tombstone: false });
+
+    const events = replica.getPersistedEvents();
+    expect(events.map((persisted) => persisted.status)).toEqual(["applied", "applied", "applied"]);
+    expect(events[2].timestamp > maxCounter).toBe(true);
+    expect(replica.getTodo("todo-honest")?.title).toBe("todo-honest");
+    expect(replica.getTodo("todo-local")?.title).toBe("todo-local");
+  });
 });
 
 it.each([60_000, 86_400_000])("restores snapshot timestamps ahead of the wall clock by %i ms", async (futureTime) => {
