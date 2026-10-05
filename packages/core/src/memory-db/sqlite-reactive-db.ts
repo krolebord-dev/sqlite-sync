@@ -100,12 +100,15 @@ export class SQLiteReactiveDb<Database> {
   private sharedLiveQueries = new Map<string, SharedLiveQueryEntry<unknown>[]>();
 
   createLiveQuery<TResult>(query: { sql: string; parameters: readonly unknown[] }) {
+    let rowsVersion = 0;
+
     const fetchRows = (parameters: readonly unknown[]) => {
       let statement = this.liveQueryStatements.get(query.sql);
       if (!statement) {
         statement = this.db.prepare<any[], any>(query.sql);
         this.liveQueryStatements.set(query.sql, statement);
       }
+      rowsVersion = this.mutationVersion;
       return statement.execute(parameters as any) as TResult[];
     };
 
@@ -140,6 +143,11 @@ export class SQLiteReactiveDb<Database> {
         onDataChange: refresh,
       });
 
+      // Tables may have changed while nothing was subscribed, e.g. between React's render and commit.
+      if (rows && this.mutationVersion !== rowsVersion) {
+        refresh();
+      }
+
       return () => {
         subscription.unsubscribe();
         subscriber = null;
@@ -161,7 +169,6 @@ export class SQLiteReactiveDb<Database> {
     }
 
     const liveQuery = this.createLiveQuery<TResult>(query);
-    let hasDetachedFromLiveQuery = false;
     const entry: SharedLiveQueryEntry<TResult> = {
       sql: query.sql,
       parameters: query.parameters,
@@ -184,13 +191,6 @@ export class SQLiteReactiveDb<Database> {
               listener();
             }
           });
-
-          // Rows may have gone stale while no subscriber was listening
-          // for table changes.
-          if (hasDetachedFromLiveQuery) {
-            hasDetachedFromLiveQuery = false;
-            liveQuery.refresh();
-          }
         }
 
         return () => {
@@ -199,7 +199,6 @@ export class SQLiteReactiveDb<Database> {
           if (entry.listeners.size === 0) {
             entry.unsubscribeFromLiveQuery?.();
             entry.unsubscribeFromLiveQuery = null;
-            hasDetachedFromLiveQuery = true;
             this.scheduleSharedLiveQueryCleanup(entry);
           }
         };
@@ -438,6 +437,7 @@ export class SQLiteReactiveDb<Database> {
 
   useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
     this.db.useSnapshot(snapshot);
+    this.mutationVersion++;
     this.notifyTableSubscribers();
   }
 

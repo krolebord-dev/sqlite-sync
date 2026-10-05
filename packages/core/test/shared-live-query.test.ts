@@ -110,6 +110,39 @@ describe("getSharedLiveQuery", () => {
     resubscribe();
   });
 
+  it("returns rows committed between the first read and the first subscription", async () => {
+    const db = await createDb();
+
+    const entry = db.getSharedLiveQuery<{ id: string; title: string }>(QUERY);
+    expect(entry.getRows()).toEqual([]);
+
+    // React renders (getRows) before it subscribes; a write can commit and announce itself in between.
+    db.db.execute(`INSERT INTO "todo" ("id", "title") VALUES ('1', 'created before subscribe')`);
+    await Promise.resolve();
+
+    const unsubscribe = entry.subscribe(() => {});
+
+    expect(entry.getRows()).toEqual([{ id: "1", title: "created before subscribe" }]);
+
+    unsubscribe();
+  });
+
+  it("returns fresh rows after a snapshot replaces the database", async () => {
+    const db = await createDb();
+    const entry = db.getSharedLiveQuery<{ id: string; title: string }>(QUERY);
+    expect(entry.getRows()).toEqual([]);
+
+    const source = await createSQLiteReactiveDb({ snapshot: new Uint8Array(), logger: noopLogger });
+    source.db.execute(`CREATE TABLE "todo" ("id" TEXT NOT NULL PRIMARY KEY, "title" TEXT NOT NULL)`);
+    source.db.execute(`INSERT INTO "todo" ("id", "title") VALUES ('1', 'from snapshot')`);
+    db.useSnapshot(source.createSnapshot());
+    source.dispose();
+
+    const unsubscribe = entry.subscribe(() => {});
+    expect(entry.getRows()).toEqual([{ id: "1", title: "from snapshot" }]);
+    unsubscribe();
+  });
+
   it("reports active queries through getSharedLiveQueriesSnapshot", async () => {
     const db = await createDb();
 
