@@ -120,6 +120,8 @@ export const createCrdtSyncRemoteSource = ({
     eventTarget.dispatchEvent("state-changed", remoteState.type);
   };
 
+  const isCurrentSource = (source: RemoteSource) => remoteState.type === "online" && remoteState.source === source;
+
   const initRemote = ensureSingletonExecution(
     async () => {
       if (remoteState.type !== "offline") {
@@ -148,9 +150,14 @@ export const createCrdtSyncRemoteSource = ({
         return;
       }
 
+      const created = factoryResult.data;
       patchRemoteState({
         type: "online",
-        source: factoryResult.data,
+        source: {
+          pullEvents: (request) => created.pullEvents(request),
+          pushEvents: (request) => created.pushEvents(request),
+          disconnect: () => created.disconnect?.(),
+        },
         deSynced: false,
         schemaVersionMismatched: false,
       });
@@ -158,17 +165,14 @@ export const createCrdtSyncRemoteSource = ({
     { queueReExecution: false },
   );
 
-  const syncWithRemote = ensureSingletonExecution(
-    async () => {
-      if (remoteState.type !== "online") {
-        return;
-      }
+  const syncWithRemote = async () => {
+    if (remoteState.type !== "online") {
+      return;
+    }
 
-      await pullEvents();
-      await startPushingEvents();
-    },
-    { queueReExecution: false },
-  );
+    await pullEvents();
+    await startPushingEvents();
+  };
 
   const goOffline = ensureSingletonExecution(
     async (reason: OfflineReason) => {
@@ -202,8 +206,8 @@ export const createCrdtSyncRemoteSource = ({
     }
   };
 
-  let requestedPullSyncId: number | null = null;
-  let pullPromise: Promise<void> | null = null;
+  type ActivePull = { source: RemoteSource; promise: Promise<void>; requestedSyncId: number | null };
+  let activePull: ActivePull | null = null;
   const pullEvents = (request?: {
     remoteSyncId?: number;
     remoteEventHlcSum?: string | null;
@@ -212,6 +216,7 @@ export const createCrdtSyncRemoteSource = ({
     if (remoteState.type !== "online") {
       return Promise.resolve();
     }
+    const source = remoteState.source;
 
     const remoteSyncId = request?.remoteSyncId;
 
@@ -224,43 +229,43 @@ export const createCrdtSyncRemoteSource = ({
       return Promise.resolve();
     }
 
-    if (pullPromise) {
-      if (remoteSyncId !== undefined && (!requestedPullSyncId || requestedPullSyncId < remoteSyncId)) {
-        requestedPullSyncId = remoteSyncId;
+    if (activePull?.source === source) {
+      if (remoteSyncId !== undefined && (!activePull.requestedSyncId || activePull.requestedSyncId < remoteSyncId)) {
+        activePull.requestedSyncId = remoteSyncId;
       }
-      return pullPromise;
+      return activePull.promise;
     }
 
-    pullPromise = pullAllEvents({
+    const pull: ActivePull = { source, promise: Promise.resolve(), requestedSyncId: null };
+    pull.promise = pullAllEvents(source, {
       afterSyncId: pullSyncId.current,
       excludeNodeId: request?.includeSelf ? undefined : nodeId,
     })
       .catch((error) => {
+        if (!isCurrentSource(source)) {
+          return;
+        }
         console.error("Error pulling events. Going offline.", error);
         goOffline("REMOTE_PULL_ERROR");
       })
       .finally(() => {
-        pullPromise = null;
+        if (activePull === pull) {
+          activePull = null;
+        }
 
-        const nextTarget = requestedPullSyncId;
-        requestedPullSyncId = null;
-
+        const nextTarget = pull.requestedSyncId;
         if (nextTarget && nextTarget > pullSyncId.current) {
           pullEvents({ remoteSyncId: nextTarget });
         }
       });
-    return pullPromise;
+    activePull = pull;
+    return pull.promise;
   };
 
-  const pullAllEvents = async (opts: EventsPullRequest) => {
+  const pullAllEvents = async (source: RemoteSource, opts: EventsPullRequest) => {
     let hasMore = true;
     let afterSyncId = opts.afterSyncId;
     while (hasMore) {
-      if (remoteState.type !== "online") {
-        return;
-      }
-      const source = remoteState.source;
-
       const response = await retryRemoteOperation(
         () =>
           source.pullEvents({
@@ -269,6 +274,9 @@ export const createCrdtSyncRemoteSource = ({
           }),
         REMOTE_RETRY_OPTIONS,
       );
+      if (!isCurrentSource(source)) {
+        return;
+      }
       hasMore = response.hasMore;
       afterSyncId = response.nextSyncId;
 
@@ -375,14 +383,18 @@ export const createCrdtSyncRemoteSource = ({
           REMOTE_RETRY_OPTIONS,
         );
       } catch (error) {
-        console.error("Error pushing events. Going offline.", error);
-        goOffline("REMOTE_PUSH_ERROR");
+        if (isCurrentSource(source)) {
+          console.error("Error pushing events. Going offline.", error);
+          goOffline("REMOTE_PUSH_ERROR");
+        }
         return;
       }
 
       if (!response.ok) {
-        console.error("Remote rejected pushed events. Going offline.");
-        goOffline("REMOTE_PUSH_ERROR");
+        if (isCurrentSource(source)) {
+          console.error("Remote rejected pushed events. Going offline.");
+          goOffline("REMOTE_PUSH_ERROR");
+        }
         return;
       }
 
