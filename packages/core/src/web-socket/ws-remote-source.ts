@@ -10,7 +10,7 @@ type WsRemoteSourceConfig = {
 };
 
 export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig): CreateRemoteSourceFactory => {
-  return async ({ onEventsAvailable }) => {
+  return async ({ onEventsAvailable, signal }) => {
     const socket = createWebSocket();
 
     const openPromise = createDeferredPromise<void>({
@@ -22,7 +22,16 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
     socket.addEventListener("open", () => {
       openPromise.resolve(undefined);
     });
-    await openPromise.promise;
+    const abortOpen = () => {
+      socket.close();
+      openPromise.reject(signal.reason);
+    };
+    signal.addEventListener("abort", abortOpen, { once: true });
+    try {
+      await openPromise.promise;
+    } finally {
+      signal.removeEventListener("abort", abortOpen);
+    }
 
     const requestsMap = new Map<string, DeferredPromise<unknown>>();
 

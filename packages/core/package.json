@@ -86,6 +86,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "fast-check": "^4.10.2",
     "kysely": "catalog:",
     "tsdown": "0.22.14",
     "typescript": "catalog:",

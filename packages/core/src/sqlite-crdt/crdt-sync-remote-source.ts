@@ -33,6 +33,8 @@ export type EventsPushResponse = {
   afterSyncId?: number;
 };
 
+const DISCONNECT_WATCHDOG_MS = 15_000;
+
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
 export type EventsAvailable = {
@@ -40,8 +42,14 @@ export type EventsAvailable = {
   remoteEventHlcSum: string | null;
 };
 
+/**
+ * Opens a connection to the remote. Each call must return an independent source: the library calls
+ * `disconnect` on every returned source exactly once, including one that resolves after `signal`
+ * has aborted. `signal` aborts when the connection attempt is cancelled or the connection is closed.
+ */
 export type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: EventsAvailable) => void;
+  signal: AbortSignal;
 }) => RemoteSource | Promise<RemoteSource>;
 
 type RemoteSource = {
@@ -74,7 +82,6 @@ type RemoteSourceState =
     }
   | {
       type: "online";
-      source: RemoteSource;
       deSynced: boolean;
       schemaVersionMismatched: boolean;
     };
@@ -120,190 +127,308 @@ export const createCrdtSyncRemoteSource = ({
     eventTarget.dispatchEvent("state-changed", remoteState.type);
   };
 
-  const isCurrentSource = (source: RemoteSource) => remoteState.type === "online" && remoteState.source === source;
+  let current: Connection | null = null;
+  let disposed = false;
 
-  const initRemote = ensureSingletonExecution(
-    async () => {
-      if (remoteState.type !== "offline") {
-        throw new Error("Remote source is not offline");
+  const disconnectSource = (source: RemoteSource) => {
+    const watchdog = setTimeout(() => {
+      console.error(`Remote source did not disconnect within ${DISCONNECT_WATCHDOG_MS}ms`);
+    }, DISCONNECT_WATCHDOG_MS);
+    void tryCatchAsync(async () => await source.disconnect?.()).then((result) => {
+      clearTimeout(watchdog);
+      if (!result.success) {
+        console.warn("Error while disconnecting from remote source", result.error);
       }
+    });
+  };
 
-      if (!remoteFactory) {
-        console.warn("Remote source factory not provided. Going offline.");
-        patchRemoteState({ type: "offline", reason: "NOT_INITIALIZED" });
-        return;
-      }
-
-      patchRemoteState({ type: "pending" });
-
-      const factoryResult = await tryCatchAsync(async () => {
-        return await remoteFactory?.({
-          onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
-            pullEvents({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
-          },
-        });
-      });
-
-      if (!factoryResult.success) {
-        patchRemoteState({ type: "offline", reason: "INITIALIZATION_FAILED" });
-        console.warn("Failed to create remote source", factoryResult.error);
-        return;
-      }
-
-      const created = factoryResult.data;
-      patchRemoteState({
-        type: "online",
-        source: {
-          pullEvents: (request) => created.pullEvents(request),
-          pushEvents: (request) => created.pushEvents(request),
-          disconnect: () => created.disconnect?.(),
-        },
-        deSynced: false,
-        schemaVersionMismatched: false,
-      });
-    },
-    { queueReExecution: false },
-  );
-
-  const syncWithRemote = async () => {
-    if (remoteState.type !== "online") {
+  const closeConnection = (connection: Connection, reason: OfflineReason) => {
+    if (current !== connection) {
       return;
     }
-
-    await pullEvents();
-    await startPushingEvents();
+    current = null;
+    connection.close();
+    patchRemoteState({ type: "offline", reason });
   };
 
-  const goOffline = ensureSingletonExecution(
-    async (reason: OfflineReason) => {
-      if (remoteState.type !== "online") {
-        return;
-      }
-      const source = remoteState.source;
+  type Connection = ReturnType<typeof createConnection>;
+  const createConnection = (factory: CreateRemoteSourceFactory) => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    let source: RemoteSource | null = null;
 
-      patchRemoteState({ type: "pending" });
-
-      const disconnectResult = await tryCatchAsync(async () => {
-        return await source.disconnect?.();
-      });
-
-      if (!disconnectResult.success) {
-        console.warn("Error while disconnecting from remote source", disconnectResult.error);
-      }
-
-      patchRemoteState({ type: "offline", reason });
-    },
-    { queueReExecution: false },
-  );
-
-  const goOnline = async () => {
-    if (remoteState.type !== "online") {
-      await initRemote();
-    }
-
-    if (remoteState.type === "online") {
-      await syncWithRemote();
-    }
-  };
-
-  type ActivePull = { source: RemoteSource; promise: Promise<void>; requestedSyncId: number | null };
-  let activePull: ActivePull | null = null;
-  const pullEvents = (request?: {
-    remoteSyncId?: number;
-    remoteEventHlcSum?: string | null;
-    includeSelf?: boolean;
-  }) => {
-    if (remoteState.type !== "online") {
-      return Promise.resolve();
-    }
-    const source = remoteState.source;
-
-    const remoteSyncId = request?.remoteSyncId;
-
-    if (remoteSyncId !== undefined && remoteSyncId <= pullSyncId.current) {
-      // We are already caught up to this broadcast, so there is nothing to pull.
-      // This is the quiescent moment to verify we have not diverged from the
-      // remote (the check is a no-op unless we are exactly aligned: remoteSyncId
-      // === pullSyncId.current).
-      checkRemoteConsistency(remoteSyncId, request?.remoteEventHlcSum ?? null);
-      return Promise.resolve();
-    }
-
-    if (activePull?.source === source) {
-      if (remoteSyncId !== undefined && (!activePull.requestedSyncId || activePull.requestedSyncId < remoteSyncId)) {
-        activePull.requestedSyncId = remoteSyncId;
-      }
-      return activePull.promise;
-    }
-
-    const pull: ActivePull = { source, promise: Promise.resolve(), requestedSyncId: null };
-    pull.promise = pullAllEvents(source, {
-      afterSyncId: pullSyncId.current,
-      excludeNodeId: request?.includeSelf ? undefined : nodeId,
-    })
-      .catch((error) => {
-        if (!isCurrentSource(source)) {
+    const untilClosed = <T>(operation: () => Promise<T>) =>
+      new Promise<T>((resolve, reject) => {
+        const onAbort = () => reject(new Error("Remote connection closed"));
+        if (signal.aborted) {
+          onAbort();
           return;
         }
-        console.error("Error pulling events. Going offline.", error);
-        goOffline("REMOTE_PULL_ERROR");
-      })
-      .finally(() => {
-        if (activePull === pull) {
-          activePull = null;
-        }
-
-        const nextTarget = pull.requestedSyncId;
-        if (nextTarget && nextTarget > pullSyncId.current) {
-          pullEvents({ remoteSyncId: nextTarget });
-        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        operation()
+          .then(resolve, reject)
+          .finally(() => signal.removeEventListener("abort", onAbort));
       });
-    activePull = pull;
-    return pull.promise;
-  };
 
-  const pullAllEvents = async (source: RemoteSource, opts: EventsPullRequest) => {
-    let hasMore = true;
-    let afterSyncId = opts.afterSyncId;
-    while (hasMore) {
-      const response = await retryRemoteOperation(
-        () =>
-          source.pullEvents({
-            ...opts,
-            afterSyncId,
-          }),
-        REMOTE_RETRY_OPTIONS,
-      );
-      if (!isCurrentSource(source)) {
+    const retryOptions = { ...REMOTE_RETRY_OPTIONS, shouldRetry: () => !signal.aborted };
+
+    const connect = async () => {
+      if (signal.aborted) {
         return;
       }
-      hasMore = response.hasMore;
-      afterSyncId = response.nextSyncId;
 
-      if (response.events) {
-        storage.enqueueRemoteEvents(
-          response.events.map((x) => {
-            if (x.schema_version > migrator.currentSchemaVersion) {
-              eventTarget.dispatchEvent("remote-schema-version-mismatch", {
-                remoteSchemaVersion: x.schema_version,
-                localSchemaVersion: migrator.currentSchemaVersion,
-              });
-              if (remoteState.type === "online" && !remoteState.schemaVersionMismatched) {
-                patchRemoteState({ schemaVersionMismatched: true });
-              }
-              throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
-            }
-            return x;
+      const result = await tryCatchAsync(
+        async () =>
+          await factory({
+            onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
+              pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
+            },
+            signal,
           }),
+      );
+
+      if (signal.aborted) {
+        if (result.success) {
+          disconnectSource(result.data);
+        }
+        return;
+      }
+
+      if (!result.success) {
+        console.warn("Failed to create remote source", result.error);
+        closeConnection(connection, "INITIALIZATION_FAILED");
+        return;
+      }
+
+      source = result.data;
+      patchRemoteState({ type: "online", deSynced: false, schemaVersionMismatched: false });
+      void sync();
+    };
+
+    type ActivePull = { promise: Promise<void>; requestedSyncId: number | null };
+    let activePull: ActivePull | null = null;
+    const pull = (request?: {
+      remoteSyncId?: number;
+      remoteEventHlcSum?: string | null;
+      includeSelf?: boolean;
+    }): Promise<void> => {
+      if (!source || signal.aborted) {
+        return Promise.resolve();
+      }
+      const activeSource = source;
+
+      const remoteSyncId = request?.remoteSyncId;
+
+      if (remoteSyncId !== undefined && remoteSyncId <= pullSyncId.current) {
+        // We are already caught up to this broadcast, so there is nothing to pull.
+        // This is the quiescent moment to verify we have not diverged from the
+        // remote (the check is a no-op unless we are exactly aligned: remoteSyncId
+        // === pullSyncId.current).
+        checkRemoteConsistency(remoteSyncId, request?.remoteEventHlcSum ?? null);
+        return Promise.resolve();
+      }
+
+      if (activePull) {
+        if (remoteSyncId !== undefined && (!activePull.requestedSyncId || activePull.requestedSyncId < remoteSyncId)) {
+          activePull.requestedSyncId = remoteSyncId;
+        }
+        return activePull.promise;
+      }
+
+      const nextPull: ActivePull = { promise: Promise.resolve(), requestedSyncId: null };
+      nextPull.promise = pullAllEvents(activeSource, {
+        afterSyncId: pullSyncId.current,
+        excludeNodeId: request?.includeSelf ? undefined : nodeId,
+      })
+        .catch((error) => {
+          if (signal.aborted) {
+            return;
+          }
+          console.error("Error pulling events. Going offline.", error);
+          closeConnection(connection, "REMOTE_PULL_ERROR");
+        })
+        .finally(() => {
+          if (activePull === nextPull) {
+            activePull = null;
+          }
+
+          const nextTarget = nextPull.requestedSyncId;
+          if (nextTarget && nextTarget > pullSyncId.current) {
+            pull({ remoteSyncId: nextTarget });
+          }
+        });
+      activePull = nextPull;
+      return nextPull.promise;
+    };
+
+    const pullAllEvents = async (activeSource: RemoteSource, opts: EventsPullRequest) => {
+      let hasMore = true;
+      let afterSyncId = opts.afterSyncId;
+      while (hasMore) {
+        const response = await retryRemoteOperation(
+          () =>
+            untilClosed(() =>
+              activeSource.pullEvents({
+                ...opts,
+                afterSyncId,
+              }),
+            ),
+          retryOptions,
         );
+        if (signal.aborted) {
+          return;
+        }
+        hasMore = response.hasMore;
+        afterSyncId = response.nextSyncId;
+
+        if (response.events) {
+          storage.enqueueRemoteEvents(
+            response.events.map((x) => {
+              if (x.schema_version > migrator.currentSchemaVersion) {
+                eventTarget.dispatchEvent("remote-schema-version-mismatch", {
+                  remoteSchemaVersion: x.schema_version,
+                  localSchemaVersion: migrator.currentSchemaVersion,
+                });
+                if (remoteState.type === "online" && !remoteState.schemaVersionMismatched) {
+                  patchRemoteState({ schemaVersionMismatched: true });
+                }
+                throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
+              }
+              return x;
+            }),
+          );
+        }
+        if (response.nextSyncId <= pullSyncId.current) {
+          break;
+        }
+        if (response.nextSyncId > pullSyncId.current) {
+          pullSyncId.current = response.nextSyncId;
+        }
       }
-      if (response.nextSyncId <= pullSyncId.current) {
-        break;
+    };
+
+    const push = ensureSingletonExecution(async () => {
+      while (source && !signal.aborted) {
+        const activeSource = source;
+        const eventsBatch = storage.getEventsBatch({
+          status: "applied",
+          afterSyncId: pushSyncId.current,
+          excludeOrigin: "remote",
+          limit: bufferSize,
+        });
+        if (eventsBatch.events.length === 0) {
+          break;
+        }
+
+        let response: EventsPushResponse;
+        try {
+          response = await retryRemoteOperation(
+            () =>
+              untilClosed(() =>
+                activeSource.pushEvents({
+                  nodeId,
+                  events: eventsBatch.events.map((event) => ({
+                    schema_version: event.schema_version,
+                    timestamp: event.timestamp,
+                    type: event.type,
+                    dataset: event.dataset,
+                    item_id: event.item_id,
+                    payload: event.payload,
+                  })),
+                }),
+              ),
+            retryOptions,
+          );
+        } catch (error) {
+          if (!signal.aborted) {
+            console.error("Error pushing events. Going offline.", error);
+            closeConnection(connection, "REMOTE_PUSH_ERROR");
+          }
+          return;
+        }
+
+        if (signal.aborted) {
+          return;
+        }
+
+        if (!response.ok) {
+          console.error("Remote rejected pushed events. Going offline.");
+          closeConnection(connection, "REMOTE_PUSH_ERROR");
+          return;
+        }
+
+        pushSyncId.current = eventsBatch.nextSyncId;
+
+        // Fast-forward the pull cursor: the remote assigns sync ids for the pushed
+        // events synchronously, so (beforeSyncId, afterSyncId] contains only this
+        // node's own events. If we are caught up to at least beforeSyncId, the skipped
+        // range (pullSyncId, afterSyncId] contains only our own events, so there is
+        // nothing to pull up to afterSyncId.
+        if (
+          response.beforeSyncId !== undefined &&
+          response.afterSyncId !== undefined &&
+          response.beforeSyncId <= pullSyncId.current &&
+          response.afterSyncId > pullSyncId.current
+        ) {
+          pullSyncId.current = response.afterSyncId;
+        }
+        if (!eventsBatch.hasMore) {
+          break;
+        }
       }
-      if (response.nextSyncId > pullSyncId.current) {
-        pullSyncId.current = response.nextSyncId;
+    });
+
+    const sync = async () => {
+      await pull();
+      await push();
+    };
+
+    const close = () => {
+      controller.abort();
+      if (source) {
+        disconnectSource(source);
       }
+    };
+
+    const ready = Promise.resolve()
+      .then(() => untilClosed(connect))
+      .catch((error) => {
+        if (!signal.aborted) {
+          throw error;
+        }
+      });
+
+    const connection = { ready, close, push, sync };
+    return connection;
+  };
+
+  const goOnline = (): Promise<void> => {
+    if (disposed) {
+      return Promise.resolve();
     }
+    if (current) {
+      return current.ready;
+    }
+    if (!remoteFactory) {
+      console.warn("Remote source factory not provided. Going offline.");
+      patchRemoteState({ type: "offline", reason: "NOT_INITIALIZED" });
+      return Promise.resolve();
+    }
+
+    const connection = createConnection(remoteFactory);
+    current = connection;
+    patchRemoteState({ type: "pending" });
+    return connection.ready;
+  };
+
+  const goOffline = async (reason: OfflineReason) => {
+    if (current) {
+      closeConnection(current, reason);
+    }
+  };
+
+  const syncWithRemote = async () => {
+    await current?.sync();
   };
 
   // De-sync detection: when we are exactly caught up to the remote's broadcast
@@ -348,79 +473,8 @@ export const createCrdtSyncRemoteSource = ({
     }
   };
 
-  const startPushingEvents = ensureSingletonExecution(async () => {
-    while (true) {
-      const eventsBatch = storage.getEventsBatch({
-        status: "applied",
-        afterSyncId: pushSyncId.current,
-        excludeOrigin: "remote",
-        limit: bufferSize,
-      });
-      if (eventsBatch.events.length === 0) {
-        break;
-      }
-
-      if (remoteState.type !== "online") {
-        break;
-      }
-      const source = remoteState.source;
-
-      let response: EventsPushResponse;
-      try {
-        response = await retryRemoteOperation(
-          () =>
-            source.pushEvents({
-              nodeId,
-              events: eventsBatch.events.map((event) => ({
-                schema_version: event.schema_version,
-                timestamp: event.timestamp,
-                type: event.type,
-                dataset: event.dataset,
-                item_id: event.item_id,
-                payload: event.payload,
-              })),
-            }),
-          REMOTE_RETRY_OPTIONS,
-        );
-      } catch (error) {
-        if (isCurrentSource(source)) {
-          console.error("Error pushing events. Going offline.", error);
-          goOffline("REMOTE_PUSH_ERROR");
-        }
-        return;
-      }
-
-      if (!response.ok) {
-        if (isCurrentSource(source)) {
-          console.error("Remote rejected pushed events. Going offline.");
-          goOffline("REMOTE_PUSH_ERROR");
-        }
-        return;
-      }
-
-      pushSyncId.current = eventsBatch.nextSyncId;
-
-      // Fast-forward the pull cursor: the remote assigns sync ids for the pushed
-      // events synchronously, so (beforeSyncId, afterSyncId] contains only this
-      // node's own events. If we are caught up to at least beforeSyncId, the skipped
-      // range (pullSyncId, afterSyncId] contains only our own events, so there is
-      // nothing to pull up to afterSyncId.
-      if (
-        response.beforeSyncId !== undefined &&
-        response.afterSyncId !== undefined &&
-        response.beforeSyncId <= pullSyncId.current &&
-        response.afterSyncId > pullSyncId.current
-      ) {
-        pullSyncId.current = response.afterSyncId;
-      }
-      if (!eventsBatch.hasMore) {
-        break;
-      }
-    }
-  });
-
   const eventsAppliedSubscription = storage.addEventListener("events-applied", () => {
-    startPushingEvents();
+    current?.push();
   });
 
   const remoteEventApplyFailedSubscription = storage.addEventListener("remote-event-apply-failed", () => {
@@ -437,9 +491,10 @@ export const createCrdtSyncRemoteSource = ({
   });
 
   const dispose = async () => {
-    await goOffline("DISCONNECTED");
+    disposed = true;
     eventsAppliedSubscription.unsubscribe();
     remoteEventApplyFailedSubscription.unsubscribe();
+    await goOffline("DISCONNECTED");
   };
 
   return {

@@ -4,6 +4,7 @@ type RetryOptions = {
   backoffExponent: number;
   backoffJitterMs: number;
   timeoutMs: number;
+  shouldRetry?: (error: unknown) => boolean;
 };
 
 export const REMOTE_RETRY_OPTIONS: RetryOptions = {
@@ -60,7 +61,7 @@ export const retryRemoteOperation = async <T>(operation: () => Promise<T>, optio
     } catch (error) {
       lastError = error;
 
-      if (attempt >= options.maxAttempts) {
+      if (attempt >= options.maxAttempts || options.shouldRetry?.(error) === false) {
         throw error;
       }
 
