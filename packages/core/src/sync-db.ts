@@ -241,6 +241,11 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       },
       goOnline: workerClient.goOnline.bind(workerClient),
       goOffline: workerClient.goOffline.bind(workerClient),
+      sync: async () => {
+        await tabRemoteSource.syncWithRemote();
+        await workerClient.sync();
+        await tabRemoteSource.syncWithRemote();
+      },
     },
     /**
      * Ask the elected worker to broadcast a page reload to all tabs for this dbId.

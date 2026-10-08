@@ -104,6 +104,7 @@ export const createWorkerDbClient = async ({
     postState: () => queryWorker("postState", []),
     goOnline: () => queryWorker("goOnline", []),
     goOffline: () => queryWorker("goOffline", []),
+    sync: () => queryWorker("sync", []),
     requestReload: (options) => queryWorker("requestReload", [options]),
   };
 

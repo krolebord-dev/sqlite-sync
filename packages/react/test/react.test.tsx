@@ -378,6 +378,7 @@ function createFakeDb() {
       subscribe: () => () => {},
       goOnline: vi.fn(),
       goOffline: vi.fn(),
+      sync: vi.fn(),
     },
     subscribe,
     dispose: vi.fn(),

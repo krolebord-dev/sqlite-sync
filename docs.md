@@ -1240,6 +1240,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the connection attempt connects, fails, or is cancelled; the initial sync continues in the background |
 | `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a pending connection attempt |
+| `state.sync()` | `() => Promise<void>` | Pull new remote events and push pending local events. Resolves when both finish; does nothing unless online (call `goOnline()` first to connect) |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |

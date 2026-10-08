@@ -282,7 +282,7 @@ export const createCrdtSyncRemoteSource = ({
         afterSyncId = response.nextSyncId;
 
         if (response.events) {
-          storage.enqueueRemoteEvents(
+          const { processed } = storage.enqueueRemoteEvents(
             response.events.map((x) => {
               if (x.schema_version > migrator.currentSchemaVersion) {
                 eventTarget.dispatchEvent("remote-schema-version-mismatch", {
@@ -297,6 +297,10 @@ export const createCrdtSyncRemoteSource = ({
               return x;
             }),
           );
+          await untilClosed(() => processed);
+          if (signal.aborted) {
+            return;
+          }
         }
         if (response.nextSyncId <= pullSyncId.current) {
           break;
@@ -378,8 +382,11 @@ export const createCrdtSyncRemoteSource = ({
       }
     });
 
+    // Waits out in-flight operations first: they may have started before the caller's request.
     const sync = async () => {
+      await activePull?.promise;
       await pull();
+      await push.promise();
       await push();
     };
 

@@ -64,9 +64,8 @@ describe("createCrdtSyncRemoteSource", () => {
     });
 
     await remoteSource.goOnline();
-    await remoteSource.syncWithRemote();
+    await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(3));
 
-    expect(source.pullEvents).toHaveBeenCalledTimes(3);
     expect(pullRequests).toEqual([
       { afterSyncId: 0, excludeNodeId: "local-node" },
       { afterSyncId: 0, excludeNodeId: "local-node" },
@@ -239,6 +238,125 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(shared.pullEvents).toHaveBeenCalledTimes(2);
       expect(enqueueRemoteEvents).not.toHaveBeenCalledWith([remoteEvent]);
       expect(pullSyncId.current).toBe(0);
+    });
+  });
+
+  describe("syncWithRemote", () => {
+    it.each(["processed", "disconnected"])("waits for pulled events until %s", async (outcome) => {
+      const processing = createDeferredPromise<void>();
+      const enqueued = createDeferredPromise<void>();
+      const storage = createStorageMock();
+      const source = createSource({});
+      const pullSyncId = createStoredValue({ initialValue: 0 });
+      const remoteSource = setup({ sources: [source], storage, pullSyncId });
+      await remoteSource.goOnline();
+      await remoteSource.syncWithRemote();
+
+      vi.spyOn(storage, "enqueueRemoteEvents").mockImplementation(() => {
+        enqueued.resolve();
+        return { beforeSyncId: 0, afterSyncId: 1, processed: processing.promise };
+      });
+      source.pullEvents.mockResolvedValue({
+        events: [
+          {
+            schema_version: 1,
+            timestamp: "000000000000001:00000:remote",
+            type: "item-created",
+            dataset: "todo",
+            item_id: "1",
+            payload: "{}",
+          },
+        ],
+        hasMore: false,
+        nextSyncId: 1,
+      });
+      let syncFinished = false;
+      const syncing = remoteSource.syncWithRemote().then(() => {
+        syncFinished = true;
+      });
+      try {
+        await enqueued.promise;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(syncFinished).toBe(false);
+        expect(pullSyncId.current).toBe(0);
+        if (outcome === "processed") {
+          processing.resolve();
+        } else {
+          await remoteSource.goOffline("DISCONNECTED");
+        }
+        await syncing;
+        expect(pullSyncId.current).toBe(outcome === "processed" ? 1 : 0);
+      } finally {
+        processing.resolve();
+        await remoteSource.dispose();
+        await syncing;
+      }
+    });
+
+    it("pulls again after a pull that was already in flight", async () => {
+      const inFlight = createDeferredPromise<EventsPullResponse>();
+      let pulls = 0;
+      const source = createSource({ pullEvents: () => (pulls++ === 0 ? inFlight.promise : emptyPull()) });
+      const remoteSource = setup({ sources: [source] });
+      await remoteSource.goOnline();
+      await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(1));
+
+      const syncing = remoteSource.syncWithRemote();
+      inFlight.resolve({ events: [], hasMore: false, nextSyncId: 0 });
+      await syncing;
+
+      expect(source.pullEvents).toHaveBeenCalledTimes(2);
+    });
+
+    it("pushes events applied while a push was already in flight", async () => {
+      const event = {
+        schema_version: 1,
+        timestamp: "0000000000001-0000-local-node",
+        type: "item-created" as const,
+        dataset: "todo",
+        item_id: "1",
+        payload: "{}",
+      };
+      let lastSyncId = 1;
+      const storage = {
+        ...createStorageMock(),
+        getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
+          afterSyncId < lastSyncId
+            ? { events: [event], hasMore: false, nextSyncId: lastSyncId }
+            : { events: [], hasMore: false, nextSyncId: afterSyncId },
+      } as unknown as CrdtStorage;
+      const inFlight = createDeferredPromise<EventsPushResponse>();
+      let pushes = 0;
+      const source = createSource({
+        pushEvents: () =>
+          pushes++ === 0
+            ? inFlight.promise
+            : new Promise<EventsPushResponse>((resolve) => setTimeout(() => resolve({ ok: true }), 0)),
+      });
+      const pushSyncId = createStoredValue({ initialValue: 0 });
+      const remoteSource = setup({ sources: [source], storage, pushSyncId });
+      await remoteSource.goOnline();
+      await vi.waitFor(() => expect(source.pushEvents).toHaveBeenCalledTimes(1));
+
+      lastSyncId = 2;
+      const syncing = remoteSource.syncWithRemote();
+      await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(2));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      inFlight.resolve({ ok: true });
+      await syncing;
+
+      expect(source.pushEvents).toHaveBeenCalledTimes(2);
+      expect(pushSyncId.current).toBe(2);
+    });
+
+    it("does not connect while offline", async () => {
+      const remoteFactory = vi.fn();
+      const remoteSource = setup({ remoteFactory });
+
+      await remoteSource.syncWithRemote();
+
+      expect(remoteFactory).not.toHaveBeenCalled();
+      expect(remoteSource.getState().remoteState).toBe("offline");
     });
   });
 
