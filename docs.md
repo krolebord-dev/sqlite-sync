@@ -1240,7 +1240,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the connection attempt connects, fails, or is cancelled; the initial sync continues in the background |
 | `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a pending connection attempt |
-| `state.sync()` | `() => Promise<void>` | Pull new remote events and push pending local events. Resolves when both finish; does nothing unless online (call `goOnline()` first to connect) |
+| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. Does nothing unless online (call `goOnline()` first to connect). Also runs automatically whenever the page becomes visible |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |
@@ -1343,6 +1343,8 @@ function createWsRemoteSource(options: {
 }): CreateRemoteSourceFactory
 ```
 
+Requests made while the socket is closed (for example, while PartySocket is reconnecting) wait for it to reopen before they are sent, and their response timeout starts only then.
+
 #### Custom remote sources
 
 `createRemoteSource` accepts any `CreateRemoteSourceFactory`. The library calls it once per connection attempt:
@@ -1350,6 +1352,7 @@ function createWsRemoteSource(options: {
 ```ts
 type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: { newSyncId: number; remoteEventHlcSum: string | null }) => void;
+  onReconnected: () => void;
   signal: AbortSignal;
 }) => RemoteSource | Promise<RemoteSource>;
 
@@ -1363,6 +1366,7 @@ type RemoteSource = {
 - Each call must return an independent source. Do not return the same source object from multiple calls.
 - The library calls `disconnect` on every returned source exactly once, including a source that resolves after the attempt was cancelled. It does not wait for `disconnect` to finish.
 - `signal` aborts when the attempt is cancelled (`goOffline()` or `dispose()` while connecting) or when the connection closes. Factories can use it to stop opening a connection early.
+- Call `onReconnected` when the transport reconnects on its own without a new source (as PartySocket does). Broadcasts sent while it was down are lost, so the library pulls and pushes to catch up. `createWsRemoteSource` calls it on every `open` after the first.
 
 ### `@sqlite-sync/core/server`
 

@@ -46,9 +46,12 @@ export type EventsAvailable = {
  * Opens a connection to the remote. Each call must return an independent source: the library calls
  * `disconnect` on every returned source exactly once, including one that resolves after `signal`
  * has aborted. `signal` aborts when the connection attempt is cancelled or the connection is closed.
+ * Call `onReconnected` when the transport re-establishes itself without a new source: broadcasts
+ * sent while it was down are lost, so the library pulls and pushes to catch up.
  */
 export type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: EventsAvailable) => void;
+  onReconnected: () => void;
   signal: AbortSignal;
 }) => RemoteSource | Promise<RemoteSource>;
 
@@ -182,6 +185,9 @@ export const createCrdtSyncRemoteSource = ({
           await factory({
             onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
               pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
+            },
+            onReconnected: () => {
+              void sync();
             },
             signal,
           }),

@@ -72,7 +72,7 @@ export interface WorkerRpc {
   postState: () => void;
   goOnline: () => Promise<void>;
   goOffline: () => void;
-  sync: () => Promise<void>;
+  sync: () => void;
   requestReload: (options: { clean: boolean }) => Promise<void>;
 }
 

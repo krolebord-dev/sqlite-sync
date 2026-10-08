@@ -4,7 +4,6 @@ import { createMigrations } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";
 import { createSyncedDb, createSyncedDbDatabase, type SyncedDb } from "../src/sync-db";
-import { createDeferredPromise } from "../src/utils";
 import { createBroadcastChannels, type WorkerResponseMessage } from "../src/worker-db/worker-common";
 
 describe("SyncedDb database facade", () => {
@@ -54,7 +53,7 @@ describe("SyncedDb database facade", () => {
 });
 
 describe("SyncedDb state", () => {
-  it("waits for events pulled by the worker to reach the tab", async () => {
+  it("returns immediately and delivers events pulled by the worker to the tab", async () => {
     vi.stubGlobal("navigator", {
       locks: { request: (_name: string, _options: unknown, callback: () => Promise<void>) => callback() },
     });
@@ -66,8 +65,6 @@ describe("SyncedDb state", () => {
     let syncedDb: SyncedDb<(typeof schema)["~clientSchema"]> | undefined;
     const dbId = `sync-test-${crypto.randomUUID()}`;
     const channels = createBroadcastChannels(dbId);
-    const pullStarted = createDeferredPromise<void>();
-    const deliverEvents = createDeferredPromise<void>();
     try {
       initialDb.db.execute(
         "CREATE TABLE _todo (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, tombstone INTEGER NOT NULL DEFAULT 0)",
@@ -81,7 +78,7 @@ describe("SyncedDb state", () => {
           notificationType: "state-changed",
           state: { remoteState: "online", deSynced: false, schemaVersionMismatched: false },
         });
-      channels.requests.onmessage = async ({ data: request }) => {
+      channels.requests.onmessage = ({ data: request }) => {
         switch (request.method) {
           case "postState":
             postState();
@@ -92,8 +89,6 @@ describe("SyncedDb state", () => {
             break;
           case "pullEvents":
             if (serverSyncDone) {
-              pullStarted.resolve();
-              await deliverEvents.promise;
               respond(request.requestId, {
                 events: [
                   {
@@ -138,18 +133,12 @@ describe("SyncedDb state", () => {
         workerProps: undefined,
         syncDbSchema: schema,
       });
-      let syncFinished = false;
-      const syncing = syncedDb.state.sync().then(() => {
-        syncFinished = true;
-      });
-      await pullStarted.promise;
-      expect(syncFinished).toBe(false);
+      expect(syncedDb.state.sync()).toBeUndefined();
       expect(syncedDb.db.execute("SELECT * FROM todo").rows).toEqual([]);
-      deliverEvents.resolve();
-      await syncing;
-      expect(syncedDb.db.execute("SELECT title FROM todo").rows).toEqual([{ title: "From server" }]);
+      await vi.waitFor(() =>
+        expect(syncedDb?.db.execute("SELECT title FROM todo").rows).toEqual([{ title: "From server" }]),
+      );
     } finally {
-      deliverEvents.resolve();
       await syncedDb?.dispose();
       initialDb.dispose();
       channels.requests.close();

@@ -206,6 +206,18 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     globalThis.location?.reload();
   });
 
+  const sync = () => {
+    workerClient.sync().catch((error) => console.warn("Failed to start sync", error));
+  };
+
+  // Mobile browsers suspend background pages, and the socket can reconnect or die unnoticed meanwhile.
+  const syncWhenVisible = () => {
+    if (globalThis.document?.visibilityState === "visible") {
+      sync();
+    }
+  };
+  globalThis.document?.addEventListener("visibilitychange", syncWhenVisible);
+
   perf.logEnd("createSyncedDb", "initialized", "info");
 
   const exportData = createExportData({
@@ -222,6 +234,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     isDisposed = true;
 
     unregisterDevtools?.();
+    globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
     reloadRequestedSubscription.unsubscribe();
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();
@@ -241,11 +254,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       },
       goOnline: workerClient.goOnline.bind(workerClient),
       goOffline: workerClient.goOffline.bind(workerClient),
-      sync: async () => {
-        await tabRemoteSource.syncWithRemote();
-        await workerClient.sync();
-        await tabRemoteSource.syncWithRemote();
-      },
+      sync,
     },
     /**
      * Ask the elected worker to broadcast a page reload to all tabs for this dbId.

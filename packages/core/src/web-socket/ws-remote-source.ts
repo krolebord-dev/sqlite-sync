@@ -4,13 +4,14 @@ import { createDeferredPromise, type DeferredPromise, jsonSafeParse } from "../u
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
 
 type WsRemoteSourceConfig = {
-  createWebSocket: () => Pick<WebSocket, "onmessage" | "close" | "addEventListener"> & {
+  createWebSocket: () => Pick<WebSocket, "onmessage" | "close" | "addEventListener" | "removeEventListener"> & {
+    readyState: number;
     send: (data: string) => void;
   };
 };
 
 export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig): CreateRemoteSourceFactory => {
-  return async ({ onEventsAvailable, signal }) => {
+  return async ({ onEventsAvailable, onReconnected, signal }) => {
     const socket = createWebSocket();
 
     const openPromise = createDeferredPromise<void>({
@@ -33,11 +34,41 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
       signal.removeEventListener("abort", abortOpen);
     }
 
+    socket.addEventListener("open", () => {
+      onReconnected();
+    });
+
+    const waitForOpen = () =>
+      new Promise<void>((resolve, reject) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          resolve();
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        const onOpen = () => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          socket.removeEventListener("open", onOpen);
+          reject(signal.reason);
+        };
+        socket.addEventListener("open", onOpen, { once: true });
+        signal.addEventListener("abort", onAbort, { once: true });
+      });
+
     const requestsMap = new Map<string, DeferredPromise<unknown>>();
 
     const pushEvents = async (request: EventsPushRequest): Promise<EventsPushResponse> => {
+      await waitForOpen();
       const requestId = crypto.randomUUID();
-      const promise = createDeferredPromise<EventsPushResponse>({ timeout: 5000 });
+      const promise = createDeferredPromise<EventsPushResponse>({
+        timeout: 5000,
+        onTimeout: () => requestsMap.delete(requestId),
+      });
       requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
       const wsRequest: SyncServerRequest = {
@@ -52,8 +83,12 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
     };
 
     const pullEvents = async (request: EventsPullRequest): Promise<GetEventsBatch> => {
+      await waitForOpen();
       const requestId = crypto.randomUUID();
-      const promise = createDeferredPromise<GetEventsBatch>({ timeout: 2000 });
+      const promise = createDeferredPromise<GetEventsBatch>({
+        timeout: 2000,
+        onTimeout: () => requestsMap.delete(requestId),
+      });
       requestsMap.set(requestId, promise as DeferredPromise<unknown>);
 
       const wsRequest: SyncServerRequest = {

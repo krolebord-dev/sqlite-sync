@@ -197,6 +197,44 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(pushSyncId.current).toBe(1);
     });
 
+    it("pulls missed events and pushes pending ones when the source reports a reconnect", async () => {
+      const pullSyncId = createStoredValue({ initialValue: 0 });
+      const pushSyncId = createStoredValue({ initialValue: 0 });
+      let hasPendingEvent = false;
+      const storage = {
+        ...createStorageMock(),
+        getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
+          hasPendingEvent && afterSyncId < 1
+            ? { events: [remoteEvent], hasMore: false, nextSyncId: 1 }
+            : { events: [], hasMore: false, nextSyncId: afterSyncId },
+      } as unknown as CrdtStorage;
+      const source = createSource({});
+      let reportReconnect = () => {};
+      const remoteSource = setup({
+        storage,
+        pullSyncId,
+        pushSyncId,
+        remoteFactory: ({ onReconnected }) => {
+          reportReconnect = onReconnected;
+          return source;
+        },
+      });
+
+      await remoteSource.goOnline();
+      await remoteSource.syncWithRemote();
+      const pullsBeforeReconnect = source.pullEvents.mock.calls.length;
+      expect(source.pushEvents).not.toHaveBeenCalled();
+
+      hasPendingEvent = true;
+      source.pullEvents.mockResolvedValueOnce({ events: [remoteEvent], hasMore: false, nextSyncId: 5 });
+      reportReconnect();
+
+      await vi.waitFor(() => expect(pullSyncId.current).toBe(5));
+      await vi.waitFor(() => expect(pushSyncId.current).toBe(1));
+      expect(source.pullEvents).toHaveBeenCalledTimes(pullsBeforeReconnect + 1);
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
     it("does not apply events pulled by the previous connection", async () => {
       const pullSyncId = createStoredValue({ initialValue: 0 });
       const storage = createStorageMock();
