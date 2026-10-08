@@ -613,8 +613,9 @@ defaults are filled, rows in dropped tables are discarded). A dump from a **newe
 version cannot be down-migrated and is rejected; pass `{ validate: false }` to
 author it as-is at the current version anyway (footgun — payloads are not
 down-migrated). Row payloads are always validated against the schema and the
-import is atomic — an invalid row throws `CrdtEventValidationError` and applies
-nothing.
+import is atomic — an invalid row rejects the call and applies nothing. The
+validation runs in the worker, so `syncedDb.importData` rejects with a plain
+`Error` carrying the validation message, not a `CrdtEventValidationError`.
 
 ---
 
@@ -1018,10 +1019,15 @@ syncDb.enqueueSnapshot({
 ```
 
 `enqueueSnapshot` reads the current row when present, applies the patch, and immediately writes an `item-created` event
-containing the resulting complete row. Existing rows treat that create as an update. Every older event for the same
-dataset and item remains in the event log with its non-empty payload replaced by sqlite-sync's no-op marker. This
-preserves sync cursors and consistency checks while removing superseded payload data. Fresh replicas replay the no-ops
-followed by the latest full-row snapshot.
+containing the resulting complete row with `tombstone: false`. Existing rows treat that create as an update, and a
+deleted row is restored. When no event for the same dataset and item has a newer timestamp than the snapshot, every
+older event remains in the event log with its non-empty payload replaced by sqlite-sync's no-op marker. This preserves
+sync cursors and consistency checks while removing superseded payload data. Fresh replicas replay the no-ops followed by
+the latest full-row snapshot.
+
+When a newer event exists, for example a pending client edit stamped by a clock running ahead of the server's, the
+row's history is left intact. That event still wins last-write-wins for its fields, and fresh replicas need the
+original history to replay it on. The next snapshot that is newer than every event for the row compacts the history.
 
 If the row does not exist, the patch creates it and must supply every required column. The TypeScript API prevents patches
 from changing `id` or `tombstone`, but this path does not run runtime schema validation. SQLite rejects an incomplete
@@ -1081,8 +1087,8 @@ push still returns `ok: true`. An event is rejected when:
   write. Server-only tables, CRDT view names, and other spellings such as `_TODO` or
   `main._todo` are rejected.
 - after migration, its payload does not match the table schema: unknown or missing columns,
-  values of the wrong type, an `id` that differs from `item_id`, or `id`/`tombstone` changes in an
-  update
+  values of the wrong type, an `id` that differs from `item_id`, an `id` in an update, or an update
+  that sets `tombstone` to `true`/`1` (deletes must use `item-deleted`)
 
 Older-version events are migrated before they are checked. Events whose table was dropped by a
 migration, and events with a no-op payload, are stored as no-ops.
@@ -1240,7 +1246,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the connection attempt connects, fails, or is cancelled; the initial sync continues in the background |
 | `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a pending connection attempt |
-| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. Does nothing unless online (call `goOnline()` first to connect). Also runs automatically whenever the page becomes visible |
+| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. If a connection error took the remote offline, reconnects instead; does nothing after `goOffline()` or a schema version mismatch (call `goOnline()` to connect). Also runs automatically whenever the page becomes visible or the browser comes back online |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |
@@ -1477,7 +1483,7 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 | `unsafe.transaction(callback)` | Run a direct SQLite transaction without draining intents |
 | `enqueueEvent(event)` | Write a single CRDT event |
 | `enqueueEvents(events)` | Write multiple CRDT events |
-| `enqueueSnapshot(snapshot)` | Patch a row, replace its older non-empty event payloads with no-ops, and write a full create snapshot |
+| `enqueueSnapshot(snapshot)` | Patch a row and write a full create snapshot; older event payloads become no-ops unless a newer event exists |
 | `applyOwnEvents(events)` | Validate, persist, and immediately apply own CRDT events |
 | `createEvent(event)` | Type helper — returns the event as-is |
 | `addEventListener("event-applied", handler)` | Listen for applied events |

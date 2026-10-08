@@ -135,6 +135,7 @@ export const createCrdtSyncRemoteSource = ({
 
   let current: Connection | null = null;
   let disposed = false;
+  let wantsOnline = false;
 
   const disconnectSource = (source: RemoteSource) => {
     const watchdog = setTimeout(() => {
@@ -431,6 +432,7 @@ export const createCrdtSyncRemoteSource = ({
       return Promise.resolve();
     }
 
+    wantsOnline = true;
     const connection = createConnection(remoteFactory);
     current = connection;
     patchRemoteState({ type: "pending" });
@@ -438,13 +440,20 @@ export const createCrdtSyncRemoteSource = ({
   };
 
   const goOffline = async (reason: OfflineReason) => {
+    wantsOnline = false;
     if (current) {
       closeConnection(current, reason);
     }
   };
 
+  // Reconnects only when a connection error, not goOffline, took us offline. Retrying after a schema
+  // mismatch would fail the same way.
   const syncWithRemote = async () => {
-    await current?.sync();
+    if (current) {
+      await current.sync();
+    } else if (wantsOnline && !remoteState.schemaVersionMismatched) {
+      await goOnline();
+    }
   };
 
   // De-sync detection: when we are exactly caught up to the remote's broadcast

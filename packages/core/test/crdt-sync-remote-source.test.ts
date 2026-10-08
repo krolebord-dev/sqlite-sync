@@ -387,7 +387,7 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(pushSyncId.current).toBe(2);
     });
 
-    it("does not connect while offline", async () => {
+    it("does not connect before goOnline", async () => {
       const remoteFactory = vi.fn();
       const remoteSource = setup({ remoteFactory });
 
@@ -395,6 +395,73 @@ describe("createCrdtSyncRemoteSource", () => {
 
       expect(remoteFactory).not.toHaveBeenCalled();
       expect(remoteSource.getState().remoteState).toBe("offline");
+    });
+
+    it("reconnects when a pull error took it offline", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const failing = createSource({ pullEvents: () => Promise.reject(new Error("pull failed")) });
+      const next = createSource({});
+      const remoteSource = setup({ sources: [failing, next] });
+      await remoteSource.goOnline();
+      await vi.waitFor(() => expect(remoteSource.getState().remoteState).toBe("offline"));
+
+      await remoteSource.syncWithRemote();
+
+      expect(remoteSource.getState().remoteState).toBe("online");
+      await vi.waitFor(() => expect(next.pullEvents).toHaveBeenCalled());
+    });
+
+    it("does not reconnect after goOffline", async () => {
+      const remoteFactory = vi.fn(() => createSource({}));
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+      await remoteSource.goOffline("DISCONNECTED");
+
+      await remoteSource.syncWithRemote();
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("offline");
+    });
+
+    it("does not reconnect after a schema version mismatch", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const remoteFactory = vi.fn(() =>
+        createSource({
+          pullEvents: async () => ({
+            events: [
+              {
+                schema_version: 2,
+                timestamp: "000000000000001:00000:remote",
+                type: "item-created",
+                dataset: "todo",
+                item_id: "1",
+                payload: "{}",
+              },
+            ],
+            hasMore: false,
+            nextSyncId: 1,
+          }),
+        }),
+      );
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+      await vi.waitFor(() => expect(remoteSource.getState().remoteState).toBe("offline"));
+
+      await remoteSource.syncWithRemote();
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState()).toMatchObject({ remoteState: "offline", schemaVersionMismatched: true });
+    });
+
+    it("does not start another connection while one is pending", async () => {
+      const remoteFactory = vi.fn(() => new Promise<never>(() => {}));
+      const remoteSource = setup({ remoteFactory });
+      void remoteSource.goOnline();
+
+      await remoteSource.syncWithRemote();
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("pending");
     });
   });
 

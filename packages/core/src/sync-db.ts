@@ -217,6 +217,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     }
   };
   globalThis.document?.addEventListener("visibilitychange", syncWhenVisible);
+  globalThis.addEventListener?.("online", sync);
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 
@@ -235,6 +236,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
     unregisterDevtools?.();
     globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
+    globalThis.removeEventListener?.("online", sync);
     reloadRequestedSubscription.unsubscribe();
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();

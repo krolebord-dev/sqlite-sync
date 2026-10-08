@@ -251,7 +251,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     goOnline: () => remoteSource.goOnline(),
     goOffline: () => remoteSource.goOffline("DISCONNECTED"),
     sync: () => {
-      void remoteSource.syncWithRemote();
+      remoteSource.syncWithRemote().catch((error) => console.warn("Sync failed", error));
     },
     requestReload: createReloadRequestHandler({
       resetState,

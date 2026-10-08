@@ -44,14 +44,15 @@ React Component
     └── mutation: db.db.executeKysely(...)
             │
             ▼
-        CRDT view INSTEAD OF trigger
+        CRDT view INSTEAD OF trigger → row in crdt_change_intents
             │
             ▼
-        storage.applyOwnEvent (sync, in-memory)
+        intent drainer after each mutating statement (sync, in-memory)
             │
-            ├── persists to persisted_crdt_events
-            ├── applies LWW to physical base table
-            └── on commit → sync producer → workerClient.pushTabEvents()
+            ├── storage.applyOwnIntentsFromTransaction
+            │     ├── persists to persisted_crdt_events
+            │     └── applies LWW to physical base table
+            └── on commit → processEnqueuedEvents → sync producer → workerClient.pushTabEvents()
                                                   │
                                                   ▼
                                         Worker (OPFS) → Remote
@@ -119,7 +120,7 @@ The tab→worker event push step is eliminated.
 
 ### Worker already has CRDT infrastructure
 
-The worker already applies CRDT events from remote via `handleCrdtEventApply`. Extending it to handle local mutations is incremental.
+The worker already applies CRDT events from remote via `enqueueRemoteEvents` and `processEnqueuedEvents`. Extending it to handle local mutations is incremental.
 
 ## Cons
 

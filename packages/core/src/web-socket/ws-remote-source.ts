@@ -3,6 +3,8 @@ import type { CreateRemoteSourceFactory } from "../sqlite-crdt/crdt-sync-remote-
 import { createDeferredPromise, type DeferredPromise, jsonSafeParse } from "../utils";
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
 
+const WS_OPEN = 1;
+
 type WsRemoteSourceConfig = {
   createWebSocket: () => Pick<WebSocket, "onmessage" | "close" | "addEventListener" | "removeEventListener"> & {
     readyState: number;
@@ -40,7 +42,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
 
     const waitForOpen = () =>
       new Promise<void>((resolve, reject) => {
-        if (socket.readyState === WebSocket.OPEN) {
+        if (socket.readyState === WS_OPEN) {
           resolve();
           return;
         }
