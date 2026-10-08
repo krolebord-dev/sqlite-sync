@@ -147,8 +147,8 @@ export const createCrdtSyncRemoteSource = ({
       return;
     }
     current = null;
-    connection.close();
     patchRemoteState({ type: "offline", reason });
+    connection.close();
   };
 
   type Connection = ReturnType<typeof createConnection>;

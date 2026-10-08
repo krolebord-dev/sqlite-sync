@@ -435,6 +435,23 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
+    it("shows a reconnect started by disconnect as pending", async () => {
+      const previous = createSource({});
+      previous.disconnect.mockImplementation(() => {
+        remoteSource.goOnline();
+      });
+      let factoryCalls = 0;
+      const remoteSource = setup({
+        remoteFactory: () => (factoryCalls++ === 0 ? previous : new Promise<never>(() => {})),
+      });
+      await remoteSource.goOnline();
+
+      await remoteSource.goOffline("DISCONNECTED");
+
+      expect(previous.disconnect).toHaveBeenCalled();
+      expect(remoteSource.getState().remoteState).toBe("pending");
+    });
+
     it("shares one connection attempt between concurrent goOnline calls", async () => {
       vi.spyOn(console, "warn").mockImplementation(() => {});
       const remoteFactory = vi.fn(async (): Promise<ReturnType<typeof createSource>> => {
