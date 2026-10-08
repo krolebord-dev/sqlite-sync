@@ -538,6 +538,75 @@ describe("CRDT convergence for parallel entity edits", () => {
     });
   });
 
+  it("drops local events redelivered by a later push before assigning them a sync id", async () => {
+    const client = await createReplica("node-a", 1_000);
+    const server = await createReplica("server", 1_000, { trackEventHlcAccumulator: true });
+
+    await client.createTodo({ id: "todo-1", title: "First", completed: false, tombstone: false });
+    await client.createTodo({ id: "todo-2", title: "Second", completed: false, tombstone: false });
+    const { events } = client.exportEvents(0);
+    const [firstEvent] = events;
+    if (!firstEvent) {
+      throw new Error("Expected exported events");
+    }
+
+    const first = server.storage.enqueueLocalEvents([...events, firstEvent], client.nodeId);
+    // Each push is a separate message, so processing finishes before the next one is handled.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(server.getPersistedEvents().map((event) => event.status)).toEqual(events.map(() => "applied"));
+    const accumulator = server.getEventHlcAccumulator();
+
+    const redelivered = server.storage.enqueueLocalEvents(events, client.nodeId);
+    await redelivered.processed;
+
+    expect(first).toMatchObject({ beforeSyncId: 0, afterSyncId: events.length });
+    expect(redelivered).toMatchObject({ beforeSyncId: events.length, afterSyncId: events.length });
+    expect(server.getPersistedEvents().map((event) => event.status)).toEqual(events.map(() => "applied"));
+    expect(server.getEventHlcAccumulator()).toBe(accumulator);
+    expect(server.getTodo("todo-2")?.title).toBe("Second");
+  });
+
+  it("applies a redelivered local event whose pending original fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const client = await createReplica("node-a", 1_000);
+      const server = await createReplica("server", 1_000);
+
+      await client.createTodo({ id: "todo-1", title: "First", completed: false, tombstone: false });
+      await client.updateTodo("todo-1", { title: "Edited" });
+      const [create, update] = client.exportEvents(0).events;
+      if (!create || !update) {
+        throw new Error("Expected create and update events");
+      }
+
+      server.storage.enqueueLocalEvents([update], client.nodeId);
+      server.storage.enqueueLocalEvents([create], client.nodeId);
+      server.storage.enqueueLocalEvents([update], client.nodeId);
+      await server.waitForProcessing();
+
+      expect(server.getPersistedEvents().map((event) => event.status)).toEqual(["failed", "applied", "applied"]);
+      expect(server.getTodo("todo-1")?.title).toBe("Edited");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("resolves processed for a local event redelivered while its original is pending", async () => {
+    const client = await createReplica("node-a", 1_000);
+    const server = await createReplica("server", 1_000);
+
+    await client.createTodo({ id: "todo-1", title: "First", completed: false, tombstone: false });
+    const { events } = client.exportEvents(0);
+
+    server.storage.enqueueLocalEvents(events, client.nodeId);
+    await server.storage.enqueueLocalEvents(events, client.nodeId).processed;
+
+    expect(server.getPersistedEvents().map((event) => event.status)).toEqual([
+      ...events.map(() => "applied"),
+      ...events.map(() => "deduped"),
+    ]);
+  });
+
   it("detects duplicate timestamps within the same processing batch", async () => {
     const replica = await createReplica("node-a", 1_000);
     const timestamp = "000000000001000:00000:remote-node";

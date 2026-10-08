@@ -9,7 +9,11 @@ import { formatSchemaVerificationIssues, verifySyncSchema } from "../schema/veri
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { type CrdtStorage, createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
-import { type CreateRemoteSourceFactory, createCrdtSyncRemoteSource } from "../sqlite-crdt/crdt-sync-remote-source";
+import {
+  type CreateRemoteSourceFactory,
+  createCrdtSyncRemoteSource,
+  PUSH_BATCH_SIZE,
+} from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
@@ -330,7 +334,7 @@ function createRemoteSource({
   remoteFactory,
 }: InitRemoteOptions) {
   return createCrdtSyncRemoteSource({
-    bufferSize: 50,
+    bufferSize: PUSH_BATCH_SIZE,
     pullSyncId,
     pushSyncId,
     nodeId: clientId,

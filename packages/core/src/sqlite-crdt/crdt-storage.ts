@@ -298,7 +298,15 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   };
 
   const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string): EnqueueEventsResult => {
-    return enqueueEvents("local", sourceNodeId, events);
+    const known = getFirstAcceptedSyncIdsByTimestamp(db, events);
+    const newEvents = events.filter((event) => {
+      if (known.has(event.timestamp)) {
+        return false;
+      }
+      known.set(event.timestamp, 0);
+      return true;
+    });
+    return enqueueEvents("local", sourceNodeId, newEvents);
   };
 
   const enqueueOwnEvents = (events: OwnCrdtEvent[]): EnqueueEventsResult => {
@@ -670,11 +678,9 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
 
   const getFirstAcceptedSyncIdsByTimestamp = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
-    events: PersistedCrdtEvent[],
+    events: { timestamp: string }[],
   ) => {
-    const timestamps = Array.from(
-      new Set(events.filter((event) => event.origin !== "own-applied").map((event) => event.timestamp)),
-    );
+    const timestamps = Array.from(new Set(events.map((event) => event.timestamp)));
     if (timestamps.length === 0) {
       return new Map<string, number>();
     }
@@ -855,7 +861,10 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
       const appliedEventsToNotify: PersistedCrdtEvent[] = [];
 
       db.executeTransaction((tx) => {
-        const firstAcceptedSyncIdByTimestamp = getFirstAcceptedSyncIdsByTimestamp(tx, events);
+        const firstAcceptedSyncIdByTimestamp = getFirstAcceptedSyncIdsByTimestamp(
+          tx,
+          events.filter((event) => event.origin !== "own-applied"),
+        );
         const statusOnlyEvents: PersistedCrdtEvent[] = [];
 
         for (const event of events) {

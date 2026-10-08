@@ -21,6 +21,9 @@ export type EventsPullRequest = {
   excludeNodeId?: string;
 };
 
+export const PUSH_BATCH_SIZE = 75;
+export const MAX_PUSH_EVENTS = 100;
+
 export type EventsPushRequest = {
   nodeId: string;
   events: (PendingCrdtEvent & { schema_version: number })[];

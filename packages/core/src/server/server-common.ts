@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { EventsPushResponse } from "../sqlite-crdt/crdt-sync-remote-source";
+import { type EventsPushResponse, MAX_PUSH_EVENTS } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { EventsPullResponse } from "../worker-db/worker-common";
 
 const pullEventsZodSchema = z.object({
@@ -12,16 +12,18 @@ const pushEventsZodSchema = z.object({
   type: z.literal("push-events"),
   requestId: z.string(),
   nodeId: z.string(),
-  events: z.array(
-    z.object({
-      schema_version: z.number(),
-      timestamp: z.string(),
-      type: z.enum(["item-created", "item-updated", "item-deleted"]),
-      dataset: z.string(),
-      item_id: z.string(),
-      payload: z.string(),
-    }),
-  ),
+  events: z
+    .array(
+      z.object({
+        schema_version: z.number(),
+        timestamp: z.string(),
+        type: z.enum(["item-created", "item-updated", "item-deleted"]),
+        dataset: z.string(),
+        item_id: z.string(),
+        payload: z.string(),
+      }),
+    )
+    .max(MAX_PUSH_EVENTS),
 });
 
 export const syncServerZodSchema = {
