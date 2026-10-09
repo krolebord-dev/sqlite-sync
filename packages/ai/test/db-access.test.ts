@@ -1,13 +1,6 @@
-import {
-  CrdtEventValidationError,
-  createMigrations,
-  defineSyncSchema,
-  type OwnCrdtEvent,
-  SQLiteReactiveDb,
-  t,
-} from "@sqlite-sync/core";
+import { CrdtEventValidationError, createMigrations, defineSyncSchema, SQLiteReactiveDb, t } from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
-import { type AiDbAccess, type AiDbExecutor, createAiDbAccess } from "../src/db-access";
+import { type AiDbAccess, type AiDbExecutor, type AiDbMutatorEvent, createAiDbAccess } from "../src/db-access";
 
 function createFakeExecutor() {
   const calls: string[] = [];
@@ -56,13 +49,13 @@ describe("createAiDbAccess", () => {
     );
   });
 
-  it("exposes mutate when storage is provided and applies CRDT own events with generated create ids", () => {
+  it("exposes mutate when storage is provided and applies CRDT events with generated create ids", () => {
     const { executor } = createFakeExecutor();
-    const applied: OwnCrdtEvent[] = [];
+    const applied: AiDbMutatorEvent[] = [];
     const access = createAiDbAccess({
       executor,
       storage: {
-        applyOwnEvents: (events) => {
+        applyEvents: (events) => {
           applied.push(...events);
         },
       },
@@ -82,7 +75,7 @@ describe("createAiDbAccess", () => {
     expect(applied[0]?.type).toBe("item-created");
     expect(applied[0]?.dataset).toBe("item");
     expect(applied[0]?.item_id).toBe(result.createdIds[0]);
-    expect(JSON.parse(applied[0]?.payload ?? "{}")).toEqual({ id: result.createdIds[0], title: "first" });
+    expect(applied[0]?.payload).toEqual({ id: result.createdIds[0], title: "first" });
   });
 
   it("rejects create events when the caller provides an id", () => {
@@ -91,7 +84,7 @@ describe("createAiDbAccess", () => {
     const access = createAiDbAccess({
       executor,
       storage: {
-        applyOwnEvents: (events) => {
+        applyEvents: (events) => {
           applied.push(...events);
         },
       },
@@ -121,7 +114,7 @@ describe("createAiDbAccess", () => {
     const access = createAiDbAccess({
       executor,
       storage: {
-        applyOwnEvents: () => {
+        applyEvents: () => {
           throw new CrdtEventValidationError(['[0] payload: Unknown column "nope"']);
         },
       },
@@ -141,7 +134,7 @@ describe("createAiDbAccess", () => {
     const applied: unknown[] = [];
     const access = createAiDbAccess({
       executor,
-      storage: { applyOwnEvents: (events) => applied.push(...events) },
+      storage: { applyEvents: (events) => applied.push(...events) },
       syncDbSchema,
     });
 
@@ -165,10 +158,10 @@ describe("createAiDbAccess policy enforcement", () => {
 
   function createAccess() {
     const { executor } = createFakeExecutor();
-    const applied: OwnCrdtEvent[] = [];
+    const applied: AiDbMutatorEvent[] = [];
     const access = createAiDbAccess({
       executor,
-      storage: { applyOwnEvents: (events) => applied.push(...events) },
+      storage: { applyEvents: (events) => applied.push(...events) },
       syncDbSchema: policySchema,
     });
     return { access, applied };

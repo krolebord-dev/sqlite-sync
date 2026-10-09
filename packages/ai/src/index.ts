@@ -2,6 +2,8 @@ export {
   type AiDbAccess,
   type AiDbExecuteParams,
   type AiDbExecutor,
+  type AiDbMutator,
+  type AiDbMutatorEvent,
   type AiMutationEvent,
   type AiMutationInput,
   type AiMutationResult,

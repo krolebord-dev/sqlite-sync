@@ -90,8 +90,7 @@ export type UnsafeServerSyncDbSqlExecutor<Schema extends SyncDbSchema> = ServerS
 
 export type ServerSyncDb<Schema extends SyncDbSchema> = ServerSyncDbSqlExecutor<Schema> & {
   unsafe: UnsafeServerSyncDbSqlExecutor<Schema>;
-} & Pick<CrdtStorage, "applyOwnEvents"> &
-  CrdtStorageMutator<Schema[`~mutationsSchema`]> &
+} & CrdtStorageMutator<Schema[`~mutationsSchema`]> &
   Pick<TypedEventTarget<ServerSyncDbEvents<Schema>>, "addEventListener" | "removeEventListener">;
 
 async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
@@ -202,7 +201,6 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     ...syncDbExecutor,
     unsafe: unsafeExecutor,
     ...syncDbMutator,
-    applyOwnEvents: crdtStorage.applyOwnEvents,
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
   };

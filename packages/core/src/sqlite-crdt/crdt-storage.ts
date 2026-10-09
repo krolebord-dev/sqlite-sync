@@ -309,10 +309,6 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     return enqueueEvents("local", sourceNodeId, newEvents);
   };
 
-  const enqueueOwnEvents = (events: OwnCrdtEvent[]): EnqueueEventsResult => {
-    return enqueueEvents("own", storage.nodeId, events);
-  };
-
   const enqueueRemoteEvents = (events: RemoteCrdtEvent[]): EnqueueEventsResult => {
     return enqueueEvents("remote", "", events);
   };
@@ -907,7 +903,6 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
   return {
     getEventsBatch,
     enqueueLocalEvents,
-    enqueueOwnEvents,
     enqueueRemoteEvents,
     applyOwnEvents,
     applyOwnSnapshot,

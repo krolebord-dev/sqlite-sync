@@ -201,7 +201,7 @@ worker throws with the full issue list and refuses to start.
 The schema carries three phantom types used for type inference:
 - `~clientSchema` — Used by React hooks and client `executeKysely`. Base tables are read-only. CRDT views are read-write, except tables with `{ writes: "server" }`, which are read-only.
 - `~serverSchema` — Used by server-side `executeKysely`. CRDT views are read-write, including server-only tables. Base tables are read-only.
-- `~mutationsSchema` — Used by `enqueueEvent` for typed CRDT payloads. Server-only tables stay writable.
+- `~mutationsSchema` — Used by `applyEvent` / `applyEvents` for typed CRDT payloads. Server-only tables stay writable.
 
 ---
 
@@ -997,7 +997,7 @@ that do not drain. Mutating a synced view through `unsafe` can leave undrained i
 ### Writing Events
 
 ```ts
-syncDb.enqueueEvent({
+syncDb.applyEvent({
   type: "item-updated",
   dataset: "_item",
   item_id: itemId,
@@ -1005,11 +1005,15 @@ syncDb.enqueueEvent({
 });
 ```
 
-For server-owned rows whose intermediate states do not need to remain in change history, patch the row and enqueue a
+`applyEvent` and `applyEvents` validate payloads against the schema and apply them in one transaction before returning,
+so the row can be read back immediately. An invalid event throws `CrdtEventValidationError` and nothing is written.
+Each event in an `applyEvents` batch is typed against its own `dataset`.
+
+For server-owned rows whose intermediate states do not need to remain in change history, patch the row and apply a
 full-row snapshot:
 
 ```ts
-syncDb.enqueueSnapshot({
+syncDb.applySnapshot({
   dataset: "_message",
   id: messageId,
   patch: {
@@ -1019,7 +1023,7 @@ syncDb.enqueueSnapshot({
 });
 ```
 
-`enqueueSnapshot` reads the current row when present, applies the patch, and immediately writes an `item-created` event
+`applySnapshot` reads the current row when present, applies the patch, and immediately writes an `item-created` event
 containing the resulting complete row with `tombstone: false`. Existing rows treat that create as an update, and a
 deleted row is restored. When no event for the same dataset and item has a newer timestamp than the snapshot, every
 older event remains in the event log with its non-empty payload replaced by sqlite-sync's no-op marker. This preserves
@@ -1035,17 +1039,17 @@ from changing `id` or `tombstone`, but this path does not run runtime schema val
 create. Use this helper only where replacing the row's change history is intentional. Event listeners receive the new
 event as `item-created`.
 
-To delete from the server, enqueue an `item-deleted` event. The payload is omitted because the tombstone is materialized when the event is applied:
+To delete from the server, apply an `item-deleted` event. The payload is omitted because the tombstone is materialized when the event is applied:
 
 ```ts
-syncDb.enqueueEvent({
+syncDb.applyEvent({
   type: "item-deleted",
   dataset: "_item",
   item_id: itemId,
 });
 ```
 
-Events enqueued on the server are applied immediately and broadcast to all connected clients.
+Applied events are broadcast to all connected clients.
 
 ### Server-only tables
 
@@ -1064,7 +1068,7 @@ const syncDbSchema = defineSyncSchema({
 
 Clients still receive and query the table. On push, the Durable Object drops client events for
 server-only tables (see [Client push validation](#client-push-validation)). Server
-`enqueueEvent`, `applyOwnEvents`, and SQL writes are not filtered.
+`applyEvent`, `applyEvents`, `applySnapshot`, and SQL writes are not filtered.
 
 `writes` and `ai` are separate knobs. A server-side agent can still mutate a server-only table
 unless you also pass `ai: "read-only"`.
@@ -1482,11 +1486,9 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 | `unsafe.execute(params)` | Execute raw SQL without draining intents |
 | `unsafe.executeKysely(factory)` | Execute a typed Kysely query without draining intents |
 | `unsafe.transaction(callback)` | Run a direct SQLite transaction without draining intents |
-| `enqueueEvent(event)` | Write a single CRDT event |
-| `enqueueEvents(events)` | Write multiple CRDT events |
-| `enqueueSnapshot(snapshot)` | Patch a row and write a full create snapshot; older event payloads become no-ops unless a newer event exists |
-| `applyOwnEvents(events)` | Validate, persist, and immediately apply own CRDT events |
-| `createEvent(event)` | Type helper — returns the event as-is |
+| `applyEvent(event)` | Validate and immediately apply a single typed CRDT event |
+| `applyEvents(events)` | Validate and immediately apply a batch of typed CRDT events atomically |
+| `applySnapshot(snapshot)` | Patch a row and write a full create snapshot; older event payloads become no-ops unless a newer event exists |
 | `addEventListener("event-applied", handler)` | Listen for applied events |
 
 **`RemoteHandler`:**
@@ -1499,12 +1501,12 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 
 #### `createAiDbAccess(options)`
 
-Creates AI access to a synced database. Query access is read-only. Mutation access is present only when a CRDT storage is provided. Lives where the storage lives. The schema doc is generated once from the declared schema.
+Creates AI access to a synced database. Query access is read-only. Mutation access is present only when a `storage` mutator is provided. Lives where the storage lives. The schema doc is generated once from the declared schema.
 
 ```ts
 function createAiDbAccess(options: {
   executor: AiDbExecutor; // satisfied by a Cloudflare ServerSyncDb's unsafe executor
-  storage?: Pick<CrdtStorage, "applyOwnEvents">; // enables mutate(input)
+  storage?: AiDbMutator; // { applyEvents(events) }, satisfied by a Cloudflare ServerSyncDb; enables mutate(input)
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext; // overview/app-level notes
   limits?: { maxRows?: number; maxCellChars?: number };

@@ -65,11 +65,11 @@ syncDb.executeKysely((db) => db.updateTable("item").set({ complete: true }).wher
 syncDb.unsafe.execute({ sql: "vacuum", parameters: [] });
 ```
 
-For server-owned rows with disposable intermediate history, `enqueueSnapshot` patches the current row, writes a complete
+For server-owned rows with disposable intermediate history, `applySnapshot` patches the current row, writes a complete
 `item-created` event, and replaces every older non-empty payload for that row with the no-op marker:
 
 ```ts
-syncDb.enqueueSnapshot({
+syncDb.applySnapshot({
   dataset: "_message",
   id: messageId,
   patch: { content: accumulatedText, status: "streaming" },

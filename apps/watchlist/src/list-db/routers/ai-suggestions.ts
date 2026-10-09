@@ -18,7 +18,7 @@ const suggestTags = listProcedure
       throw errors.NOT_FOUND();
     }
 
-    context.syncDb.enqueueEvent({
+    context.syncDb.applyEvent({
       type: "item-updated",
       dataset: "_item",
       item_id: input.itemId,
@@ -35,7 +35,7 @@ const suggestTags = listProcedure
         },
         model,
       });
-      context.syncDb.enqueueEvent({
+      context.syncDb.applyEvent({
         type: "item-updated",
         dataset: "_item",
         item_id: input.itemId,
@@ -45,7 +45,7 @@ const suggestTags = listProcedure
         },
       });
     } catch {
-      context.syncDb.enqueueEvent({
+      context.syncDb.applyEvent({
         type: "item-updated",
         dataset: "_item",
         item_id: input.itemId,

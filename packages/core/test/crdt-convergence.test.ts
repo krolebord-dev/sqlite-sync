@@ -1031,7 +1031,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replicaA.storage });
 
     replicaA.setTime(3_000);
-    mutator.enqueueSnapshot({
+    mutator.applySnapshot({
       dataset: BASE_TABLE,
       id: "todo-1",
       patch: { title: "Almost complete" },
@@ -1055,7 +1055,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     `);
 
     replicaA.setTime(4_000);
-    mutator.enqueueSnapshot({
+    mutator.applySnapshot({
       dataset: BASE_TABLE,
       id: "todo-1",
       patch: { title: "Complete", completed: true },
@@ -1119,11 +1119,36 @@ describe("CRDT convergence for parallel entity edits", () => {
     });
   });
 
+  it("applies mutator events before returning", async () => {
+    const replica = await createReplica("node-a", 1_000);
+    const mutator = createCrdtStorageMutator<{ [CRDT_TABLE]: TodoRow }>({ storage: replica.storage });
+
+    mutator.applyEvent({
+      type: "item-created",
+      dataset: CRDT_TABLE,
+      item_id: "todo-1",
+      payload: { id: "todo-1", title: "First", completed: false },
+    });
+    expect(replica.getTodo("todo-1")).toEqual({ id: "todo-1", title: "First", completed: false, tombstone: false });
+
+    mutator.applyEvents([
+      { type: "item-updated", dataset: CRDT_TABLE, item_id: "todo-1", payload: { completed: true } },
+      {
+        type: "item-created",
+        dataset: CRDT_TABLE,
+        item_id: "todo-2",
+        payload: { id: "todo-2", title: "Second", completed: false },
+      },
+    ]);
+    expect(replica.getTodo("todo-1")).toMatchObject({ completed: true });
+    expect(replica.getTodo("todo-2")).toMatchObject({ title: "Second" });
+  });
+
   it("creates a missing row from a complete snapshot patch", async () => {
     const replica = await createReplica("node-a", 1_000);
     const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replica.storage });
 
-    mutator.enqueueSnapshot({
+    mutator.applySnapshot({
       dataset: BASE_TABLE,
       id: "todo-1",
       patch: { title: "Created from snapshot", completed: false },
@@ -1148,7 +1173,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     const mutator = createCrdtStorageMutator<{ [BASE_TABLE]: TodoRow }>({ storage: replica.storage });
 
     expect(() =>
-      mutator.enqueueSnapshot({
+      mutator.applySnapshot({
         dataset: BASE_TABLE,
         id: "todo-1",
         patch: { title: "Missing completed" },
@@ -1157,7 +1182,7 @@ describe("CRDT convergence for parallel entity edits", () => {
 
     expect(replica.getPersistedEvents()).toEqual([]);
 
-    mutator.enqueueSnapshot({
+    mutator.applySnapshot({
       dataset: BASE_TABLE,
       id: "todo-1",
       patch: { title: "Complete", completed: true },

@@ -1,11 +1,4 @@
-import {
-  type CrdtEventType,
-  CrdtEventValidationError,
-  type CrdtStorage,
-  generateId,
-  type OwnCrdtEvent,
-  type SyncDbSchema,
-} from "@sqlite-sync/core";
+import { type CrdtEventType, CrdtEventValidationError, generateId, type SyncDbSchema } from "@sqlite-sync/core";
 import { resolveAiPolicy } from "./policy";
 import { createQueryGuard, QueryGuardError } from "./query-guard";
 import { createSchemaDoc, type SchemaDocContext } from "./schema-doc";
@@ -53,6 +46,21 @@ export type AiMutationEvent =
       payload?: Record<string, unknown>;
     };
 
+export type AiDbMutatorEvent = {
+  type: CrdtEventType;
+  dataset: string;
+  item_id: string;
+  payload?: Record<string, unknown>;
+};
+
+/**
+ * Minimal mutator contract for AI database access. A Cloudflare `ServerSyncDb` satisfies it.
+ * Declared as a method so schema-typed `applyEvents` implementations stay assignable.
+ */
+export type AiDbMutator = {
+  applyEvents(events: AiDbMutatorEvent[]): void;
+};
+
 export type AiMutationInput = {
   events: AiMutationEvent[];
 };
@@ -77,7 +85,7 @@ export type AiMutationResult =
  * `{ ai: "hidden" }` on a table. Until then the whole database file is in scope, so do not
  * put secret data in the same file.
  *
- * `mutate` exists only when `createAiDbAccess` gets a CRDT storage. Mutations are CRDT
+ * `mutate` exists only when `createAiDbAccess` gets a `storage` mutator. Mutations are CRDT
  * events on the normal own-event path, never direct SQL writes. Tables marked read-only or
  * hidden are rejected.
  */
@@ -97,7 +105,7 @@ function toBase64(bytes: Uint8Array): string {
 
 export function createAiDbAccess(opts: {
   executor: AiDbExecutor;
-  storage?: Pick<CrdtStorage, "applyOwnEvents">;
+  storage?: AiDbMutator;
   syncDbSchema: SyncDbSchema;
   context?: SchemaDocContext;
   limits?: { maxRows?: number; maxCellChars?: number };
@@ -159,7 +167,7 @@ export function createAiDbAccess(opts: {
     access.mutate = (input) => {
       const errors: string[] = [];
       const createdIds: string[] = [];
-      const events: OwnCrdtEvent[] = [];
+      const events: AiDbMutatorEvent[] = [];
 
       for (const [index, event] of input.events.entries()) {
         const tableAccess = policy.tableAccess(event.dataset);
@@ -190,7 +198,7 @@ export function createAiDbAccess(opts: {
             type: "item-created",
             dataset: event.dataset,
             item_id: id,
-            payload: JSON.stringify({ ...payload, id }),
+            payload: { ...payload, id },
           });
           continue;
         }
@@ -199,7 +207,7 @@ export function createAiDbAccess(opts: {
           type: event.type,
           dataset: event.dataset,
           item_id: event.item_id,
-          payload: JSON.stringify(event.payload ?? {}),
+          payload: event.payload ?? {},
         });
       }
 
@@ -208,7 +216,7 @@ export function createAiDbAccess(opts: {
       }
 
       try {
-        storage.applyOwnEvents(events);
+        storage.applyEvents(events);
       } catch (error) {
         if (error instanceof CrdtEventValidationError) {
           return { error: error.message, errors: error.errors };
