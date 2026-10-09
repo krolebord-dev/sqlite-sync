@@ -206,6 +206,18 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     globalThis.location?.reload();
   });
 
+  // A worker elected after this tab's snapshot may have wiped the database the snapshot came from.
+  const reloadIfStorageReplaced = (storageGeneration: string) => {
+    if (storageGeneration !== workerClientSnapshot.storageGeneration) {
+      storageReplacedSubscription.unsubscribe();
+      globalThis.location?.reload();
+    }
+  };
+  const storageReplacedSubscription = workerClient.subscribe("state-changed", (event) => {
+    reloadIfStorageReplaced(event.payload.storageGeneration);
+  });
+  reloadIfStorageReplaced(workerClient.getStorageGeneration());
+
   const sync = () => {
     workerClient.sync().catch((error) => console.warn("Failed to start sync", error));
   };
@@ -238,6 +250,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
     globalThis.removeEventListener?.("online", sync);
     reloadRequestedSubscription.unsubscribe();
+    storageReplacedSubscription.unsubscribe();
     clientLockRelease.resolve();
     await tabRemoteSource.dispose();
     broadcastChannels.requests.close();

@@ -16,7 +16,6 @@ import type {
   WorkerRequestMethod,
   WorkerResponseMessage,
   WorkerRpc,
-  WorkerState,
 } from "./worker-common";
 import { isWorkerErrorResponseMessage, isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
 
@@ -116,10 +115,11 @@ export const createWorkerDbClient = async ({
   // worker to send its current state.
   rpc.postState().catch(noop);
 
-  let workerState = await statePromise;
+  let { state: workerState, storageGeneration } = await statePromise;
 
   eventTarget.addEventListener("state-changed", (event) => {
     workerState = event.payload.state;
+    storageGeneration = event.payload.storageGeneration;
   });
 
   const dispose = () => {
@@ -135,15 +135,16 @@ export const createWorkerDbClient = async ({
     ...rpc,
     subscribe: eventTarget.addEventListener,
     getState: () => workerState,
+    getStorageGeneration: () => storageGeneration,
     dispose,
   };
 };
 
 function awaitWorkerState(eventTarget: TypedEventTarget<NotificationEvents>) {
-  const promise = createDeferredPromise<WorkerState>({ timeout: 15_000 });
+  const promise = createDeferredPromise<NotificationEvents["state-changed"]>({ timeout: 15_000 });
 
   const subscription = eventTarget.addEventListener("state-changed", (event) => {
-    promise.resolve(event.payload.state);
+    promise.resolve(event.payload);
     subscription.unsubscribe();
   });
 

@@ -794,6 +794,7 @@ Notes:
 - This is a recovery/reload flow, not a hot runtime reset — pending in-memory tab events are not preserved.
 - The returned promise may never settle in the caller: the page typically unloads first.
 - For `clean: true`, the worker durably records a reset request epoch (in IndexedDB) before broadcasting. Whichever worker wins the post-reload election applies the wipe exactly once; the request expires after 10 minutes if the reload never happens.
+- Each persisted worker DB has a storage generation id, and a wiped DB gets a new one. A tab that sees a different id from the worker serving it reloads, because its in-memory copy came from a DB that no longer exists. This handles the case where a newly elected worker wiped the DB on startup.
 
 ### Breaking Storage Changes
 
@@ -807,7 +808,7 @@ await startDbWorker({
 });
 ```
 
-The worker durably stores the combined version (app version + internal library storage version). When the elected worker starts with a version that does not match the stored one, it wipes the local DB during initialization and records the new version after a successful init. Clients on the old version are unaffected until they load the new code.
+The worker durably stores the combined version (app version + internal library storage version). When the elected worker starts with a version that does not match the stored one, it wipes the local DB during initialization and records the new version after a successful init. Clients on the old version are unaffected until they load the new code. Once a worker running the new code is elected and wipes the DB, tabs still open on the previous DB reload (see [Reload and Recovery](#reload-and-recovery)).
 
 ---
 

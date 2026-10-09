@@ -17,7 +17,7 @@ import {
 import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
-import { createDeferredPromise } from "../utils";
+import { createDeferredPromise, generateId } from "../utils";
 import { runWorkerEventLogGc } from "./event-log-gc";
 import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
 import { createStorageVersionStore } from "./storage-version";
@@ -127,6 +127,10 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   const pullSyncId = kvStore.createNumberStoredValue("pull-sync-id", -1);
   const pushSyncId = kvStore.createNumberStoredValue("push-sync-id", -1);
   const eventHlcAccumulator = kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", "");
+  const storageGeneration = kvStore.createStringStoredValue("storage-generation", "");
+  if (!storageGeneration.current) {
+    storageGeneration.current = generateId();
+  }
 
   // Record the applied reset epoch / storage version only after the wiped DB
   // initialized successfully, so a failed init can be retried by a later
@@ -188,6 +192,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     broadcastNotification({
       notificationType: "state-changed",
       state: remoteSource.getState(),
+      storageGeneration: storageGeneration.current,
     });
   };
   const stateChangedSubscription = remoteSource.addEventListener("state-changed", () => {
@@ -221,6 +226,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
         file,
         syncId: appliedSyncId,
         schemaVersion: migrator.currentSchemaVersion,
+        storageGeneration: storageGeneration.current,
       };
     },
     importData: createImportData({

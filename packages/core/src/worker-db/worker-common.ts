@@ -22,6 +22,8 @@ export type WorkerNotificationMessage =
   | {
       notificationType: "state-changed";
       state: WorkerState;
+      /** Id of the worker's persisted database. A wiped database gets a new one. */
+      storageGeneration: string;
     }
   | {
       notificationType: "reload-requested";
@@ -48,6 +50,7 @@ export type GetSnapshotResponse = {
   file: Uint8Array<ArrayBufferLike>;
   syncId: number;
   schemaVersion: number;
+  storageGeneration: string;
 };
 
 export type EventsPullResponse = {
