@@ -99,14 +99,16 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     sqlite3,
   });
 
+  // Rollback journal, not WAL: transactions span main and the attached worker DB, and only a
+  // rollback journal (via a super-journal) commits multiple files atomically.
   db.execute("PRAGMA locking_mode=exclusive", { loggerLevel: "system" });
-  db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
-  db.execute("PRAGMA synchronous=NORMAL", { loggerLevel: "system" });
+  db.execute("PRAGMA journal_mode=PERSIST", { loggerLevel: "system" });
+  db.execute("PRAGMA synchronous=FULL", { loggerLevel: "system" });
 
   db.execute(`ATTACH DATABASE '/${config.dbId}-worker.db' as worker`, { loggerLevel: "system" });
   db.execute("PRAGMA worker.locking_mode=exclusive", { loggerLevel: "system" });
-  db.execute("PRAGMA worker.journal_mode=WAL", { loggerLevel: "system" });
-  db.execute("PRAGMA worker.synchronous=NORMAL", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.journal_mode=PERSIST", { loggerLevel: "system" });
+  db.execute("PRAGMA worker.synchronous=FULL", { loggerLevel: "system" });
 
   const { kvStore } = applyWorkerDbSchema(db);
 
@@ -219,11 +221,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     execute: (query) => db.execute(query),
     getSnapshot: () => {
       const appliedSyncId = getMaxSyncId(db, "pending");
-      db.execute("PRAGMA journal_mode=off", { loggerLevel: "system" });
-      const file = db.createSnapshot();
-      db.execute("PRAGMA journal_mode=WAL", { loggerLevel: "system" });
       return {
-        file,
+        file: db.createSnapshot(),
         syncId: appliedSyncId,
         schemaVersion: migrator.currentSchemaVersion,
         storageGeneration: storageGeneration.current,
