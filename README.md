@@ -86,7 +86,6 @@ export async function initDb() {
   return createSyncedDb({
     dbId: "app-db",
     worker,
-    workerProps: undefined,
     syncDbSchema,
   });
 }
@@ -174,16 +173,23 @@ Current query runner rules:
 `@sqlite-sync/cloudflare` provides a Durable Object adapter for deployments that need remote sync.
 
 ```ts
-// apps/server/event-log-server.ts
+// event-log-server.ts
 import { durableObjectAdapter, type RemoteHandler } from "@sqlite-sync/cloudflare";
 import { type Connection, routePartykitRequest, Server } from "partyserver";
 import { syncDbSchema } from "../src/db-schema";
 
 export class EventLogServer extends Server<Env> {
+  static options = { hibernate: true };
   private remoteHandler!: RemoteHandler;
 
-  onStart() {
-    const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Answers client heartbeat pings without waking the hibernating Durable Object.
+    durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
+  }
+
+  async onStart() {
+    const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       storage: this.ctx.storage,
       nodeId: this.ctx.id.toString(),
       syncDbSchema,
@@ -204,7 +210,9 @@ export class EventLogServer extends Server<Env> {
 
 export default {
   fetch: (request: Request, env: Env) =>
-    routePartykitRequest(request, env).then((res) => res || new Response("Not Found", { status: 404 })),
+    routePartykitRequest(request, env).then(
+      (res) => res || new Response("Not Found", { status: 404 }),
+    ),
 } satisfies ExportedHandler<Env>;
 ```
 

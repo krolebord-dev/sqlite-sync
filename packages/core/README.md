@@ -5,7 +5,7 @@ Core sync engine for [sqlite-sync](https://github.com/krolebord-dev/sqlite-sync)
 This package provides:
 
 - `createSyncedDb()` for client orchestration (worker attach, snapshot hydration, sync state).
-- The schema builder (`createSyncDbSchema`) and migrations (`createMigrations`).
+- Declarative synced tables (`defineSyncSchema`, `t.table`) and migrations (`createMigrations`).
 - Live query primitives (`db.createLiveQuery(...)`), typed through [Kysely](https://kysely.dev/).
 - CRDT primitives with Last-Write-Wins per-field replication and HLC timestamps.
 - The worker runtime (`@sqlite-sync/core/worker`) and server protocol types (`@sqlite-sync/core/server`).
@@ -21,19 +21,12 @@ For React bindings, add [`@sqlite-sync/react`](https://www.npmjs.com/package/@sq
 ## Quick start
 
 ```ts
-import { createMigrations, createSyncDbSchema, createSyncedDb } from "@sqlite-sync/core";
-
-type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-  tombstone?: boolean;
-};
+import { createMigrations, createSyncedDb, defineSyncSchema, t } from "@sqlite-sync/core";
 
 const migrations = createMigrations((b) => ({
   0: [
-    b.createTable("_todo", (t) =>
-      t
+    b.createTable("_todo", (table) =>
+      table
         .addColumn("id", "text", (col) => col.primaryKey().notNull())
         .addColumn("title", "text", (col) => col.notNull())
         .addColumn("completed", "boolean", (col) => col.notNull().defaultTo(false))
@@ -42,19 +35,22 @@ const migrations = createMigrations((b) => ({
   ],
 }));
 
-export const syncDbSchema = createSyncDbSchema({ migrations })
-  .addTable<Todo>()
-  .withConfig({ baseTableName: "_todo", crdtTableName: "todo" })
-  .build();
+// Queryable as "todo", stored in "_todo". `id` and `tombstone` are added automatically.
+export const syncDbSchema = defineSyncSchema({
+  tables: {
+    todo: t.table({
+      title: t.text(),
+      completed: t.boolean().default(false),
+    }),
+  },
+  migrations,
+});
+
+export type Todo = typeof syncDbSchema.tables.todo.$row;
 
 const worker = new Worker(new URL("./db-worker.ts", import.meta.url), { type: "module" });
 
-export const db = await createSyncedDb({
-  dbId: "app-db",
-  worker,
-  workerProps: undefined,
-  syncDbSchema,
-});
+export const db = await createSyncedDb({ dbId: "app-db", worker, syncDbSchema });
 ```
 
 Start the worker (remote sync optional):

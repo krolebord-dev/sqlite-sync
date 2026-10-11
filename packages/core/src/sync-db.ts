@@ -24,9 +24,8 @@ import { createBroadcastChannels, syncDbClientLockName } from "./worker-db/worke
 export type SyncedDbOptions<Database, Props = undefined> = {
   dbId: string;
   worker: Worker;
-  workerProps: Props;
   syncDbSchema: SyncDbSchema<Database>;
-};
+} & (undefined extends Props ? { workerProps?: Props } : { workerProps: Props });
 
 /** SQL execution that participates in CRDT intent draining. */
 export type SyncedDbSqlExecutor<Database> = {

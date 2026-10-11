@@ -83,16 +83,7 @@ const syncDbSchema = defineSyncSchema({
 });
 ```
 
-What each level enforces:
-
 - `"read-only"` keeps the table in the schema doc, labelled read-only, and makes `mutateDb` reject events for it.
-- `"hidden"` removes it from the doc and makes `queryDb` reject any statement that reads it. Enforcement works off the root pages a compiled statement opens, so views, aliases, CTEs, subqueries and quoting tricks all resolve to the same check.
+- `"hidden"` removes it from the doc and makes `queryDb` reject any statement that reads it.
 
-Access is table-level. There is no per-column setting. SQLite bytecode names tables, not columns, so a column cannot be hidden from reads. Blocking writes to a required column would also stop the agent from creating rows. Put data the agent must not touch in its own table.
-
-Hiding a table has two side effects worth knowing:
-
-- Reads switch to an allow-list of the remaining base tables, so any other table in the same database file (including non-synced tables you created yourself) becomes unreadable too.
-- `change_history` is dropped from the doc and denied. That view reads the raw event log, which holds every dataset's payloads, so it cannot be filtered per table.
-
-Names and columns of hidden tables can still show up through SQLite schema introspection in principle. The guard rejects `pragma_*` table-valued functions and reads of `sqlite_schema` while restricted, but treat hiding as row-level protection, not proof the table does not exist.
+Access is table-level. Hiding a table also makes internal sync tables and any non-synced tables in the same database file unreadable. See [AI agent tools](https://github.com/krolebord-dev/sqlite-sync/blob/main/docs.md#limiting-what-an-agent-may-touch) for how enforcement works and its limits.

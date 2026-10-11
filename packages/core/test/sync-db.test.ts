@@ -131,7 +131,6 @@ describe("SyncedDb state", () => {
       syncedDb = await createSyncedDb({
         dbId,
         worker,
-        workerProps: undefined,
         syncDbSchema: schema,
       });
       expect(syncedDb.state.sync()).toBeUndefined();
@@ -208,7 +207,7 @@ describe("SyncedDb storage generation", () => {
       terminate: vi.fn(),
     }) satisfies Worker;
 
-    const syncedDb = await createSyncedDb({ dbId, worker, workerProps: undefined, syncDbSchema: schema });
+    const syncedDb = await createSyncedDb({ dbId, worker, syncDbSchema: schema });
 
     return {
       reload,

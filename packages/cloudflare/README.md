@@ -28,8 +28,8 @@ export class EventLogServer extends Server<Env> {
     durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
   }
 
-  onStart() {
-    const { remoteHandler } = durableObjectAdapter.createCrdtStorage({
+  async onStart() {
+    const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       storage: this.ctx.storage,
       nodeId: this.ctx.id.toString(),
       syncDbSchema,
