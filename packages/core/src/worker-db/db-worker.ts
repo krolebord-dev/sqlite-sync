@@ -76,12 +76,15 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     dbId: config.dbId,
     appStorageVersion: opts.storageVersion,
   });
-  const [pendingReset, isVersionMismatch] = await Promise.all([
+  const [pendingReset, versionStatus] = await Promise.all([
     resetState.resolvePendingReset(),
-    storageVersion.isVersionMismatch(),
+    storageVersion.getVersionStatus(),
   ]);
+  const isVersionMismatch = versionStatus !== "current";
 
-  if (isVersionMismatch) {
+  if (versionStatus === "missing") {
+    logger("worker", `Initializing local DB storage version ${storageVersion.currentVersion}`, "info");
+  } else if (versionStatus === "outdated") {
     logger("worker", `Storage version mismatch — resetting local DB to ${storageVersion.currentVersion}`, "warning");
   }
 

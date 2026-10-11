@@ -38,9 +38,12 @@ export function createStorageVersionStore({ store, dbId, appStorageVersion }: St
 
   return {
     currentVersion,
-    async isVersionMismatch(): Promise<boolean> {
+    async getVersionStatus(): Promise<"current" | "missing" | "outdated"> {
       const storedVersion = await store.get<string>(key);
-      return storedVersion !== currentVersion;
+      if (storedVersion === undefined) {
+        return "missing";
+      }
+      return storedVersion === currentVersion ? "current" : "outdated";
     },
     /**
      * Record the current version. Must be called only after the worker has

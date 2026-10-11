@@ -30,35 +30,35 @@ describe("formatStorageVersion", () => {
 });
 
 describe("storage version store", () => {
-  it("reports a mismatch when no version is stored (first run or pre-versioned DB)", async () => {
+  it("reports a missing version when none is stored (first run or pre-versioned DB)", async () => {
     const store = createMemoryStore();
     const storageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "1" });
 
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(true);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("missing");
   });
 
-  it("reports no mismatch when the stored version matches", async () => {
+  it("reports the version as current when the stored version matches", async () => {
     const store = createMemoryStore();
     store.map.set(versionKey, formatStorageVersion("1"));
     const storageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "1" });
 
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(false);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("current");
   });
 
-  it("reports a mismatch when the app version changes", async () => {
+  it("reports an outdated version when the app version changes", async () => {
     const store = createMemoryStore();
     store.map.set(versionKey, formatStorageVersion("1"));
     const storageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "2" });
 
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(true);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("outdated");
   });
 
-  it("reports a mismatch when the lib version changes", async () => {
+  it("reports an outdated version when the lib version changes", async () => {
     const store = createMemoryStore();
     store.map.set(versionKey, `lib-v${LIB_STORAGE_VERSION - 1}:app-1`);
     const storageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "1" });
 
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(true);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("outdated");
   });
 
   it("stores the combined current version on markCurrentVersionApplied", async () => {
@@ -68,17 +68,17 @@ describe("storage version store", () => {
     await storageVersion.markCurrentVersionApplied();
 
     expect(store.map.get(versionKey)).toBe(formatStorageVersion("2"));
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(false);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("current");
   });
 
   it("lets a later elected worker retry the reset if init failed before recording the version", async () => {
     const store = createMemoryStore();
     const storageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "2" });
-    await expect(storageVersion.isVersionMismatch()).resolves.toBe(true);
+    await expect(storageVersion.getVersionStatus()).resolves.toBe("missing");
     // Init fails — markCurrentVersionApplied is never called.
 
     const retryStorageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "2" });
-    await expect(retryStorageVersion.isVersionMismatch()).resolves.toBe(true);
+    await expect(retryStorageVersion.getVersionStatus()).resolves.toBe("missing");
   });
 
   it("does not wipe again after a later election with the same version", async () => {
@@ -87,7 +87,7 @@ describe("storage version store", () => {
     await storageVersion.markCurrentVersionApplied();
 
     const laterStorageVersion = createStorageVersionStore({ store, dbId: DB_ID, appStorageVersion: "2" });
-    await expect(laterStorageVersion.isVersionMismatch()).resolves.toBe(false);
+    await expect(laterStorageVersion.getVersionStatus()).resolves.toBe("current");
   });
 
   it("scopes versions by dbId", async () => {
@@ -96,7 +96,7 @@ describe("storage version store", () => {
     await dbA.markCurrentVersionApplied();
 
     const dbB = createStorageVersionStore({ store, dbId: "db-b", appStorageVersion: "1" });
-    await expect(dbB.isVersionMismatch()).resolves.toBe(true);
-    await expect(dbA.isVersionMismatch()).resolves.toBe(false);
+    await expect(dbB.getVersionStatus()).resolves.toBe("missing");
+    await expect(dbA.getVersionStatus()).resolves.toBe("current");
   });
 });
