@@ -317,15 +317,11 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     return <TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>>(
       factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>,
     ): TypedStatement<TParams, TResult> => {
-      const query = factory(dummyKysely, (key) => key as any).compile();
+      const query = compileKyselyStatement(factory);
       const statement = this.prepare<SqlValue[], TResult>(query.sql, opts);
 
       return {
-        execute: (parameters) => {
-          const params = query.parameters.map((param) => parameters[param as keyof TParams]);
-          const result = statement.execute(params as SqlValue[]);
-          return result;
-        },
+        execute: (parameters) => statement.execute(query.bindParameters(parameters) as SqlValue[]),
       };
     };
   }
@@ -471,3 +467,23 @@ export type KyselyStatementFactory<
 export type KyselyQueryFactory<TDatabase, TQuery extends Compilable<TResult>, TResult = QueryBuilderOutput<TQuery>> = (
   kysely: Kysely<TDatabase>,
 ) => TQuery;
+
+export function compileKyselyStatement<TParams extends Record<string, unknown>, TDatabase>(
+  factory: KyselyStatementFactory<TParams, TDatabase, Compilable<unknown>>,
+) {
+  const parameterKeys = new Map<unknown, keyof TParams>();
+  const query = factory(dummyKysely, (key) => {
+    const token = {};
+    parameterKeys.set(token, key);
+    return token as TParams[typeof key];
+  }).compile();
+
+  return {
+    sql: query.sql,
+    bindParameters: (parameters: TParams) =>
+      query.parameters.map((value) => {
+        const key = parameterKeys.get(value);
+        return key === undefined ? value : parameters[key];
+      }),
+  };
+}

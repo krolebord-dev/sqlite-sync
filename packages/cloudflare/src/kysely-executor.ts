@@ -1,5 +1,9 @@
 import { dummyKysely } from "@sqlite-sync/core";
-import type { InternalSQLiteWrapper, KyselyStatementFactory } from "@sqlite-sync/core/internal";
+import {
+  compileKyselyStatement,
+  type InternalSQLiteWrapper,
+  type KyselyStatementFactory,
+} from "@sqlite-sync/core/internal";
 import type { Compilable, Kysely } from "kysely";
 
 type ExecuteParams = {
@@ -84,13 +88,11 @@ export function createCrdtStorageDb(executor: KyselyExecutor<any>): InternalSQLi
       params: TParams,
       factory: KyselyStatementFactory<TParams, any, TQuery, TResult>,
     ) => {
-      const query = factory(dummyKysely as any, (key) => key as any).compile();
-      const parameters = query.parameters.map((param) => params[param as keyof TParams]);
-      const result = executor.execute<TResult>({
+      const query = compileKyselyStatement(factory);
+      return executor.execute<TResult>({
         sql: query.sql,
-        parameters,
-      });
-      return result.rows;
+        parameters: query.bindParameters(params),
+      }).rows;
     },
   };
 

@@ -12,4 +12,4 @@ export {
   createCrdtViewStatements,
   drainCrdtChangeIntents,
 } from "./sqlite-crdt/make-crdt-table";
-export type { InternalSQLiteWrapper, KyselyStatementFactory } from "./sqlite-db-wrapper";
+export { compileKyselyStatement, type InternalSQLiteWrapper, type KyselyStatementFactory } from "./sqlite-db-wrapper";
