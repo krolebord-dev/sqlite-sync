@@ -19,6 +19,7 @@ import type {
 } from "./sqlite-db-wrapper";
 import { createDeferredPromise, generateId } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
+import { acquireReplicaLock } from "./worker-db/replica-lock";
 import { createBroadcastChannels, syncDbClientLockName } from "./worker-db/worker-common";
 
 export type SyncedDbOptions<Database, Props = undefined> = {
@@ -143,183 +144,207 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
   const hlcCounter = new HLCCounter(tabId, () => Date.now());
 
-  const workerClientSnapshot = await workerClient.getSnapshot();
-  const reactiveDb = await createSQLiteReactiveDb<Database>({
-    snapshot: workerClientSnapshot.file,
-    logger: defaultLogger,
-  });
-
-  const memoryDbMigrator: SyncDbMigrator = {
-    currentSchemaVersion: workerClientSnapshot.schemaVersion,
-    latestSchemaVersion: workerClientSnapshot.schemaVersion,
-    migrateDbToLatest: () => {
-      throw new Error("Memory DB migrations are not implemented");
-    },
-    migrateEvent: (event, targetVersion) => {
-      if (event.schema_version === targetVersion) {
-        return event;
-      }
-      throw new Error("Memory DB migrations are not implemented");
-    },
-    migrateEvents: (events) => events,
-  };
-  const { crdtStorage } = await createMemoryDb({
-    nodeId: tabId,
-    migrator: memoryDbMigrator,
-    reactiveDb: reactiveDb,
-    hlcCounter,
-    crdtTables: options.syncDbSchema.tablesConfig,
-    syncDbSchema: options.syncDbSchema,
-  });
-
-  const pullSyncId = createStoredValue({
-    initialValue: workerClientSnapshot.syncId,
-  });
-  const pushSyncId = createStoredValue({
-    initialValue: 0,
-  });
-  const tabRemoteSource = createCrdtSyncRemoteSource({
-    bufferSize: 500,
-    pullSyncId,
-    pushSyncId,
-    storage: crdtStorage,
-    nodeId: tabId,
-    migrator: memoryDbMigrator,
-    remoteFactory: ({ onEventsAvailable }) => {
-      const subscription = workerClient.subscribe("new-event-chunk-applied", (event) => {
-        onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteEventHlcSum: event.payload.eventHlcSum });
-      });
-
-      return {
-        pullEvents: (request) => workerClient.pullEvents(request),
-        pushEvents: (request) => workerClient.pushTabEvents(request),
-        disconnect: () => {
-          subscription.unsubscribe();
-        },
-      };
-    },
-  });
-  tabRemoteSource.goOnline();
-
-  const reloadRequestedSubscription = workerClient.subscribe("reload-requested", () => {
-    globalThis.location?.reload();
-  });
-
-  // A worker elected after this tab's snapshot may have wiped the database the snapshot came from.
-  const reloadIfStorageReplaced = (storageGeneration: string) => {
-    if (storageGeneration !== workerClientSnapshot.storageGeneration) {
-      storageReplacedSubscription.unsubscribe();
-      globalThis.location?.reload();
-    }
-  };
-  const storageReplacedSubscription = workerClient.subscribe("state-changed", (event) => {
-    reloadIfStorageReplaced(event.payload.storageGeneration);
-  });
-  reloadIfStorageReplaced(workerClient.getStorageGeneration());
-
-  const sync = () => {
-    workerClient.sync().catch((error) => console.warn("Failed to start sync", error));
-  };
-
-  // Mobile browsers suspend background pages, and the socket can reconnect or die unnoticed meanwhile.
-  const syncWhenVisible = () => {
-    if (globalThis.document?.visibilityState === "visible") {
-      sync();
-    }
-  };
-  // Browsers can keep a socket open long after the network is gone.
-  const dropConnection = () => {
-    workerClient.dropConnection().catch((error) => console.warn("Failed to drop connection", error));
-  };
-  globalThis.document?.addEventListener("visibilitychange", syncWhenVisible);
-  globalThis.addEventListener?.("online", sync);
-  globalThis.addEventListener?.("offline", dropConnection);
-
-  perf.logEnd("createSyncedDb", "initialized", "info");
-
-  const exportData = createExportData({
-    reactiveDb,
-    tablesConfig: options.syncDbSchema.tablesConfig,
-    schemaVersion: workerClientSnapshot.schemaVersion,
-  });
-  const importData = (data: SyncedDbExport, opts?: ImportDataOptions) => workerClient.importData(data, opts);
-
-  let isDisposed = false;
+  const releaseReplicaLock = await acquireReplicaLock({ dbId: options.dbId });
+  let disposeReactiveDb: (() => void) | undefined;
+  let disposeRemoteSource: (() => Promise<void>) | undefined;
+  const cleanupCallbacks: (() => void)[] = [];
   let unregisterDevtools: (() => void) | undefined;
+  let isDisposed = false;
   const dispose = async () => {
     if (isDisposed) return;
     isDisposed = true;
 
     unregisterDevtools?.();
-    globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
-    globalThis.removeEventListener?.("online", sync);
-    globalThis.removeEventListener?.("offline", dropConnection);
-    reloadRequestedSubscription.unsubscribe();
-    storageReplacedSubscription.unsubscribe();
+    for (const cleanup of cleanupCallbacks) {
+      cleanup();
+    }
     clientLockRelease.resolve();
-    await tabRemoteSource.dispose();
-    broadcastChannels.requests.close();
-    broadcastChannels.responses.close();
-    workerClient.dispose();
-    reactiveDb.dispose();
+    try {
+      await disposeRemoteSource?.();
+    } finally {
+      broadcastChannels.requests.close();
+      broadcastChannels.responses.close();
+      workerClient.dispose();
+      try {
+        disposeReactiveDb?.();
+      } finally {
+        await releaseReplicaLock();
+      }
+    }
   };
 
-  const syncedDb = {
-    db: createSyncedDbDatabase(reactiveDb),
-    state: {
-      getState: workerClient.getState.bind(workerClient),
-      subscribe: (onChange: () => void) => {
-        const { unsubscribe } = workerClient.subscribe("state-changed", onChange);
-        return unsubscribe;
+  try {
+    const workerClientSnapshot = await workerClient.getSnapshot();
+    const reactiveDb = await createSQLiteReactiveDb<Database>({
+      snapshot: workerClientSnapshot.file,
+      logger: defaultLogger,
+    });
+    disposeReactiveDb = () => reactiveDb.dispose();
+
+    const memoryDbMigrator: SyncDbMigrator = {
+      currentSchemaVersion: workerClientSnapshot.schemaVersion,
+      latestSchemaVersion: workerClientSnapshot.schemaVersion,
+      migrateDbToLatest: () => {
+        throw new Error("Memory DB migrations are not implemented");
       },
-      goOnline: workerClient.goOnline.bind(workerClient),
-      goOffline: workerClient.goOffline.bind(workerClient),
-      sync,
-    },
-    /**
-     * Ask the elected worker to broadcast a page reload to all tabs for this dbId.
-     *
-     * With `clean: true` the worker durably records a reset request epoch before
-     * broadcasting, so the worker elected on the next startup initializes with
-     * `clearOnInit: true` and wipes the persisted DB. Destructive — use as a
-     * recovery path when the durable worker DB may be de-synced.
-     *
-     * Pending in-memory tab events are not preserved, and the returned promise
-     * may never settle in the caller — the page typically unloads first.
-     */
-    requestReload: async (options: { clean: boolean }) => {
-      await workerClient.requestReload(options);
-      // Primary path: this tab receives the worker's "reload-requested" broadcast
-      // like every other tab. Fallback in case the broadcast is missed — in the
-      // normal case the page is already unloading and this timeout never fires.
-      setTimeout(() => globalThis.location?.reload(), 250);
-    },
-    subscribe: workerClient.subscribe,
-    exportData,
-    importData,
-    dispose,
-    _internal: {
-      executeAsync: workerClient.execute.bind(workerClient),
-      getMemoryQueryTables: reactiveDb.getTablesUsed.bind(reactiveDb),
-      getSharedLiveQueriesSnapshot: reactiveDb.getSharedLiveQueriesSnapshot.bind(reactiveDb),
-      crdtTableNames: options.syncDbSchema.tablesConfig.map((table) => table.crdtTableName),
-      crdtTablesConfig: options.syncDbSchema.tablesConfig,
-      tables: options.syncDbSchema.tables,
+      migrateEvent: (event, targetVersion) => {
+        if (event.schema_version === targetVersion) {
+          return event;
+        }
+        throw new Error("Memory DB migrations are not implemented");
+      },
+      migrateEvents: (events) => events,
+    };
+    const { crdtStorage } = await createMemoryDb({
+      nodeId: tabId,
+      migrator: memoryDbMigrator,
+      reactiveDb: reactiveDb,
+      hlcCounter,
+      crdtTables: options.syncDbSchema.tablesConfig,
+      syncDbSchema: options.syncDbSchema,
+    });
+
+    const pullSyncId = createStoredValue({
+      initialValue: workerClientSnapshot.syncId,
+    });
+    const pushSyncId = createStoredValue({
+      initialValue: 0,
+    });
+    const tabRemoteSource = createCrdtSyncRemoteSource({
+      bufferSize: 500,
+      pullSyncId,
+      pushSyncId,
+      storage: crdtStorage,
+      nodeId: tabId,
+      migrator: memoryDbMigrator,
+      remoteFactory: ({ onEventsAvailable }) => {
+        const subscription = workerClient.subscribe("new-event-chunk-applied", (event) => {
+          onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteEventHlcSum: event.payload.eventHlcSum });
+        });
+
+        return {
+          pullEvents: (request) => workerClient.pullEvents(request),
+          pushEvents: (request) => workerClient.pushTabEvents(request),
+          disconnect: () => {
+            subscription.unsubscribe();
+          },
+        };
+      },
+    });
+    disposeRemoteSource = () => tabRemoteSource.dispose();
+    tabRemoteSource.goOnline();
+
+    const reloadRequestedSubscription = workerClient.subscribe("reload-requested", () => {
+      globalThis.location?.reload();
+    });
+
+    cleanupCallbacks.push(reloadRequestedSubscription.unsubscribe);
+
+    // A worker elected after this tab's snapshot may have wiped the database the snapshot came from.
+    const reloadIfStorageReplaced = (storageGeneration: string) => {
+      if (storageGeneration !== workerClientSnapshot.storageGeneration) {
+        storageReplacedSubscription.unsubscribe();
+        globalThis.location?.reload();
+      }
+    };
+    const storageReplacedSubscription = workerClient.subscribe("state-changed", (event) => {
+      reloadIfStorageReplaced(event.payload.storageGeneration);
+    });
+    cleanupCallbacks.push(storageReplacedSubscription.unsubscribe);
+    reloadIfStorageReplaced(workerClient.getStorageGeneration());
+
+    const sync = () => {
+      workerClient.sync().catch((error) => console.warn("Failed to start sync", error));
+    };
+
+    // Mobile browsers suspend background pages, and the socket can reconnect or die unnoticed meanwhile.
+    const syncWhenVisible = () => {
+      if (globalThis.document?.visibilityState === "visible") {
+        sync();
+      }
+    };
+    // Browsers can keep a socket open long after the network is gone.
+    const dropConnection = () => {
+      workerClient.dropConnection().catch((error) => console.warn("Failed to drop connection", error));
+    };
+    cleanupCallbacks.push(() => {
+      globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
+      globalThis.removeEventListener?.("online", sync);
+      globalThis.removeEventListener?.("offline", dropConnection);
+    });
+    globalThis.document?.addEventListener("visibilitychange", syncWhenVisible);
+    globalThis.addEventListener?.("online", sync);
+    globalThis.addEventListener?.("offline", dropConnection);
+
+    perf.logEnd("createSyncedDb", "initialized", "info");
+
+    const exportData = createExportData({
+      reactiveDb,
+      tablesConfig: options.syncDbSchema.tablesConfig,
       schemaVersion: workerClientSnapshot.schemaVersion,
-      migrationVersions: Object.keys(options.syncDbSchema.migrations)
-        .map(Number)
-        .sort((a, b) => a - b),
-    },
-  };
+    });
+    const importData = (data: SyncedDbExport, opts?: ImportDataOptions) => workerClient.importData(data, opts);
 
-  unregisterDevtools = getOrCreateSQLiteSyncDevtoolsRegistry().register({
-    instanceId,
-    dbId: options.dbId,
-    createdAt: Date.now(),
-    instance: syncedDb,
-  });
+    const syncedDb = {
+      db: createSyncedDbDatabase(reactiveDb),
+      state: {
+        getState: workerClient.getState.bind(workerClient),
+        subscribe: (onChange: () => void) => {
+          const { unsubscribe } = workerClient.subscribe("state-changed", onChange);
+          return unsubscribe;
+        },
+        goOnline: workerClient.goOnline.bind(workerClient),
+        goOffline: workerClient.goOffline.bind(workerClient),
+        sync,
+      },
+      /**
+       * Ask the elected worker to broadcast a page reload to all tabs for this dbId.
+       *
+       * With `clean: true` the worker durably records a reset request epoch before
+       * broadcasting, so the worker elected on the next startup initializes with
+       * `clearOnInit: true` and wipes the persisted DB. Destructive — use as a
+       * recovery path when the durable worker DB may be de-synced.
+       *
+       * Pending in-memory tab events are not preserved, and the returned promise
+       * may never settle in the caller — the page typically unloads first.
+       */
+      requestReload: async (options: { clean: boolean }) => {
+        await workerClient.requestReload(options);
+        // Primary path: this tab receives the worker's "reload-requested" broadcast
+        // like every other tab. Fallback in case the broadcast is missed — in the
+        // normal case the page is already unloading and this timeout never fires.
+        setTimeout(() => globalThis.location?.reload(), 250);
+      },
+      subscribe: workerClient.subscribe,
+      exportData,
+      importData,
+      dispose,
+      _internal: {
+        executeAsync: workerClient.execute.bind(workerClient),
+        getMemoryQueryTables: reactiveDb.getTablesUsed.bind(reactiveDb),
+        getSharedLiveQueriesSnapshot: reactiveDb.getSharedLiveQueriesSnapshot.bind(reactiveDb),
+        crdtTableNames: options.syncDbSchema.tablesConfig.map((table) => table.crdtTableName),
+        crdtTablesConfig: options.syncDbSchema.tablesConfig,
+        tables: options.syncDbSchema.tables,
+        schemaVersion: workerClientSnapshot.schemaVersion,
+        migrationVersions: Object.keys(options.syncDbSchema.migrations)
+          .map(Number)
+          .sort((a, b) => a - b),
+      },
+    };
 
-  return syncedDb;
+    unregisterDevtools = getOrCreateSQLiteSyncDevtoolsRegistry().register({
+      instanceId,
+      dbId: options.dbId,
+      createdAt: Date.now(),
+      instance: syncedDb,
+    });
+
+    return syncedDb;
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
 }
 
 export type SyncedDb<Database> = Awaited<ReturnType<typeof createSyncedDb<Database>>>;

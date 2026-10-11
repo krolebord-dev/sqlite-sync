@@ -4,6 +4,7 @@ import { createMigrations } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";
 import { createSyncedDb, createSyncedDbDatabase, type SyncedDb } from "../src/sync-db";
+import { runWithNoActiveReplicas } from "../src/worker-db/replica-lock";
 import { createBroadcastChannels, type WorkerResponseMessage } from "../src/worker-db/worker-common";
 
 describe("SyncedDb database facade", () => {
@@ -149,9 +150,16 @@ describe("SyncedDb state", () => {
 });
 
 describe("SyncedDb storage generation", () => {
-  const setup = async (opts: { snapshotStorageGeneration: string; stateStorageGeneration: string }) => {
+  const realLocks = globalThis.navigator?.locks;
+  const setup = async (opts: {
+    snapshotStorageGeneration: string;
+    stateStorageGeneration: string;
+    locks?: LockManager;
+    beforeSnapshot?: (dbId: string) => Promise<void>;
+    includeTodoTable?: boolean;
+  }) => {
     vi.stubGlobal("navigator", {
-      locks: { request: (_name: string, _options: unknown, callback: () => Promise<void>) => callback() },
+      locks: opts.locks ?? { request: (_name: string, _options: unknown, callback: () => Promise<void>) => callback() },
     });
     const reload = vi.fn();
     vi.stubGlobal("location", { reload });
@@ -162,7 +170,9 @@ describe("SyncedDb storage generation", () => {
     });
     const initialDb = await createSQLiteReactiveDb({ snapshot: new Uint8Array(), logger: () => {} });
     initialDb.db.execute(
-      "CREATE TABLE _todo (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, tombstone INTEGER NOT NULL DEFAULT 0)",
+      opts.includeTodoTable === false
+        ? "CREATE TABLE unrelated (id INTEGER PRIMARY KEY)"
+        : "CREATE TABLE _todo (id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, tombstone INTEGER NOT NULL DEFAULT 0)",
     );
     const snapshot = initialDb.createSnapshot();
     initialDb.dispose();
@@ -178,13 +188,14 @@ describe("SyncedDb storage generation", () => {
       });
     const respond = (requestId: string, data: WorkerResponseMessage["data"]) =>
       channels.responses.postMessage({ type: "response", requestId, data });
-    channels.requests.onmessage = ({ data: request }) => {
+    channels.requests.onmessage = async ({ data: request }) => {
       switch (request.method) {
         case "postState":
           postState();
           respond(request.requestId, undefined);
           break;
         case "getSnapshot":
+          await opts.beforeSnapshot?.(dbId);
           respond(request.requestId, {
             file: snapshot,
             syncId: 0,
@@ -207,9 +218,18 @@ describe("SyncedDb storage generation", () => {
       terminate: vi.fn(),
     }) satisfies Worker;
 
-    const syncedDb = await createSyncedDb({ dbId, worker, syncDbSchema: schema });
+    let syncedDb: SyncedDb<(typeof schema)["~clientSchema"]>;
+    try {
+      syncedDb = await createSyncedDb({ dbId, worker, syncDbSchema: schema });
+    } catch (error) {
+      channels.requests.close();
+      channels.responses.close();
+      vi.unstubAllGlobals();
+      throw error;
+    }
 
     return {
+      dbId,
       reload,
       electWorker: (nextStorageGeneration: string) => {
         storageGeneration = nextStorageGeneration;
@@ -223,6 +243,41 @@ describe("SyncedDb storage generation", () => {
       },
     };
   };
+
+  it.runIf(realLocks)("blocks cleanup before reading the snapshot and releases the lock on disposal", async () => {
+    await using tab = await setup({
+      snapshotStorageGeneration: "gen-1",
+      stateStorageGeneration: "gen-1",
+      locks: realLocks,
+      beforeSnapshot: async (dbId) => {
+        expect(await runWithNoActiveReplicas({ dbId, run: () => {} })).toBe(false);
+      },
+    });
+
+    expect(await runWithNoActiveReplicas({ dbId: tab.dbId, run: () => {} })).toBe(false);
+    await tab[Symbol.asyncDispose]();
+    expect(await runWithNoActiveReplicas({ dbId: tab.dbId, run: () => {} })).toBe(true);
+  });
+
+  it.runIf(realLocks)("releases the replica lock when memory schema setup fails", async () => {
+    let dbId = "";
+    await expect(
+      setup({
+        snapshotStorageGeneration: "gen-1",
+        stateStorageGeneration: "gen-1",
+        locks: realLocks,
+        includeTodoTable: false,
+        beforeSnapshot: async (id) => {
+          dbId = id;
+          expect(await runWithNoActiveReplicas({ dbId, run: () => {} })).toBe(false);
+        },
+      }),
+    ).rejects.toThrow("Table _todo not found");
+
+    expect(await runWithNoActiveReplicas({ dbId, run: () => {} })).toBe(true);
+    const { held } = await navigator.locks.query();
+    expect(held?.some((lock) => lock.name === `sync-db-client-lock-${dbId}`)).toBe(false);
+  });
 
   it("reloads when a newly elected worker reports a replaced database", async () => {
     await using tab = await setup({ snapshotStorageGeneration: "gen-1", stateStorageGeneration: "gen-1" });

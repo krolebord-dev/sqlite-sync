@@ -1249,7 +1249,7 @@ function startDbWorker(options: {
 
 `storageVersion` is combined with the library's internal storage version. Bump it to wipe local DBs across an incompatible deploy; see [Breaking Storage Changes](#breaking-storage-changes).
 
-`eventLogGc` controls startup-only worker event-log garbage collection. It is disabled by default. GC keeps at least the latest 100 applied/deduped event rows, never deletes pending rows, and never deletes local rows that have not been pushed to the remote. Set `eventLogGc: true` to enable it.
+`eventLogGc` controls startup-only worker event-log garbage collection. It is disabled by default. GC keeps at least the latest 100 applied/deduped event rows, never deletes pending rows, and never deletes local rows that have not been pushed to the remote. Set `eventLogGc: true` to enable it. Cleanup is skipped while any open tab holds an in-memory copy of the database, including during worker handoff, so in practice it runs on a fresh startup.
 
 #### `getWorkerConfig<Props>()`
 

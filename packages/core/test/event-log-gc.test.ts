@@ -3,6 +3,7 @@ import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "../src/memory-db/
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../src/migrations/system-schema";
 import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 import { runWorkerEventLogGc } from "../src/worker-db/event-log-gc";
+import { acquireReplicaLock, runWithNoActiveReplicas } from "../src/worker-db/replica-lock";
 
 const noopLogger = () => {};
 
@@ -20,6 +21,37 @@ describe("worker event log GC", () => {
   afterEach(() => {
     reactiveDb.dispose();
   });
+
+  it.runIf(globalThis.navigator?.locks)(
+    "retains history during worker handoff while an existing replica remains",
+    async () => {
+      insertEvents({ from: 1, to: 150, origin: "remote", status: "applied" });
+      const dbId = crypto.randomUUID();
+      const release = await acquireReplicaLock({ dbId });
+      const cleanup = () =>
+        runWithNoActiveReplicas({
+          dbId,
+          run: () => {
+            runWorkerEventLogGc({
+              db: reactiveDb.db,
+              dbConfig: memoryDbConfig,
+              pushSyncId: createStoredValue({ initialValue: -1 }),
+              eventHlcAccumulator: createStoredValue({ initialValue: "00000000000000000000000000000000" }),
+            });
+          },
+        });
+
+      try {
+        expect(await cleanup()).toBe(false);
+        expect(getEventStats()).toEqual({ count: 150, minSyncId: 1, maxSyncId: 150 });
+        await release();
+        expect(await cleanup()).toBe(true);
+        expect(getEventStats()).toEqual({ count: 100, minSyncId: 51, maxSyncId: 150 });
+      } finally {
+        await release();
+      }
+    },
+  );
 
   it("keeps the latest 100 applied or deduped events", () => {
     insertEvents({ from: 1, to: 150, origin: "remote", status: "applied" });

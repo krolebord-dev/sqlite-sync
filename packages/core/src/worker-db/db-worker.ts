@@ -19,6 +19,7 @@ import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise, generateId } from "../utils";
 import { runWorkerEventLogGc } from "./event-log-gc";
+import { runWithNoActiveReplicas } from "./replica-lock";
 import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
 import { createStorageVersionStore } from "./storage-version";
 import {
@@ -146,12 +147,17 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   }
 
   if (opts.eventLogGc === true) {
-    runWorkerEventLogGc({
-      db,
-      dbConfig: workerDbConfig,
-      pushSyncId,
-      eventHlcAccumulator,
-      logger,
+    await runWithNoActiveReplicas({
+      dbId: config.dbId,
+      run: () => {
+        runWorkerEventLogGc({
+          db,
+          dbConfig: workerDbConfig,
+          pushSyncId,
+          eventHlcAccumulator,
+          logger,
+        });
+      },
     });
   }
 
@@ -400,6 +406,7 @@ type WorkerOptions = {
    * Runs local worker event-log garbage collection on startup. Disabled by default;
    * set `eventLogGc: true` to enable. GC keeps the latest event rows and never removes
    * pending events or local rows that have not been pushed to the remote.
+   * Skipped while an existing tab holds an in-memory replica of this DB.
    */
   eventLogGc?: boolean;
 };
