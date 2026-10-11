@@ -33,6 +33,8 @@ import {
 import {
   admitClientPush,
   type ExtractSyncServerRequest,
+  HEARTBEAT_PING,
+  HEARTBEAT_PONG,
   type PushRejection,
   type SyncServerMessage,
   type SyncServerRequest,
@@ -243,6 +245,10 @@ function createDurableObjectRemoteHandler({
   });
 
   const handleMessage = (message: string): MessageResult => {
+    if (message === HEARTBEAT_PING) {
+      return { success: true, payload: HEARTBEAT_PONG };
+    }
+
     const requestRaw = jsonSafeParse<SyncServerRequest>(message);
 
     if (!requestRaw.success) {
@@ -397,6 +403,15 @@ function createCrdtViews(executor: KyselyExecutor<any>, syncDbSchema: SyncDbSche
   });
 }
 
+/**
+ * Answers client heartbeat pings in the runtime, so pings do not wake a hibernating Durable Object. Call it from the
+ * Durable Object constructor. A Durable Object has a single auto-response pair, so this replaces any other one.
+ */
+function enableHeartbeatAutoResponse(ctx: DurableObjectState) {
+  ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(HEARTBEAT_PING, HEARTBEAT_PONG));
+}
+
 export const durableObjectAdapter = {
   createCrdtStorage: createDurableObjectCrdtStorage,
+  enableHeartbeatAutoResponse,
 };

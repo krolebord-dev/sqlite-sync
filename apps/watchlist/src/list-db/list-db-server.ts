@@ -28,6 +28,11 @@ export class ListDbServer extends Server<Env> {
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private aiDbAccess: AiDbAccess = null!;
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
+  }
+
   async onStart() {
     const { syncDb, remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       syncDbSchema,

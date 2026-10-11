@@ -45,9 +45,11 @@ describe("createCrdtSyncRemoteSource", () => {
   const createSource = (overrides: {
     pullEvents?: (request: EventsPullRequest) => Promise<EventsPullResponse>;
     pushEvents?: (request: EventsPushRequest) => Promise<EventsPushResponse>;
+    ping?: () => Promise<void>;
   }) => ({
     pullEvents: vi.fn(overrides.pullEvents ?? emptyPull),
     pushEvents: vi.fn(overrides.pushEvents ?? (async () => ({ ok: true }))),
+    ping: overrides.ping && vi.fn(overrides.ping),
     disconnect: vi.fn(),
   });
 
@@ -725,6 +727,91 @@ describe("createCrdtSyncRemoteSource", () => {
     });
   });
 
+  describe("heartbeat", () => {
+    it("pings a connection that has been idle", async () => {
+      vi.useFakeTimers();
+      const source = createSource({ ping: async () => {} });
+      const remoteSource = setup({ sources: [source] });
+      await remoteSource.goOnline();
+
+      await vi.advanceTimersByTimeAsync(24_999);
+      expect(source.ping).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(source.ping).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(source.ping).toHaveBeenCalledTimes(2);
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("does not ping while the remote keeps sending", async () => {
+      vi.useFakeTimers();
+      const source = createSource({ ping: async () => {} });
+      let eventsAvailable: (event: EventsAvailable) => void = () => {};
+      const remoteSource = setup({
+        remoteFactory: ({ onEventsAvailable }) => {
+          eventsAvailable = onEventsAvailable;
+          return source;
+        },
+      });
+      await remoteSource.goOnline();
+
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersByTimeAsync(20_000);
+        eventsAvailable({ newSyncId: 0, remoteEventHlcSum: null });
+      }
+
+      expect(source.ping).not.toHaveBeenCalled();
+    });
+
+    it("replaces a connection whose ping is not answered", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const stuck = createSource({ ping: hangingPull });
+      const next = createSource({});
+      const remoteFactory = vi.fn<CreateRemoteSourceFactory>().mockReturnValueOnce(stuck).mockReturnValueOnce(next);
+      const remoteSource = setup({ remoteFactory });
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+
+      await vi.advanceTimersByTimeAsync(25_000 + 9_999);
+      expect(stuck.disconnect).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stuck.disconnect).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("replaces a connection whose ping fails", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const failing = createSource({ ping: () => Promise.reject(new Error("socket closed")) });
+      const remoteFactory = vi
+        .fn<CreateRemoteSourceFactory>()
+        .mockReturnValueOnce(failing)
+        .mockReturnValueOnce(createSource({}));
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+
+      await vi.advanceTimersByTimeAsync(25_000);
+
+      expect(failing.disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops pinging once the connection is closed", async () => {
+      vi.useFakeTimers();
+      const source = createSource({ ping: async () => {} });
+      const remoteSource = setup({ sources: [source] });
+      await remoteSource.goOnline();
+
+      await remoteSource.goOffline("DISCONNECTED");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(source.ping).not.toHaveBeenCalled();
+    });
+  });
+
   describe("dropConnection", () => {
     it("goes offline and reconnects on the next syncWithRemote", async () => {
       const remoteFactory = vi.fn(() => createSource({}));
@@ -1003,6 +1090,7 @@ describe("createCrdtSyncRemoteSource", () => {
                       nextSyncId: pullSyncId.current + 1,
                     })),
                   pushEvents: () => use(() => ({ ok: true })),
+                  ping: () => use(() => undefined),
                   disconnect: () => {
                     disconnects.set(id, (disconnects.get(id) ?? 0) + 1);
                   },

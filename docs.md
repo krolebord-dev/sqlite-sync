@@ -881,6 +881,11 @@ export class SyncServer extends Server<Env> {
   static options = { hibernate: true };
   private remoteHandler: RemoteHandler = null!;
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
+  }
+
   async onStart() {
     const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       syncDbSchema,
@@ -914,6 +919,8 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 ```
+
+Clients ping idle connections to detect sockets that died without closing (see [Custom remote sources](#custom-remote-sources)). `handleMessage` answers those pings, but each one would wake a hibernating Durable Object. `enableHeartbeatAutoResponse` makes the Cloudflare runtime answer them instead, without waking it. A Durable Object has a single auto-response pair, so the call replaces any pair set before.
 
 **`durableObjectAdapter.createCrdtStorage` options:**
 
@@ -1351,7 +1358,7 @@ function createWsRemoteSource(options: {
 }): CreateRemoteSourceFactory
 ```
 
-Requests wait for the socket to open before they are sent. When the socket closes, pending requests reject, the source reports the close, and the library opens a new socket after a backoff. The library closes the socket on the first `close` event, so wrappers like PartySocket do not reconnect on their own.
+Requests wait for the socket to open before they are sent. The source implements `ping` with plain text `"ping"` and `"pong"` frames, so the server must answer them: `handleMessage` from `@sqlite-sync/cloudflare` does, and `durableObjectAdapter.enableHeartbeatAutoResponse` does so without waking a hibernating Durable Object. Update servers before clients: a server that does not answer pings makes clients replace idle connections every 35 seconds or so. When the socket closes, pending requests reject, the source reports the close, and the library opens a new socket after a backoff. The library closes the socket on the first `close` event, so wrappers like PartySocket do not reconnect on their own.
 
 #### Custom remote sources
 
@@ -1366,6 +1373,7 @@ type CreateRemoteSourceFactory = (opts: {
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
+  ping?: () => Promise<void>;
   disconnect?: () => void | Promise<void>;
 };
 ```
@@ -1374,6 +1382,7 @@ type RemoteSource = {
 - The library calls `disconnect` on every returned source exactly once, also to cancel an attempt that is still connecting. It does not wait for `disconnect` to finish.
 - Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then reports `connecting` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
 - `pullEvents` and `pushEvents` may wait for the connection to open. Once the connection has closed, they should reject so failures surface quickly.
+- `ping` is optional. When the source has it, the library pings a connection that has received nothing for 25 seconds, and replaces the connection if the ping fails or gets no answer within 10 seconds. Any response or broadcast counts as activity, so busy connections are not pinged. The library calls `ping` only on an online connection, one at a time, and never after the connection closes, so a source does not need to handle overlapping pings, and a ping does not need to settle once the source has closed. Without `ping`, a connection that dies without closing is only noticed when a request times out.
 - The library times requests out after 10 seconds and does not retry on the same source: any failed request closes the connection, and the library reconnects with backoff. A push response with `ok: false` also closes the connection, but the library does not reconnect until the next `state.sync()`. The remote counts as `online` once the first request succeeds.
 
 ### `@sqlite-sync/core/server`
@@ -1492,7 +1501,15 @@ function createCrdtStorage<Schema extends SyncDbSchema>(options: {
 
 | Method | Description |
 |--------|-------------|
-| `handleMessage(message: string)` | Parse and handle a WebSocket message. Returns `{ success: true, payload: string }` or `{ success: false, error: unknown }`. |
+| `handleMessage(message: string)` | Parse and handle a WebSocket message. Returns `{ success: true, payload: string }` or `{ success: false, error: unknown }`. Answers the heartbeat `"ping"` with `"pong"`. |
+
+#### `durableObjectAdapter.enableHeartbeatAutoResponse(ctx)`
+
+```ts
+function enableHeartbeatAutoResponse(ctx: DurableObjectState): void
+```
+
+Calls `ctx.setWebSocketAutoResponse` so the runtime answers client heartbeat pings without waking a hibernating Durable Object. Call it from the Durable Object constructor. Replaces any auto-response pair set before.
 
 ### `@sqlite-sync/ai`
 

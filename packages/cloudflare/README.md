@@ -19,7 +19,14 @@ import { type Connection, routePartykitRequest, Server } from "partyserver";
 import { syncDbSchema } from "../src/db-schema";
 
 export class EventLogServer extends Server<Env> {
+  static options = { hibernate: true };
   private remoteHandler!: RemoteHandler;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // Answers client heartbeat pings without waking the hibernating Durable Object.
+    durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
+  }
 
   onStart() {
     const { remoteHandler } = durableObjectAdapter.createCrdtStorage({

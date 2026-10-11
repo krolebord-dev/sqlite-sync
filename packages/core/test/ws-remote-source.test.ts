@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SyncServerMessage, SyncServerRequest } from "../src/server";
+import { HEARTBEAT_PING, HEARTBEAT_PONG, type SyncServerMessage, type SyncServerRequest } from "../src/server";
 import { createWsRemoteSource } from "../src/web-socket/ws-remote-source";
 
 class FakeSocket extends EventTarget {
   onmessage: ((event: { data: string }) => void) | null = null;
   sent: SyncServerRequest[] = [];
+  pings = 0;
   readyState: number = WebSocket.CONNECTING;
   close = vi.fn();
 
   send(data: string) {
+    if (data === HEARTBEAT_PING) {
+      this.pings++;
+      return;
+    }
     this.sent.push(JSON.parse(data));
   }
 
@@ -24,6 +29,10 @@ class FakeSocket extends EventTarget {
 
   receive(message: SyncServerMessage) {
     this.onmessage?.({ data: JSON.stringify(message) });
+  }
+
+  pong() {
+    this.onmessage?.({ data: HEARTBEAT_PONG });
   }
 }
 
@@ -110,6 +119,17 @@ describe("createWsRemoteSource", () => {
     expect(socket.close).toHaveBeenCalledTimes(1);
     expect(socket.close).toHaveBeenCalledWith(1000);
     expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it("resolves a ping on the next pong", async () => {
+    const { socket, source } = connect();
+    socket.open();
+
+    const pinging = source.ping?.();
+    expect(socket.pings).toBe(1);
+    socket.pong();
+
+    await expect(pinging).resolves.toBeUndefined();
   });
 
   it("reports broadcast events", () => {

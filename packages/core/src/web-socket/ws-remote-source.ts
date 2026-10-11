@@ -1,4 +1,5 @@
 import type { SyncServerMessage, SyncServerRequest } from "../server";
+import { HEARTBEAT_PING, HEARTBEAT_PONG } from "../server/heartbeat";
 import type { CreateRemoteSourceFactory } from "../sqlite-crdt/crdt-sync-remote-source";
 import { createDeferredPromise, type DeferredPromise, type DistributiveOmit, jsonSafeParse } from "../utils";
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
@@ -18,6 +19,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
     const opened = createDeferredPromise<void>();
     opened.promise.catch(() => {});
     const requestsMap = new Map<string, DeferredPromise<unknown>>();
+    let onPong: (() => void) | undefined;
     let closed = false;
 
     const shutdown = () => {
@@ -71,7 +73,19 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
         excludeNodeId: request.excludeNodeId,
       });
 
+    const ping = () => {
+      socket.send(HEARTBEAT_PING);
+      return new Promise<void>((resolve) => {
+        onPong = resolve;
+      });
+    };
+
     socket.onmessage = (event) => {
+      if (event.data === HEARTBEAT_PONG) {
+        onPong?.();
+        return;
+      }
+
       const result = jsonSafeParse<SyncServerMessage>(event.data);
 
       if (!result.success || !("type" in result.data) || !result.data.type) {
@@ -103,6 +117,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
     return {
       pushEvents,
       pullEvents,
+      ping,
       disconnect: () => {
         shutdown();
       },

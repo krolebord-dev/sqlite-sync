@@ -6,6 +6,7 @@ export {
   type PushRejection,
   type PushRejectionReason,
 } from "./admit-client-push";
+export { HEARTBEAT_PING, HEARTBEAT_PONG } from "./heartbeat";
 export {
   type ExtractSyncServerRequest,
   type SyncServerMessage,

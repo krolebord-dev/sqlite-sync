@@ -10,6 +10,11 @@ export class EventLogServer extends Server<Env> {
   // biome-ignore lint/style/noNonNullAssertion: initialize in onStart
   private remoteHandler: RemoteHandler = null!;
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    durableObjectAdapter.enableHeartbeatAutoResponse(ctx);
+  }
+
   async onStart() {
     const { remoteHandler } = await durableObjectAdapter.createCrdtStorage({
       batchSize: 100,

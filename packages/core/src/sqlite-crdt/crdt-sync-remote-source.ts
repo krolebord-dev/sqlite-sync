@@ -42,6 +42,8 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 // Backoff restarts only after a connection stays up this long, so a remote that accepts and then drops
 // connections right away is not hammered.
 const RECONNECT_MIN_UPTIME_MS = 5_000;
+// Pings a remote that has sent nothing for this long, to catch connections that died without closing.
+const HEARTBEAT_IDLE_MS = 25_000;
 
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
@@ -55,6 +57,9 @@ export type EventsAvailable = {
  * returned source exactly once. Call `onClosed` when the connection ends on its own, at any time including during
  * this call; the library then reconnects with backoff. Requests may wait for the connection to open and should
  * reject once it closes. The library times requests out and shows the remote as online after the first one succeeds.
+ * With `ping`, the library also checks idle connections and replaces one whose ping fails or times out. It calls `ping`
+ * only on an online connection, one at a time, and never after the connection closes; a ping does not need to settle
+ * once the source has closed.
  */
 export type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: EventsAvailable) => void;
@@ -64,6 +69,7 @@ export type CreateRemoteSourceFactory = (opts: {
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
+  ping?: () => Promise<void>;
   disconnect?: () => void | Promise<void>;
 };
 
@@ -204,6 +210,8 @@ export const createCrdtSyncRemoteSource = ({
     const ready = createDeferredPromise<void>();
     let source: RemoteSource | null = null;
     let establishedAt: number | null = null;
+    let lastActivityAt = Date.now();
+    let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
 
     const untilClosed = <T>(operation: () => Promise<T>, timeoutMs?: number) =>
       new Promise<T>((resolve, reject) => {
@@ -227,10 +235,12 @@ export const createCrdtSyncRemoteSource = ({
 
     const request = async <T>(operation: () => Promise<T>) => {
       const response = await untilClosed(operation, REQUEST_TIMEOUT_MS);
+      lastActivityAt = Date.now();
       if (establishedAt === null && !signal.aborted) {
         establishedAt = Date.now();
         patchRemoteState({ type: "online", schemaVersionMismatched: false });
         ready.resolve();
+        scheduleHeartbeat();
       }
       return response;
     };
@@ -255,6 +265,7 @@ export const createCrdtSyncRemoteSource = ({
       try {
         created = factory({
           onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
+            lastActivityAt = Date.now();
             pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
           },
           onClosed: (error) => {
@@ -279,6 +290,30 @@ export const createCrdtSyncRemoteSource = ({
       }
       source = created;
       void sync();
+    };
+
+    const scheduleHeartbeat = () => {
+      const ping = source?.ping?.bind(source);
+      if (!ping || signal.aborted) {
+        return;
+      }
+      heartbeatTimer = setTimeout(
+        async () => {
+          if (Date.now() - lastActivityAt >= HEARTBEAT_IDLE_MS) {
+            try {
+              await request(ping);
+            } catch (error) {
+              if (!signal.aborted) {
+                console.warn("Remote did not answer a ping", error);
+                fail("CONNECTION_LOST");
+              }
+              return;
+            }
+          }
+          scheduleHeartbeat();
+        },
+        Math.max(0, lastActivityAt + HEARTBEAT_IDLE_MS - Date.now()),
+      );
     };
 
     type ActivePull = { promise: Promise<void>; requestedSyncId: number | null };
@@ -461,6 +496,7 @@ export const createCrdtSyncRemoteSource = ({
 
     const close = () => {
       controller.abort();
+      clearTimeout(heartbeatTimer);
       ready.resolve();
       if (source) {
         disconnectSource(source);
