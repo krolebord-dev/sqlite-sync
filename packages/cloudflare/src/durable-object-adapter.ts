@@ -149,7 +149,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
 
   const crdtStorage = createCrdtStorage({
     nodeId: truncatedNodeId,
-    initialLocalSyncId: getLatestSyncId(sqlExecutor),
+    initialLocalSyncId: getLatestSyncId(sqlExecutor, crdtEventsTable),
     hlc,
     migrator: migrator,
     db: crdtStorageDb,
@@ -350,9 +350,9 @@ function groupRejectionsByReason(rejected: PushRejection<{ dataset: string; type
   return byReason;
 }
 
-function getLatestSyncId(executor: KyselyExecutor<any>) {
+function getLatestSyncId(executor: KyselyExecutor<any>, eventsTable: string) {
   const result = executor.executeKysely((db) =>
-    db.selectFrom("crdt_events").select((eb) => eb.fn.max("sync_id").as("sync_id")),
+    db.selectFrom(eventsTable).select((eb) => eb.fn.max("sync_id").as("sync_id")),
   );
   return result.rows[0]?.sync_id ?? 0;
 }
