@@ -1,20 +1,16 @@
 import { createWsRemoteSource, getWorkerConfig, startDbWorker } from "@sqlite-sync/core/worker";
-import { PartySocket } from "partysocket";
 import { type ListDbProps, syncDbSchema } from "./migrations";
 
 const workerConfig = await getWorkerConfig<ListDbProps>();
+
+const syncUrl = new URL(`/list-db/list-db-server/list-${workerConfig.props.listId}`, import.meta.env.VITE_APP_URL);
+syncUrl.protocol = syncUrl.protocol === "https:" ? "wss:" : "ws:";
 
 await startDbWorker({
   workerConfig,
   syncDbSchema,
   verifySchema: import.meta.env.DEV,
   createRemoteSource: createWsRemoteSource({
-    createWebSocket: () =>
-      new PartySocket({
-        host: import.meta.env.VITE_APP_URL,
-        prefix: "list-db",
-        party: "list-db-server",
-        room: `list-${workerConfig.props.listId}`,
-      }),
+    createWebSocket: () => new WebSocket(syncUrl),
   }),
 });

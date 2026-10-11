@@ -97,18 +97,12 @@ export async function initDb() {
 ```ts
 // src/db-worker.ts
 import { createWsRemoteSource, startDbWorker } from "@sqlite-sync/core/worker";
-import { PartySocket } from "partysocket";
 import { syncDbSchema } from "./db-schema";
 
 await startDbWorker({
   syncDbSchema,
   createRemoteSource: createWsRemoteSource({
-    createWebSocket: () =>
-      new PartySocket({
-        host: "localhost:8787",
-        party: "event-log-server",
-        room: "main",
-      }),
+    createWebSocket: () => new WebSocket("ws://localhost:8787/parties/event-log-server/main"),
   }),
 });
 ```

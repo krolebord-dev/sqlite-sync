@@ -225,21 +225,18 @@ await startDbWorker({
 });
 ```
 
-The `createWebSocket` factory is called each time the worker needs to establish a connection. You can use any WebSocket-compatible library (e.g., `PartySocket` for Cloudflare Workers with PartyServer).
+The `createWebSocket` factory is called for each connection attempt. The library reconnects on its own with backoff, so a plain `WebSocket` is enough. With PartyServer on Cloudflare, connect to the route `routePartykitRequest` serves (`/parties/<party>/<room>` by default):
 
 ```ts
-// Using PartySocket
-import { PartySocket } from "partysocket";
+const syncUrl = new URL("/parties/my-sync-server/main", "https://your-server.example.com");
+syncUrl.protocol = syncUrl.protocol === "https:" ? "wss:" : "ws:";
 
 createRemoteSource: createWsRemoteSource({
-  createWebSocket: () =>
-    new PartySocket({
-      host: "localhost:8787",
-      party: "my-sync-server",
-      room: "main",
-    }),
+  createWebSocket: () => new WebSocket(syncUrl),
 }),
 ```
+
+Any WebSocket-compatible object works, including `PartySocket`. The library closes the socket when the connection drops, which also stops PartySocket's own reconnect.
 
 ### 2. Initialize the Database
 
@@ -706,8 +703,8 @@ function SyncStatus() {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `remoteState` | `"online" \| "offline" \| "pending"` | Current remote connection state. `pending` means a connection attempt is in progress. |
-| `deSynced` | `boolean` | `true` after the worker detects that local applied events and remote applied events diverged. |
+| `remoteState` | `"online" \| "offline" \| "pending"` | Current remote connection state. `pending` means a connection attempt is in progress; it turns `online` once the remote answers the first request. Goes `offline` as soon as the connection drops or the browser reports the network is gone. After a dropped connection or a failed request, the library reconnects on its own with exponential backoff (about 1s doubling up to 30s, with jitter). The backoff restarts on `goOnline()` and `state.sync()`. If the remote rejects pushed events, the library waits for the next `state.sync()` instead, since the same batch would be rejected again. |
+| `deSynced` | `boolean` | `true` after the worker detects that local applied events and remote applied events diverged. Stays `true` until the page reloads, since reconnecting does not fix the divergence. |
 | `schemaVersionMismatched` | `boolean` | `true` after the worker receives an event from a newer schema version than the local code can apply. |
 
 ### De-sync and Schema Mismatch
@@ -1249,9 +1246,9 @@ function createSyncedDb<Database, Props = undefined>(
 | `db.getSharedLiveQuery(query)` | `(query) => SharedLiveQuery<T>` | Get or create a shared reactive query |
 | `state.getState()` | `() => WorkerState` | Get current sync state |
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
-| `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the connection attempt connects, fails, or is cancelled; the initial sync continues in the background |
+| `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the remote answers the first request, the attempt fails, or it is cancelled; the initial sync continues in the background |
 | `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a pending connection attempt |
-| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. If a connection error took the remote offline, reconnects instead; does nothing after `goOffline()` or a schema version mismatch (call `goOnline()` to connect). Also runs automatically whenever the page becomes visible or the browser comes back online |
+| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. If a connection error, a dropped connection, or the browser going offline took the remote offline, reconnects right away instead of waiting for the next backoff retry; does nothing after `goOffline()` or a schema version mismatch (call `goOnline()` to connect). Also runs automatically whenever the page becomes visible or the browser comes back online. While the browser reports it is offline, the library does not retry on its own |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |
@@ -1354,7 +1351,7 @@ function createWsRemoteSource(options: {
 }): CreateRemoteSourceFactory
 ```
 
-Requests made while the socket is closed (for example, while PartySocket is reconnecting) wait for it to reopen before they are sent, and their response timeout starts only then.
+Requests wait for the socket to open before they are sent. When the socket closes, pending requests reject, the source reports the close, and the library opens a new socket after a backoff. The library closes the socket on the first `close` event, so wrappers like PartySocket do not reconnect on their own.
 
 #### Custom remote sources
 
@@ -1363,9 +1360,8 @@ Requests made while the socket is closed (for example, while PartySocket is reco
 ```ts
 type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: { newSyncId: number; remoteEventHlcSum: string | null }) => void;
-  onReconnected: () => void;
-  signal: AbortSignal;
-}) => RemoteSource | Promise<RemoteSource>;
+  onClosed: (error?: unknown) => void;
+}) => RemoteSource;
 
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
@@ -1374,10 +1370,11 @@ type RemoteSource = {
 };
 ```
 
-- Each call must return an independent source. Do not return the same source object from multiple calls.
-- The library calls `disconnect` on every returned source exactly once, including a source that resolves after the attempt was cancelled. It does not wait for `disconnect` to finish.
-- `signal` aborts when the attempt is cancelled (`goOffline()` or `dispose()` while connecting) or when the connection closes. Factories can use it to stop opening a connection early.
-- Call `onReconnected` when the transport reconnects on its own without a new source (as PartySocket does). Broadcasts sent while it was down are lost, so the library pulls and pushes to catch up. `createWsRemoteSource` calls it on every `open` after the first.
+- One source is one connection. Each call must return a new source, synchronously. Do any async setup, like fetching a token, inside the source.
+- The library calls `disconnect` on every returned source exactly once, also to cancel an attempt that is still connecting. It does not wait for `disconnect` to finish.
+- Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then goes `offline` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
+- `pullEvents` and `pushEvents` may wait for the connection to open. Once the connection has closed, they should reject so failures surface quickly.
+- The library times requests out after 10 seconds and does not retry on the same source: any failed request closes the connection, and the library reconnects with backoff. A push response with `ok: false` also closes the connection, but the library does not reconnect until the next `state.sync()`. The remote counts as `online` once the first request succeeds.
 
 ### `@sqlite-sync/core/server`
 

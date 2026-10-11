@@ -228,8 +228,13 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       sync();
     }
   };
+  // Browsers can keep a socket open long after the network is gone.
+  const dropConnection = () => {
+    workerClient.dropConnection().catch((error) => console.warn("Failed to drop connection", error));
+  };
   globalThis.document?.addEventListener("visibilitychange", syncWhenVisible);
   globalThis.addEventListener?.("online", sync);
+  globalThis.addEventListener?.("offline", dropConnection);
 
   perf.logEnd("createSyncedDb", "initialized", "info");
 
@@ -249,6 +254,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     unregisterDevtools?.();
     globalThis.document?.removeEventListener("visibilitychange", syncWhenVisible);
     globalThis.removeEventListener?.("online", sync);
+    globalThis.removeEventListener?.("offline", dropConnection);
     reloadRequestedSubscription.unsubscribe();
     storageReplacedSubscription.unsubscribe();
     clientLockRelease.resolve();

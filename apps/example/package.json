@@ -20,7 +20,6 @@
     "jotai": "^2.16.2",
     "kysely": "catalog:",
     "partyserver": "^0.1.0",
-    "partysocket": "^1.1.10",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwindcss": "^4.1.18"

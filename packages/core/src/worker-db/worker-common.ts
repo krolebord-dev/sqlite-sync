@@ -75,6 +75,7 @@ export interface WorkerRpc {
   postState: () => void;
   goOnline: () => Promise<void>;
   goOffline: () => void;
+  dropConnection: () => void;
   sync: () => void;
   requestReload: (options: { clean: boolean }) => Promise<void>;
 }

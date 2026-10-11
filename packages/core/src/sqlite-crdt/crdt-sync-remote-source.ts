@@ -1,9 +1,8 @@
 import type { SyncDbMigrator } from "../migrations/migrator";
-import { createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
+import { createDeferredPromise, createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
 import type { EventsPullResponse, WorkerState } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage } from "./crdt-storage";
-import { REMOTE_RETRY_OPTIONS, retryRemoteOperation } from "./retry-remote-operation";
 import type { StoredValue } from "./stored-value";
 
 type CrdtSyncRemoteSourceConfig = {
@@ -37,6 +36,12 @@ export type EventsPushResponse = {
 };
 
 const DISCONNECT_WATCHDOG_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 10_000;
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+// Backoff restarts only after a connection stays up this long, so a remote that accepts and then drops
+// connections right away is not hammered.
+const RECONNECT_MIN_UPTIME_MS = 5_000;
 
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
@@ -46,17 +51,15 @@ export type EventsAvailable = {
 };
 
 /**
- * Opens a connection to the remote. Each call must return an independent source: the library calls
- * `disconnect` on every returned source exactly once, including one that resolves after `signal`
- * has aborted. `signal` aborts when the connection attempt is cancelled or the connection is closed.
- * Call `onReconnected` when the transport re-establishes itself without a new source: broadcasts
- * sent while it was down are lost, so the library pulls and pushes to catch up.
+ * Opens one connection to the remote. Each call must return a new source: the library calls `disconnect` on every
+ * returned source exactly once. Call `onClosed` when the connection ends on its own, at any time including during
+ * this call; the library then reconnects with backoff. Requests may wait for the connection to open and should
+ * reject once it closes. The library times requests out and shows the remote as online after the first one succeeds.
  */
 export type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: EventsAvailable) => void;
-  onReconnected: () => void;
-  signal: AbortSignal;
-}) => RemoteSource | Promise<RemoteSource>;
+  onClosed: (error?: unknown) => void;
+}) => RemoteSource;
 
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
@@ -97,6 +100,8 @@ export type OfflineReason =
   | "INITIALIZATION_FAILED"
   | "REMOTE_PUSH_ERROR"
   | "REMOTE_PULL_ERROR"
+  | "CONNECTION_LOST"
+  | "NETWORK_OFFLINE"
   | "DISCONNECTED";
 
 export type DeSyncDetectedReason = "CHECKSUM_MISMATCH" | "ERROR_APPLYING_REMOTE_EVENT";
@@ -136,6 +141,8 @@ export const createCrdtSyncRemoteSource = ({
   let current: Connection | null = null;
   let disposed = false;
   let wantsOnline = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconnectAttempt = 0;
 
   const disconnectSource = (source: RemoteSource) => {
     const watchdog = setTimeout(() => {
@@ -151,20 +158,42 @@ export const createCrdtSyncRemoteSource = ({
 
   const closeConnection = (connection: Connection, reason: OfflineReason) => {
     if (current !== connection) {
-      return;
+      return false;
     }
     current = null;
     patchRemoteState({ type: "offline", reason });
     connection.close();
+    return true;
+  };
+
+  const cancelReconnect = () => {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  };
+
+  // Retrying after a schema mismatch would fail the same way.
+  const scheduleReconnect = () => {
+    if (!wantsOnline || current || reconnectTimer || remoteState.schemaVersionMismatched) {
+      return;
+    }
+    const maxDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt);
+    reconnectAttempt++;
+    const delay = maxDelay / 2 + (Math.random() * maxDelay) / 2;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      void connect();
+    }, delay);
   };
 
   type Connection = ReturnType<typeof createConnection>;
   const createConnection = (factory: CreateRemoteSourceFactory) => {
     const controller = new AbortController();
     const { signal } = controller;
+    const ready = createDeferredPromise<void>();
     let source: RemoteSource | null = null;
+    let establishedAt: number | null = null;
 
-    const untilClosed = <T>(operation: () => Promise<T>) =>
+    const untilClosed = <T>(operation: () => Promise<T>, timeoutMs?: number) =>
       new Promise<T>((resolve, reject) => {
         const onAbort = () => reject(new Error("Remote connection closed"));
         if (signal.aborted) {
@@ -172,46 +201,73 @@ export const createCrdtSyncRemoteSource = ({
           return;
         }
         signal.addEventListener("abort", onAbort, { once: true });
+        const timeout =
+          timeoutMs === undefined
+            ? undefined
+            : setTimeout(() => reject(new Error(`Remote request timed out after ${timeoutMs}ms`)), timeoutMs);
         operation()
           .then(resolve, reject)
-          .finally(() => signal.removeEventListener("abort", onAbort));
+          .finally(() => {
+            clearTimeout(timeout);
+            signal.removeEventListener("abort", onAbort);
+          });
       });
 
-    const retryOptions = { ...REMOTE_RETRY_OPTIONS, shouldRetry: () => !signal.aborted };
+    const request = async <T>(operation: () => Promise<T>) => {
+      const response = await untilClosed(operation, REQUEST_TIMEOUT_MS);
+      if (establishedAt === null && !signal.aborted) {
+        establishedAt = Date.now();
+        patchRemoteState({ type: "online", schemaVersionMismatched: false });
+        ready.resolve();
+      }
+      return response;
+    };
 
-    const connect = async () => {
+    const fail = (reason: OfflineReason, { reconnect = true } = {}) => {
+      if (!closeConnection(connection, establishedAt === null ? "INITIALIZATION_FAILED" : reason)) {
+        return;
+      }
+      if (establishedAt !== null && Date.now() - establishedAt >= RECONNECT_MIN_UPTIME_MS) {
+        reconnectAttempt = 0;
+      }
+      if (reconnect) {
+        scheduleReconnect();
+      }
+    };
+
+    // A close during the factory call aborts before `source` is set, so the abort check below disconnects it.
+    const start = () => {
       if (signal.aborted) {
         return;
       }
 
-      const result = await tryCatchAsync(
-        async () =>
-          await factory({
-            onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
-              pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
-            },
-            onReconnected: () => {
-              void sync();
-            },
-            signal,
-          }),
-      );
+      let created: RemoteSource;
+      try {
+        created = factory({
+          onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
+            pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
+          },
+          onClosed: (error) => {
+            if (signal.aborted) {
+              return;
+            }
+            if (error !== undefined) {
+              console.warn("Remote connection closed", error);
+            }
+            fail("CONNECTION_LOST");
+          },
+        });
+      } catch (error) {
+        console.warn("Failed to create remote source", error);
+        fail("INITIALIZATION_FAILED");
+        return;
+      }
 
       if (signal.aborted) {
-        if (result.success) {
-          disconnectSource(result.data);
-        }
+        disconnectSource(created);
         return;
       }
-
-      if (!result.success) {
-        console.warn("Failed to create remote source", result.error);
-        closeConnection(connection, "INITIALIZATION_FAILED");
-        return;
-      }
-
-      source = result.data;
-      patchRemoteState({ type: "online", deSynced: false, schemaVersionMismatched: false });
+      source = created;
       void sync();
     };
 
@@ -255,7 +311,7 @@ export const createCrdtSyncRemoteSource = ({
             return;
           }
           console.error("Error pulling events. Going offline.", error);
-          closeConnection(connection, "REMOTE_PULL_ERROR");
+          fail("REMOTE_PULL_ERROR");
         })
         .finally(() => {
           if (activePull === nextPull) {
@@ -275,15 +331,11 @@ export const createCrdtSyncRemoteSource = ({
       let hasMore = true;
       let afterSyncId = opts.afterSyncId;
       while (hasMore) {
-        const response = await retryRemoteOperation(
-          () =>
-            untilClosed(() =>
-              activeSource.pullEvents({
-                ...opts,
-                afterSyncId,
-              }),
-            ),
-          retryOptions,
+        const response = await request(() =>
+          activeSource.pullEvents({
+            ...opts,
+            afterSyncId,
+          }),
         );
         if (signal.aborted) {
           return;
@@ -299,7 +351,7 @@ export const createCrdtSyncRemoteSource = ({
                   remoteSchemaVersion: x.schema_version,
                   localSchemaVersion: migrator.currentSchemaVersion,
                 });
-                if (remoteState.type === "online" && !remoteState.schemaVersionMismatched) {
+                if (!remoteState.schemaVersionMismatched) {
                   patchRemoteState({ schemaVersionMismatched: true });
                 }
                 throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
@@ -336,27 +388,23 @@ export const createCrdtSyncRemoteSource = ({
 
         let response: EventsPushResponse;
         try {
-          response = await retryRemoteOperation(
-            () =>
-              untilClosed(() =>
-                activeSource.pushEvents({
-                  nodeId,
-                  events: eventsBatch.events.map((event) => ({
-                    schema_version: event.schema_version,
-                    timestamp: event.timestamp,
-                    type: event.type,
-                    dataset: event.dataset,
-                    item_id: event.item_id,
-                    payload: event.payload,
-                  })),
-                }),
-              ),
-            retryOptions,
+          response = await request(() =>
+            activeSource.pushEvents({
+              nodeId,
+              events: eventsBatch.events.map((event) => ({
+                schema_version: event.schema_version,
+                timestamp: event.timestamp,
+                type: event.type,
+                dataset: event.dataset,
+                item_id: event.item_id,
+                payload: event.payload,
+              })),
+            }),
           );
         } catch (error) {
           if (!signal.aborted) {
             console.error("Error pushing events. Going offline.", error);
-            closeConnection(connection, "REMOTE_PUSH_ERROR");
+            fail("REMOTE_PUSH_ERROR");
           }
           return;
         }
@@ -366,8 +414,9 @@ export const createCrdtSyncRemoteSource = ({
         }
 
         if (!response.ok) {
+          // The remote would reject the same batch again, so only an explicit sync retries it.
           console.error("Remote rejected pushed events. Going offline.");
-          closeConnection(connection, "REMOTE_PUSH_ERROR");
+          fail("REMOTE_PUSH_ERROR", { reconnect: false });
           return;
         }
 
@@ -402,24 +451,17 @@ export const createCrdtSyncRemoteSource = ({
 
     const close = () => {
       controller.abort();
+      ready.resolve();
       if (source) {
         disconnectSource(source);
       }
     };
 
-    const ready = Promise.resolve()
-      .then(() => untilClosed(connect))
-      .catch((error) => {
-        if (!signal.aborted) {
-          throw error;
-        }
-      });
-
-    const connection = { ready, close, push, sync };
+    const connection = { ready: ready.promise, start, close, push, sync };
     return connection;
   };
 
-  const goOnline = (): Promise<void> => {
+  const connect = (): Promise<void> => {
     if (disposed) {
       return Promise.resolve();
     }
@@ -432,22 +474,35 @@ export const createCrdtSyncRemoteSource = ({
       return Promise.resolve();
     }
 
+    cancelReconnect();
     wantsOnline = true;
     const connection = createConnection(remoteFactory);
     current = connection;
     patchRemoteState({ type: "pending" });
+    connection.start();
     return connection.ready;
   };
 
-  const goOffline = async (reason: OfflineReason) => {
-    wantsOnline = false;
+  const goOnline = () => {
+    reconnectAttempt = 0;
+    return connect();
+  };
+
+  // Unlike goOffline, leaves syncWithRemote free to reconnect, but does not retry on its own: the caller
+  // knows the network is gone and calls syncWithRemote once it is back.
+  const dropConnection = (reason: OfflineReason) => {
+    cancelReconnect();
     if (current) {
       closeConnection(current, reason);
     }
   };
 
-  // Reconnects only when a connection error, not goOffline, took us offline. Retrying after a schema
-  // mismatch would fail the same way.
+  const goOffline = async (reason: OfflineReason) => {
+    wantsOnline = false;
+    dropConnection(reason);
+  };
+
+  // Reconnects right away, skipping any backoff, unless goOffline or a schema mismatch took us offline.
   const syncWithRemote = async () => {
     if (current) {
       await current.sync();
@@ -493,7 +548,7 @@ export const createCrdtSyncRemoteSource = ({
     console.warn(
       `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
     );
-    if (remoteState.type === "online" && !remoteState.deSynced) {
+    if (!remoteState.deSynced) {
       patchRemoteState({ deSynced: true });
     }
   };
@@ -504,7 +559,7 @@ export const createCrdtSyncRemoteSource = ({
 
   const remoteEventApplyFailedSubscription = storage.addEventListener("remote-event-apply-failed", () => {
     eventTarget.dispatchEvent("de-sync-detected", { reason: "ERROR_APPLYING_REMOTE_EVENT" });
-    if (remoteState.type === "online" && !remoteState.deSynced) {
+    if (!remoteState.deSynced) {
       patchRemoteState({ deSynced: true });
     }
   });
@@ -525,6 +580,7 @@ export const createCrdtSyncRemoteSource = ({
   return {
     goOnline,
     goOffline,
+    dropConnection,
     syncWithRemote,
     getState,
     dispose,

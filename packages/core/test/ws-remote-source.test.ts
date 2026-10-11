@@ -19,6 +19,7 @@ class FakeSocket extends EventTarget {
 
   drop() {
     this.readyState = WebSocket.CLOSED;
+    this.dispatchEvent(new Event("close"));
   }
 
   receive(message: SyncServerMessage) {
@@ -26,81 +27,96 @@ class FakeSocket extends EventTarget {
   }
 }
 
-const connect = async () => {
-  const socket = new FakeSocket();
-  const onReconnected = vi.fn();
-  const controller = new AbortController();
-  const connecting = createWsRemoteSource({ createWebSocket: () => socket as never })({
-    onEventsAvailable: vi.fn(),
-    onReconnected,
-    signal: controller.signal,
-  });
-  socket.open();
-  const source = await connecting;
-  return { socket, source, onReconnected, controller };
+const connect = (socket = new FakeSocket()) => {
+  const onEventsAvailable = vi.fn();
+  const onClosed = vi.fn();
+  const source = createWsRemoteSource({ createWebSocket: () => socket as never })({ onEventsAvailable, onClosed });
+  return { socket, source, onEventsAvailable, onClosed };
+};
+
+const respondToPull = (socket: FakeSocket, nextSyncId: number) => {
+  const request = socket.sent.at(-1);
+  if (request?.type !== "pull-events") {
+    throw new Error("Expected a pull request");
+  }
+  const batch = { events: [], hasMore: false, nextSyncId };
+  socket.receive({ type: "events-pull-response", requestId: request.requestId, data: batch });
+  return batch;
 };
 
 describe("createWsRemoteSource", () => {
-  it("reports every open after the first one as a reconnect", async () => {
-    const { socket, onReconnected } = await connect();
-    expect(onReconnected).not.toHaveBeenCalled();
-
-    socket.open();
-    socket.open();
-
-    expect(onReconnected).toHaveBeenCalledTimes(2);
-  });
-
-  it("resolves a request sent before a reconnect when the response arrives afterwards", async () => {
-    const { socket, source } = await connect();
+  it("sends requests once the socket opens", async () => {
+    const { socket, source } = connect();
 
     const pulling = source.pullEvents({ afterSyncId: 0 });
-    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    await Promise.resolve();
+    expect(socket.sent).toHaveLength(0);
+
     socket.open();
-    const [request] = socket.sent;
-    if (request?.type !== "pull-events") {
-      throw new Error("Expected a pull request");
-    }
-    const batch = { events: [], hasMore: false, nextSyncId: 3 };
-    socket.receive({ type: "events-pull-response", requestId: request.requestId, data: batch });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    const batch = respondToPull(socket, 3);
 
     await expect(pulling).resolves.toEqual(batch);
   });
 
-  it("waits for the socket to reopen before sending a request and starting its timeout", async () => {
-    vi.useFakeTimers();
-    try {
-      const { socket, source } = await connect();
-      socket.drop();
+  it("sends requests right away on a socket that is already open", async () => {
+    const socket = new FakeSocket();
+    socket.readyState = WebSocket.OPEN;
+    const { source } = connect(socket);
 
-      const pulling = source.pullEvents({ afterSyncId: 0 });
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(socket.sent).toHaveLength(0);
+    const pulling = source.pullEvents({ afterSyncId: 0 });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    const batch = respondToPull(socket, 3);
 
-      socket.open();
-      await vi.advanceTimersByTimeAsync(0);
-      const [request] = socket.sent;
-      if (request?.type !== "pull-events") {
-        throw new Error("Expected a pull request");
-      }
-      const batch = { events: [], hasMore: false, nextSyncId: 3 };
-      socket.receive({ type: "events-pull-response", requestId: request.requestId, data: batch });
-
-      await expect(pulling).resolves.toEqual(batch);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(pulling).resolves.toEqual(batch);
   });
 
-  it("rejects a request waiting for the socket to reopen when the connection closes", async () => {
-    const { socket, source, controller } = await connect();
+  it("reports the first close, rejects pending requests, and closes the socket", async () => {
+    const { socket, source, onClosed } = connect();
+    socket.open();
+    const pulling = source.pullEvents({ afterSyncId: 0 });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    socket.drop();
     socket.drop();
 
-    const pushing = source.pushEvents({ nodeId: "node", events: [] });
-    controller.abort(new Error("closed"));
+    await expect(pulling).rejects.toThrow("WebSocket closed");
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    expect(socket.close).toHaveBeenCalledTimes(1);
+  });
 
-    await expect(pushing).rejects.toThrow("closed");
+  it("rejects requests without sending them once the socket has closed", async () => {
+    const { socket, source } = connect();
+    const waiting = source.pushEvents({ nodeId: "node", events: [] });
+
+    socket.drop();
     socket.open();
+
+    await expect(waiting).rejects.toThrow("WebSocket closed");
+    await expect(source.pullEvents({ afterSyncId: 0 })).rejects.toThrow("WebSocket closed");
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("closes the socket on disconnect without reporting a close", async () => {
+    const { socket, source, onClosed } = connect();
+    socket.open();
+    const pulling = source.pullEvents({ afterSyncId: 0 });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    source.disconnect?.();
+    socket.drop();
+
+    await expect(pulling).rejects.toThrow("WebSocket closed");
+    expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it("reports broadcast events", () => {
+    const { socket, onEventsAvailable } = connect();
+    socket.open();
+
+    socket.receive({ type: "events-applied", newSyncId: 7, eventHlcSum: "sum" });
+
+    expect(onEventsAvailable).toHaveBeenCalledWith({ newSyncId: 7, remoteEventHlcSum: "sum" });
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SyncDbMigrator } from "../src/migrations/migrator";
 import type { CrdtStorage } from "../src/sqlite-crdt/crdt-storage";
 import {
+  type CrdtSyncRemoteSource,
   type CreateRemoteSourceFactory,
   createCrdtSyncRemoteSource,
   type EventsAvailable,
@@ -31,46 +32,12 @@ const migrator = {
 } as SyncDbMigrator;
 
 describe("createCrdtSyncRemoteSource", () => {
-  afterEach(() => {
+  const created: CrdtSyncRemoteSource[] = [];
+
+  afterEach(async () => {
+    await Promise.all(created.splice(0).map((remoteSource) => remoteSource.dispose()));
     vi.useRealTimers();
     vi.restoreAllMocks();
-  });
-
-  it("retries transient pull failures", async () => {
-    const randomValues = [1, 0, 1, 0];
-    vi.spyOn(Math, "random").mockImplementation(() => randomValues.shift() ?? 0);
-
-    const pullRequests: EventsPullRequest[] = [];
-    const source = {
-      pullEvents: vi.fn(async (request: EventsPullRequest) => {
-        pullRequests.push(request);
-        if (pullRequests.length < 3) {
-          throw new Error(`pull failed ${pullRequests.length}`);
-        }
-        return { events: [], hasMore: false, nextSyncId: 0 };
-      }),
-      pushEvents: vi.fn(async (_request: EventsPushRequest) => ({ ok: true })),
-    };
-
-    const remoteSource = createCrdtSyncRemoteSource({
-      bufferSize: 50,
-      storage: createStorageMock(),
-      migrator,
-      pullSyncId: createStoredValue({ initialValue: 0 }),
-      pushSyncId: createStoredValue({ initialValue: 0 }),
-      nodeId: "local-node",
-      remoteFactory: () => source,
-    });
-
-    await remoteSource.goOnline();
-    await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(3));
-
-    expect(pullRequests).toEqual([
-      { afterSyncId: 0, excludeNodeId: "local-node" },
-      { afterSyncId: 0, excludeNodeId: "local-node" },
-      { afterSyncId: 0, excludeNodeId: "local-node" },
-    ]);
-    expect(remoteSource.getState().remoteState).toBe("online");
   });
 
   const emptyPull = async () => ({ events: [], hasMore: false, nextSyncId: 0 });
@@ -95,7 +62,7 @@ describe("createCrdtSyncRemoteSource", () => {
     vi.spyOn(Math, "random").mockImplementation(() => (attempt++ % 2 === 0 ? 1 : 0));
 
     const sources = [...(opts.sources ?? [])];
-    return createCrdtSyncRemoteSource({
+    const remoteSource = createCrdtSyncRemoteSource({
       bufferSize: 50,
       storage: opts.storage ?? createStorageMock(),
       migrator,
@@ -112,18 +79,40 @@ describe("createCrdtSyncRemoteSource", () => {
           return source;
         }),
     });
+    created.push(remoteSource);
+    return remoteSource;
   };
 
-  describe("after reconnecting", () => {
-    const remoteEvent = {
-      schema_version: 1,
-      timestamp: "0000000000001-0000-node-a",
-      type: "item-created" as const,
-      dataset: "todo",
-      item_id: "1",
-      payload: "{}",
-    };
+  const hangingPull = () => new Promise<never>(() => {});
 
+  const setupClosable = (sources: ReturnType<typeof createSource>[] = []) => {
+    const closers: ((error?: unknown) => void)[] = [];
+    const remoteFactory = vi.fn<CreateRemoteSourceFactory>(({ onClosed }) => {
+      closers.push(onClosed);
+      return sources.shift() ?? createSource({});
+    });
+    return { remoteSource: setup({ remoteFactory }), remoteFactory, closers };
+  };
+
+  const remoteEvent = {
+    schema_version: 1,
+    timestamp: "0000000000001-0000-node-a",
+    type: "item-created" as const,
+    dataset: "todo",
+    item_id: "1",
+    payload: "{}",
+  };
+
+  const createStorageWithEventToPush = () =>
+    ({
+      ...createStorageMock(),
+      getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
+        afterSyncId < 1
+          ? { events: [remoteEvent], hasMore: false, nextSyncId: 1 }
+          : { events: [], hasMore: false, nextSyncId: afterSyncId },
+    }) as unknown as CrdtStorage;
+
+  describe("after reconnecting", () => {
     it("ignores a pull failure from the previous connection", async () => {
       const stalePull = createDeferredPromise<EventsPullResponse>();
       const previous = createSource({ pullEvents: () => stalePull.promise });
@@ -142,15 +131,6 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(current.disconnect).not.toHaveBeenCalled();
       expect(remoteSource.getState().remoteState).toBe("online");
     });
-
-    const createStorageWithEventToPush = () =>
-      ({
-        ...createStorageMock(),
-        getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
-          afterSyncId < 1
-            ? { events: [remoteEvent], hasMore: false, nextSyncId: 1 }
-            : { events: [], hasMore: false, nextSyncId: afterSyncId },
-      }) as unknown as CrdtStorage;
 
     it("ignores a push failure from the previous connection and pushes on the current one", async () => {
       const pushSyncId = createStoredValue({ initialValue: 0 });
@@ -194,44 +174,6 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(previous.pushEvents).toHaveBeenCalledTimes(1);
       expect(remoteSource.getState().remoteState).toBe("online");
       expect(pushSyncId.current).toBe(1);
-    });
-
-    it("pulls missed events and pushes pending ones when the source reports a reconnect", async () => {
-      const pullSyncId = createStoredValue({ initialValue: 0 });
-      const pushSyncId = createStoredValue({ initialValue: 0 });
-      let hasPendingEvent = false;
-      const storage = {
-        ...createStorageMock(),
-        getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
-          hasPendingEvent && afterSyncId < 1
-            ? { events: [remoteEvent], hasMore: false, nextSyncId: 1 }
-            : { events: [], hasMore: false, nextSyncId: afterSyncId },
-      } as unknown as CrdtStorage;
-      const source = createSource({});
-      let reportReconnect = () => {};
-      const remoteSource = setup({
-        storage,
-        pullSyncId,
-        pushSyncId,
-        remoteFactory: ({ onReconnected }) => {
-          reportReconnect = onReconnected;
-          return source;
-        },
-      });
-
-      await remoteSource.goOnline();
-      await remoteSource.syncWithRemote();
-      const pullsBeforeReconnect = source.pullEvents.mock.calls.length;
-      expect(source.pushEvents).not.toHaveBeenCalled();
-
-      hasPendingEvent = true;
-      source.pullEvents.mockResolvedValueOnce({ events: [remoteEvent], hasMore: false, nextSyncId: 5 });
-      reportReconnect();
-
-      await vi.waitFor(() => expect(pullSyncId.current).toBe(5));
-      await vi.waitFor(() => expect(pushSyncId.current).toBe(1));
-      expect(source.pullEvents).toHaveBeenCalledTimes(pullsBeforeReconnect + 1);
-      expect(remoteSource.getState().remoteState).toBe("online");
     });
 
     it("does not apply events pulled by the previous connection", async () => {
@@ -335,7 +277,7 @@ describe("createCrdtSyncRemoteSource", () => {
       let pulls = 0;
       const source = createSource({ pullEvents: () => (pulls++ === 0 ? inFlight.promise : emptyPull()) });
       const remoteSource = setup({ sources: [source] });
-      await remoteSource.goOnline();
+      void remoteSource.goOnline();
       await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(1));
 
       const syncing = remoteSource.syncWithRemote();
@@ -453,14 +395,361 @@ describe("createCrdtSyncRemoteSource", () => {
     });
 
     it("does not start another connection while one is pending", async () => {
-      const remoteFactory = vi.fn(() => new Promise<never>(() => {}));
+      const remoteFactory = vi.fn(() => createSource({ pullEvents: hangingPull }));
       const remoteSource = setup({ remoteFactory });
       void remoteSource.goOnline();
 
-      await remoteSource.syncWithRemote();
+      void remoteSource.syncWithRemote();
 
       expect(remoteFactory).toHaveBeenCalledTimes(1);
       expect(remoteSource.getState().remoteState).toBe("pending");
+    });
+  });
+
+  describe("reconnecting", () => {
+    it("shows the remote as pending until the first request succeeds", async () => {
+      const pulled = createDeferredPromise<EventsPullResponse>();
+      const remoteSource = setup({ sources: [createSource({ pullEvents: () => pulled.promise })] });
+
+      const online = remoteSource.goOnline();
+      expect(remoteSource.getState().remoteState).toBe("pending");
+
+      pulled.resolve({ events: [], hasMore: false, nextSyncId: 0 });
+      await online;
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("stays offline when the connection closes just after the first response arrives", async () => {
+      const pulled = createDeferredPromise<EventsPullResponse>();
+      const source = createSource({ pullEvents: () => pulled.promise });
+      const remoteSource = setup({ sources: [source] });
+      const online = remoteSource.goOnline();
+      await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalled());
+
+      pulled.resolve({ events: [], hasMore: false, nextSyncId: 0 });
+      queueMicrotask(() => void remoteSource.goOffline("DISCONNECTED"));
+      await online;
+
+      expect(remoteSource.getState().remoteState).toBe("offline");
+    });
+
+    it("reconnects with backoff after the source closes and catches up", async () => {
+      vi.useFakeTimers();
+      const first = createSource({});
+      const second = createSource({});
+      const { remoteSource, remoteFactory, closers } = setupClosable([first, second]);
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+
+      closers[0]?.();
+      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(first.disconnect).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(second.pullEvents).toHaveBeenCalledWith({ afterSyncId: 0, excludeNodeId: "local-node" });
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("doubles the backoff while attempts fail and restarts it after a stable connection", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const closers: ((error?: unknown) => void)[] = [];
+      let failing = true;
+      const remoteFactory = vi.fn<CreateRemoteSourceFactory>(({ onClosed }) => {
+        closers.push(onClosed);
+        if (failing) {
+          throw new Error("connect failed");
+        }
+        return createSource({});
+      });
+      const remoteSource = setup({ remoteFactory });
+      vi.spyOn(Math, "random").mockReturnValue(1);
+
+      await remoteSource.goOnline();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(remoteFactory).toHaveBeenCalledTimes(3);
+
+      failing = false;
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(4);
+      expect(remoteSource.getState().remoteState).toBe("online");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      closers.at(-1)?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(5);
+    });
+
+    it("keeps growing the backoff when connections drop right after connecting", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+
+      closers[0]?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+
+      closers[1]?.();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(remoteFactory).toHaveBeenCalledTimes(3);
+    });
+
+    it("treats a close during the factory call as a failed attempt", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const source = createSource({});
+      const remoteSource = setup({
+        remoteFactory: ({ onClosed }) => {
+          onClosed(new Error("connection refused"));
+          return source;
+        },
+      });
+
+      await remoteSource.goOnline();
+
+      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(source.disconnect).toHaveBeenCalledTimes(1);
+      expect(source.pullEvents).not.toHaveBeenCalled();
+    });
+
+    it("times out a request that never settles and reconnects", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const stuck = createSource({ pullEvents: hangingPull });
+      const next = createSource({});
+      const remoteSource = setup({ sources: [stuck, next] });
+      vi.spyOn(Math, "random").mockReturnValue(1);
+
+      const online = remoteSource.goOnline();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await online;
+      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(stuck.disconnect).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(next.pullEvents).toHaveBeenCalled();
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("skips the backoff on syncWithRemote", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      await remoteSource.goOnline();
+      closers[0]?.();
+
+      await remoteSource.syncWithRemote();
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(remoteSource.getState().remoteState).toBe("online");
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+    });
+
+    it("restarts the backoff on syncWithRemote", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+      closers[0]?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+      closers[1]?.();
+
+      await remoteSource.syncWithRemote();
+      expect(remoteFactory).toHaveBeenCalledTimes(3);
+      closers[2]?.();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(remoteFactory).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(remoteFactory).toHaveBeenCalledTimes(4);
+    });
+
+    it("waits for syncWithRemote after the remote rejects a push", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const remoteFactory = vi.fn(() => createSource({ pushEvents: async () => ({ ok: false }) }));
+      const remoteSource = setup({ remoteFactory, storage: createStorageWithEventToPush() });
+
+      await remoteSource.goOnline();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("offline");
+
+      await remoteSource.syncWithRemote();
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps deSynced across reconnects", async () => {
+      vi.useFakeTimers();
+      let onApplyFailed = () => {};
+      const storage = {
+        ...createStorageMock(),
+        addEventListener: (type: string, listener: () => void) => {
+          if (type === "remote-event-apply-failed") {
+            onApplyFailed = listener;
+          }
+          return { unsubscribe: () => {} };
+        },
+      } as unknown as CrdtStorage;
+      const closers: ((error?: unknown) => void)[] = [];
+      const remoteSource = setup({
+        storage,
+        remoteFactory: ({ onClosed }) => {
+          closers.push(onClosed);
+          return createSource({});
+        },
+      });
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+
+      onApplyFailed();
+      closers[0]?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(remoteSource.getState()).toMatchObject({ remoteState: "online", deSynced: true });
+    });
+
+    it("does not reconnect after goOffline during the backoff", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      await remoteSource.goOnline();
+      closers[0]?.();
+
+      await remoteSource.goOffline("DISCONNECTED");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("offline");
+    });
+
+    it("does not reconnect after a schema version mismatch", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const remoteFactory = vi.fn(() =>
+        createSource({
+          pullEvents: async () => ({
+            events: [
+              {
+                schema_version: 2,
+                timestamp: "000000000000001:00000:remote",
+                type: "item-created",
+                dataset: "todo",
+                item_id: "1",
+                payload: "{}",
+              },
+            ],
+            hasMore: false,
+            nextSyncId: 1,
+          }),
+        }),
+      );
+      const remoteSource = setup({ remoteFactory });
+
+      await remoteSource.goOnline();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState()).toMatchObject({ remoteState: "offline", schemaVersionMismatched: true });
+    });
+
+    it("does not restart the backoff on a close from a previous connection", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      await remoteSource.goOnline();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await remoteSource.goOffline("DISCONNECTED");
+      await remoteSource.goOnline();
+
+      closers[1]?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+      closers[0]?.();
+      closers[2]?.();
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(remoteFactory).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(remoteFactory).toHaveBeenCalledTimes(4);
+    });
+
+    it("ignores a close from a previous connection", async () => {
+      const previous = createSource({});
+      const current = createSource({});
+      const { remoteSource, closers } = setupClosable([previous, current]);
+      await remoteSource.goOnline();
+      await remoteSource.goOffline("DISCONNECTED");
+      await remoteSource.goOnline();
+
+      closers[0]?.();
+
+      expect(remoteSource.getState().remoteState).toBe("online");
+      expect(current.disconnect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("dropConnection", () => {
+    it("goes offline and reconnects on the next syncWithRemote", async () => {
+      const remoteFactory = vi.fn(() => createSource({}));
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+
+      remoteSource.dropConnection("NETWORK_OFFLINE");
+      expect(remoteSource.getState().remoteState).toBe("offline");
+
+      await remoteSource.syncWithRemote();
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("cancels a pending connection attempt", async () => {
+      const pending = createSource({ pullEvents: hangingPull });
+      const next = createSource({});
+      const remoteSource = setup({ sources: [pending, next] });
+      void remoteSource.goOnline();
+
+      remoteSource.dropConnection("NETWORK_OFFLINE");
+      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(pending.disconnect).toHaveBeenCalledTimes(1);
+
+      await remoteSource.syncWithRemote();
+      expect(remoteSource.getState().remoteState).toBe("online");
+      await vi.waitFor(() => expect(next.pullEvents).toHaveBeenCalled());
+    });
+
+    it("stays offline after goOffline", async () => {
+      const remoteFactory = vi.fn(() => createSource({}));
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+      await remoteSource.goOffline("DISCONNECTED");
+
+      remoteSource.dropConnection("NETWORK_OFFLINE");
+      await remoteSource.syncWithRemote();
+
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("offline");
+    });
+
+    it("cancels a scheduled reconnect and waits for syncWithRemote", async () => {
+      vi.useFakeTimers();
+      const { remoteSource, remoteFactory, closers } = setupClosable();
+      await remoteSource.goOnline();
+      closers[0]?.();
+
+      remoteSource.dropConnection("NETWORK_OFFLINE");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+
+      await remoteSource.syncWithRemote();
+      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(remoteSource.getState().remoteState).toBe("online");
     });
   });
 
@@ -483,24 +772,21 @@ describe("createCrdtSyncRemoteSource", () => {
     });
 
     it("stays offline when goOffline is called while goOnline is connecting", async () => {
-      const source = createSource({});
-      const connecting = createDeferredPromise<typeof source>();
-      const remoteFactory = vi.fn(() => connecting.promise);
-      const remoteSource = setup({ remoteFactory });
+      const connecting = createDeferredPromise<EventsPullResponse>();
+      const source = createSource({ pullEvents: () => connecting.promise });
+      const remoteSource = setup({ sources: [source] });
 
       const online = remoteSource.goOnline();
-      await vi.waitFor(() => expect(remoteFactory).toHaveBeenCalled());
       const offline = remoteSource.goOffline("DISCONNECTED");
-      connecting.resolve(source);
+      connecting.resolve({ events: [], hasMore: false, nextSyncId: 0 });
       await Promise.all([online, offline]);
 
-      await vi.waitFor(() => expect(source.disconnect).toHaveBeenCalled());
-      expect(source.pullEvents).not.toHaveBeenCalled();
+      expect(source.disconnect).toHaveBeenCalledTimes(1);
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
     it("disposes while a connection attempt never settles", async () => {
-      const remoteSource = setup({ remoteFactory: () => new Promise<never>(() => {}) });
+      const remoteSource = setup({ sources: [createSource({ pullEvents: hangingPull })] });
 
       const online = remoteSource.goOnline();
       await remoteSource.dispose();
@@ -510,7 +796,8 @@ describe("createCrdtSyncRemoteSource", () => {
     });
 
     it("goes offline when a state listener calls goOffline while connecting", async () => {
-      const remoteSource = setup({ remoteFactory: () => new Promise<never>(() => {}) });
+      const remoteFactory = vi.fn(() => createSource({}));
+      const remoteSource = setup({ remoteFactory });
       remoteSource.addEventListener("state-changed", (event) => {
         if (event.payload === "pending") {
           remoteSource.goOffline("DISCONNECTED");
@@ -519,15 +806,14 @@ describe("createCrdtSyncRemoteSource", () => {
 
       await remoteSource.goOnline();
 
+      expect(remoteFactory).not.toHaveBeenCalled();
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
     it("goes offline without waiting for a reconnect attempt that never settles", async () => {
       const previous = createSource({});
-      let factoryCalls = 0;
-      const remoteSource = setup({
-        remoteFactory: () => (factoryCalls++ === 0 ? previous : new Promise<never>(() => {})),
-      });
+      const reconnecting = createSource({ pullEvents: hangingPull });
+      const remoteSource = setup({ sources: [previous, reconnecting] });
       await remoteSource.goOnline();
 
       const offline = remoteSource.goOffline("DISCONNECTED");
@@ -535,7 +821,7 @@ describe("createCrdtSyncRemoteSource", () => {
       await remoteSource.goOffline("DISCONNECTED");
       await Promise.all([offline, online]);
 
-      expect(factoryCalls).toBe(1);
+      expect(reconnecting.disconnect).toHaveBeenCalledTimes(1);
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
@@ -544,10 +830,7 @@ describe("createCrdtSyncRemoteSource", () => {
       previous.disconnect.mockImplementation(() => {
         remoteSource.goOnline();
       });
-      let factoryCalls = 0;
-      const remoteSource = setup({
-        remoteFactory: () => (factoryCalls++ === 0 ? previous : new Promise<never>(() => {})),
-      });
+      const remoteSource = setup({ sources: [previous, createSource({ pullEvents: hangingPull })] });
       await remoteSource.goOnline();
 
       await remoteSource.goOffline("DISCONNECTED");
@@ -557,25 +840,24 @@ describe("createCrdtSyncRemoteSource", () => {
     });
 
     it("shares one connection attempt between concurrent goOnline calls", async () => {
-      vi.spyOn(console, "warn").mockImplementation(() => {});
-      const remoteFactory = vi.fn(async (): Promise<ReturnType<typeof createSource>> => {
-        throw new Error("connect failed");
-      });
+      const pulled = createDeferredPromise<EventsPullResponse>();
+      const remoteFactory = vi.fn(() => createSource({ pullEvents: () => pulled.promise }));
       const remoteSource = setup({ remoteFactory });
 
-      await Promise.all([remoteSource.goOnline(), remoteSource.goOnline(), remoteSource.goOnline()]);
-      expect(remoteFactory).toHaveBeenCalledTimes(1);
-      expect(remoteSource.getState().remoteState).toBe("offline");
+      const online = Promise.all([remoteSource.goOnline(), remoteSource.goOnline(), remoteSource.goOnline()]);
+      pulled.resolve({ events: [], hasMore: false, nextSyncId: 0 });
+      await online;
 
-      await remoteSource.goOnline();
-      expect(remoteFactory).toHaveBeenCalledTimes(2);
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+      expect(remoteSource.getState().remoteState).toBe("online");
     });
   });
 
   describe("random interleavings", () => {
     type Outcome = "resolve" | "reject" | "hang";
     type Action =
-      | { type: "goOnline" | "goOffline" | "dispose" | "step" }
+      | { type: "goOnline" | "goOffline" | "dispose" | "step" | "advance" }
+      | { type: "close"; connection: number }
       | { type: "eventsAvailable"; connection: number; caughtUp: boolean };
 
     const actionArb: fc.Arbitrary<Action> = fc.oneof(
@@ -583,6 +865,8 @@ describe("createCrdtSyncRemoteSource", () => {
       { arbitrary: fc.constant({ type: "goOffline" } as const), weight: 2 },
       { arbitrary: fc.constant({ type: "dispose" } as const), weight: 1 },
       { arbitrary: fc.constant({ type: "step" } as const), weight: 5 },
+      { arbitrary: fc.constant({ type: "advance" } as const), weight: 1 },
+      { arbitrary: fc.record({ type: fc.constant("close" as const), connection: fc.nat(4) }), weight: 2 },
       {
         arbitrary: fc.record({
           type: fc.constant("eventsAvailable" as const),
@@ -624,6 +908,7 @@ describe("createCrdtSyncRemoteSource", () => {
             };
 
             const callbacks: ((event: EventsAvailable) => void)[] = [];
+            const closers: (() => void)[] = [];
             const disconnects = new Map<number, number>();
             const isLive = (id: number) => disconnects.get(id) === 0;
 
@@ -652,44 +937,64 @@ describe("createCrdtSyncRemoteSource", () => {
               pullSyncId,
               pushSyncId: createStoredValue({ initialValue: 0 }),
               nodeId: "local-node",
-              remoteFactory: ({ onEventsAvailable }) => {
+              remoteFactory: ({ onEventsAvailable, onClosed }) => {
                 const id = callbacks.length;
                 callbacks.push(onEventsAvailable);
-                return settle(() => {
-                  disconnects.set(id, 0);
-                  const use = <T>(response: () => T) => {
-                    if (disconnects.get(id) !== 0) {
-                      violations.push(`used disconnected source ${id}`);
-                    }
-                    return settle(response);
-                  };
-                  return {
-                    pullEvents: () =>
-                      use(() => ({
-                        events: [
-                          {
-                            schema_version: 1,
-                            timestamp: "t",
-                            type: "item-created" as const,
-                            dataset: "todo",
-                            item_id: String(id),
-                            payload: "{}",
-                          },
-                        ],
-                        hasMore: false,
-                        nextSyncId: pullSyncId.current + 1,
-                      })),
-                    pushEvents: () => use(() => ({ ok: true })),
-                    disconnect: () => {
-                      disconnects.set(id, (disconnects.get(id) ?? 0) + 1);
-                    },
-                  };
-                });
+                closers.push(() => onClosed());
+                const outcome = outcomes.next().value;
+                if (outcome === "reject") {
+                  throw new Error("connect failed");
+                }
+                disconnects.set(id, 0);
+                if (outcome === "hang") {
+                  onClosed(new Error("connection refused"));
+                }
+                const use = <T>(response: () => T) => {
+                  if (disconnects.get(id) !== 0) {
+                    violations.push(`used disconnected source ${id}`);
+                  }
+                  return settle(response);
+                };
+                return {
+                  pullEvents: () =>
+                    use(() => ({
+                      events: [
+                        {
+                          schema_version: 1,
+                          timestamp: "t",
+                          type: "item-created" as const,
+                          dataset: "todo",
+                          item_id: String(id),
+                          payload: "{}",
+                        },
+                      ],
+                      hasMore: false,
+                      nextSyncId: pullSyncId.current + 1,
+                    })),
+                  pushEvents: () => use(() => ({ ok: true })),
+                  disconnect: () => {
+                    disconnects.set(id, (disconnects.get(id) ?? 0) + 1);
+                  },
+                };
               },
             });
 
             let deSyncs = 0;
             remoteSource.addEventListener("de-sync-detected", () => deSyncs++);
+            let depth = 0;
+            remoteSource.addEventListener("state-changed", (event) => {
+              const outcome = outcomes.next().value;
+              if (outcome === "resolve" || depth > 3) {
+                return;
+              }
+              depth++;
+              if (event.payload === "offline" && outcome === "hang") {
+                track(remoteSource.goOnline());
+              } else if (outcome === "reject") {
+                track(remoteSource.goOffline("DISCONNECTED"));
+              }
+              depth--;
+            });
 
             let unsettled = 0;
             const track = (promise: Promise<void>) => {
@@ -711,14 +1016,21 @@ describe("createCrdtSyncRemoteSource", () => {
                 if (scheduler.count() > 0) {
                   await scheduler.waitOne();
                 }
-              } else if (callbacks.length > 0) {
+              } else if (action.type === "advance") {
+                await vi.advanceTimersByTimeAsync(5_000);
+              } else if (action.type === "close") {
+                if (closers.length > 0) {
+                  closers[action.connection % closers.length]?.();
+                }
+              } else if (action.type === "eventsAvailable" && callbacks.length > 0) {
                 const id = action.connection % callbacks.length;
                 const deSyncsBefore = deSyncs;
+                const wasLive = isLive(id);
                 callbacks[id]?.({
                   newSyncId: action.caughtUp ? pullSyncId.current : pullSyncId.current + 1,
                   remoteEventHlcSum: "remote-sum",
                 });
-                if (!isLive(id) && deSyncs !== deSyncsBefore) {
+                if (!wasLive && deSyncs !== deSyncsBefore) {
                   violations.push(`de-sync detected from closed connection ${id}`);
                 }
               }
@@ -726,7 +1038,7 @@ describe("createCrdtSyncRemoteSource", () => {
               if (remoteSource.getState().remoteState === "online" && ![...disconnects.values()].includes(0)) {
                 violations.push("online without a live source");
               }
-              if (action.type !== "step") {
+              if (action.type !== "step" && action.type !== "advance") {
                 await vi.advanceTimersByTimeAsync(0);
               }
             }
