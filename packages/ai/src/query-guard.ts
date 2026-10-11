@@ -25,10 +25,9 @@ export class QueryGuardError extends Error {
 
 export type QueryGuard = {
   /**
-   * Checks that the query is a read-only single statement. When the guard was created with
-   * `readableTables`, also checks that it only reads those tables. Without `readableTables`,
-   * reads are unrestricted: the whole database file is in scope, so do not put secret data
-   * in the same file.
+   * Checks that the query is a read-only single statement. `readableTables` filters ordinary
+   * table reads; virtual tables and table-valued functions may remain readable. Without
+   * `readableTables`, all tables in the database file are readable, including internal tables.
    */
   check(input: QueryGuardInput): QueryGuardVerdict;
   /**
