@@ -9,7 +9,7 @@ import type {
 } from "@sqlite-sync/core";
 import { dummyKysely, parametersAreEqual } from "@sqlite-sync/core";
 import type { Compilable, Kysely } from "kysely";
-import { createContext, use, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 type DbQueryParams<Database, TResult> =
   | Compilable<TResult>
@@ -32,7 +32,7 @@ export function createDbContext<Schema extends SyncDbSchema>(_: Schema) {
   const dbContext = createContext<SyncedDb<Schema["~clientSchema"]> | null>(null);
 
   const useDb = () => {
-    const db = use(dbContext);
+    const db = useContext(dbContext);
     if (!db) {
       throw new Error("Database not found");
     }
