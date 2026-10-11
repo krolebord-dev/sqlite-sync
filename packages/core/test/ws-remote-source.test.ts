@@ -108,6 +108,7 @@ describe("createWsRemoteSource", () => {
 
     await expect(pulling).rejects.toThrow("WebSocket closed");
     expect(socket.close).toHaveBeenCalledTimes(1);
+    expect(socket.close).toHaveBeenCalledWith(1000);
     expect(onClosed).not.toHaveBeenCalled();
   });
 

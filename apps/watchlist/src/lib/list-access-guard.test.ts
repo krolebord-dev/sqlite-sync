@@ -17,36 +17,36 @@ describe("requireListAccess", () => {
   });
 
   it.each([
-    [{ party: "list-db-server", name: "list-abc" }, "list-db-server"],
-    [{ party: "chat-agent", name: "list-abc:main" }, "chat-agent"],
-  ] as const)("admits list members to %o", async (lobby, party) => {
-    expect(await requireListAccess(request, lobby, party)).toBeUndefined();
+    [{ className: "ListDbServer", name: "list-abc" }, "ListDbServer"],
+    [{ className: "ChatAgent", name: "list-abc:main" }, "ChatAgent"],
+  ] as const)("admits list members to %o", async (lobby, className) => {
+    expect(await requireListAccess(request, lobby, className)).toBeUndefined();
     expect(userCanAccessList).toHaveBeenCalledWith("user-1", "abc");
   });
 
   it("rejects requests without a session", async () => {
     vi.mocked(getUserIdFromRequest).mockResolvedValue(null);
 
-    const response = await requireListAccess(request, { party: "list-db-server", name: "list-abc" }, "list-db-server");
+    const response = await requireListAccess(request, { className: "ListDbServer", name: "list-abc" }, "ListDbServer");
 
     expect(response?.status).toBe(401);
   });
 
   it("rejects users who are not members of the list", async () => {
-    const response = await requireListAccess(request, { party: "list-db-server", name: "list-xyz" }, "list-db-server");
+    const response = await requireListAccess(request, { className: "ListDbServer", name: "list-xyz" }, "ListDbServer");
 
     expect(response?.status).toBe(401);
   });
 
   it.each([
-    [{ party: "chat-agent", name: "list-abc:main" }, "list-db-server"],
-    [{ party: "list-db-server", name: "list-abc" }, "chat-agent"],
-    [{ party: "list-db-server", name: "list-abc:main" }, "list-db-server"],
-    [{ party: "chat-agent", name: "list-abc" }, "chat-agent"],
-    [{ party: "list-db-server", name: "abc" }, "list-db-server"],
-    [{ party: "list-db-server", name: "list-" }, "list-db-server"],
-  ] as const)("rejects %o on the %s route before checking the session", async (lobby, party) => {
-    const response = await requireListAccess(request, lobby, party);
+    [{ className: "ChatAgent", name: "list-abc:main" }, "ListDbServer"],
+    [{ className: "ListDbServer", name: "list-abc" }, "ChatAgent"],
+    [{ className: "ListDbServer", name: "list-abc:main" }, "ListDbServer"],
+    [{ className: "ChatAgent", name: "list-abc" }, "ChatAgent"],
+    [{ className: "ListDbServer", name: "abc" }, "ListDbServer"],
+    [{ className: "ListDbServer", name: "list-" }, "ListDbServer"],
+  ] as const)("rejects %o on the %s route before checking the session", async (lobby, className) => {
+    const response = await requireListAccess(request, lobby, className);
 
     expect(response?.status).toBe(404);
     expect(getUserIdFromRequest).not.toHaveBeenCalled();

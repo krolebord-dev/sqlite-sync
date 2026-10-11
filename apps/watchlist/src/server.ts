@@ -26,7 +26,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/agents")) {
-      const guard = (req: Request, lobby: Lobby) => requireListAccess(req, lobby, "chat-agent");
+      const guard = (req: Request, lobby: Lobby) => requireListAccess(req, lobby, "ChatAgent");
       const agentResponse = await routeAgentRequest(request, env, {
         locationHint: "weur",
         onBeforeConnect: guard,
@@ -39,7 +39,7 @@ export default {
       return new Response("Not found", { status: 404 });
     }
 
-    const guard = (req: Request, lobby: Lobby) => requireListAccess(req, lobby, "list-db-server");
+    const guard = (req: Request, lobby: Lobby) => requireListAccess(req, lobby, "ListDbServer");
     const partykitRequest = await routePartykitRequest(request, env, {
       prefix: "list-db",
       locationHint: "weur",

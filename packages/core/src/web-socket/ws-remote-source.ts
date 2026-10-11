@@ -31,7 +31,8 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
         request.reject(error);
       }
       requestsMap.clear();
-      socket.close();
+      // Servers may not answer a close frame without a code, leaving the socket stuck in CLOSING.
+      socket.close(1000);
       return true;
     };
 

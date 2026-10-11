@@ -19,7 +19,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "jotai": "^2.16.2",
     "kysely": "catalog:",
-    "partyserver": "^0.1.0",
+    "partyserver": "^0.5.10",
     "react": "catalog:",
     "react-dom": "catalog:",
     "tailwindcss": "^4.1.18"
@@ -30,6 +30,6 @@
     "@vitejs/plugin-react-swc": "^4.2.2",
     "typescript": "catalog:",
     "vite": "^7.3.1",
-    "wrangler": "^4.60.0"
+    "wrangler": "^4.105.0"
   }
 }

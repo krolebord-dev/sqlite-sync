@@ -67,7 +67,7 @@
     "kysely-d1": "^0.4.0",
     "lucide-react": "^0.563.0",
     "next-themes": "^0.4.6",
-    "partyserver": "^0.1.0",
+    "partyserver": "^0.5.10",
     "pupa": "^3.3.0",
     "react": "catalog:",
     "react-day-picker": "^9.13.0",
