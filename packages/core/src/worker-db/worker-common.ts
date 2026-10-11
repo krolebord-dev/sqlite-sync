@@ -41,7 +41,7 @@ export type WorkerNotificationMessage =
     };
 
 export type WorkerState = {
-  remoteState: "online" | "offline" | "pending";
+  remoteState: "online" | "offline" | "connecting";
   deSynced: boolean;
   schemaVersionMismatched: boolean;
 };

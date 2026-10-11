@@ -79,7 +79,7 @@ export class SchemaVersionMismatchError extends Error {
 
 type RemoteSourceState =
   | {
-      type: "pending";
+      type: "connecting";
       deSynced: boolean;
       schemaVersionMismatched: boolean;
     }
@@ -134,8 +134,15 @@ export const createCrdtSyncRemoteSource = ({
   };
 
   const patchRemoteState = (state: Partial<RemoteSourceState>) => {
+    const previous = remoteState;
     remoteState = { ...remoteState, ...state } as RemoteSourceState;
-    eventTarget.dispatchEvent("state-changed", remoteState.type);
+    if (
+      remoteState.type !== previous.type ||
+      remoteState.deSynced !== previous.deSynced ||
+      remoteState.schemaVersionMismatched !== previous.schemaVersionMismatched
+    ) {
+      eventTarget.dispatchEvent("state-changed", remoteState.type);
+    }
   };
 
   let current: Connection | null = null;
@@ -156,12 +163,16 @@ export const createCrdtSyncRemoteSource = ({
     });
   };
 
-  const closeConnection = (connection: Connection, reason: OfflineReason) => {
+  const closeConnection = (connection: Connection, reason: OfflineReason, { reconnect = false } = {}) => {
     if (current !== connection) {
       return false;
     }
     current = null;
-    patchRemoteState({ type: "offline", reason });
+    if (reconnect && scheduleReconnect()) {
+      patchRemoteState({ type: "connecting" });
+    } else {
+      patchRemoteState({ type: "offline", reason });
+    }
     connection.close();
     return true;
   };
@@ -174,7 +185,7 @@ export const createCrdtSyncRemoteSource = ({
   // Retrying after a schema mismatch would fail the same way.
   const scheduleReconnect = () => {
     if (!wantsOnline || current || reconnectTimer || remoteState.schemaVersionMismatched) {
-      return;
+      return false;
     }
     const maxDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempt);
     reconnectAttempt++;
@@ -183,6 +194,7 @@ export const createCrdtSyncRemoteSource = ({
       reconnectTimer = undefined;
       void connect();
     }, delay);
+    return true;
   };
 
   type Connection = ReturnType<typeof createConnection>;
@@ -224,15 +236,13 @@ export const createCrdtSyncRemoteSource = ({
     };
 
     const fail = (reason: OfflineReason, { reconnect = true } = {}) => {
-      if (!closeConnection(connection, establishedAt === null ? "INITIALIZATION_FAILED" : reason)) {
+      if (current !== connection) {
         return;
       }
       if (establishedAt !== null && Date.now() - establishedAt >= RECONNECT_MIN_UPTIME_MS) {
         reconnectAttempt = 0;
       }
-      if (reconnect) {
-        scheduleReconnect();
-      }
+      closeConnection(connection, establishedAt === null ? "INITIALIZATION_FAILED" : reason, { reconnect });
     };
 
     // A close during the factory call aborts before `source` is set, so the abort check below disconnects it.
@@ -478,7 +488,7 @@ export const createCrdtSyncRemoteSource = ({
     wantsOnline = true;
     const connection = createConnection(remoteFactory);
     current = connection;
-    patchRemoteState({ type: "pending" });
+    patchRemoteState({ type: "connecting" });
     connection.start();
     return connection.ready;
   };
@@ -494,6 +504,8 @@ export const createCrdtSyncRemoteSource = ({
     cancelReconnect();
     if (current) {
       closeConnection(current, reason);
+    } else if (remoteState.type === "connecting") {
+      patchRemoteState({ type: "offline", reason });
     }
   };
 

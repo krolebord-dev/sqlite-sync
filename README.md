@@ -245,7 +245,7 @@ elected worker wipes the local DB on startup when the stored version no longer m
 - Live query primitives via `db.createLiveQuery(...)`.
 - React hooks over the same engine: `useDb`, `useDbQuery`. Identical `useDbQuery` calls within the same provider share one live query when SQL and parameter values match.
 - Optional floating devtools UI via `@sqlite-sync/devtools`.
-- Online/offline toggles with explicit sync state (`online | offline | pending`).
+- Online/offline toggles with explicit sync state (`online | offline | connecting`).
 - De-sync and schema-mismatch detection, with reload/reset recovery via `requestReload({ clean })`.
 - Forced local-DB wipes across incompatible deploys via the `storageVersion` worker option.
 - Worker and server protocol types exported from `@sqlite-sync/core/worker` and `@sqlite-sync/core/server`.

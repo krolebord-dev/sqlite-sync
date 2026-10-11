@@ -248,16 +248,16 @@ function SyncStatus() {
   const dbState = useDbState();
 
   const toggleOnlineStatus = () => {
-    if (dbState.remoteState === "online") {
-      state.goOffline();
-    } else {
+    if (dbState.remoteState === "offline") {
       state.goOnline();
+    } else {
+      state.goOffline();
     }
   };
 
   const statusMap = {
     online: { color: "var(--success)", label: "Synced" },
-    pending: { color: "var(--warning)", label: "Syncing" },
+    connecting: { color: "var(--warning)", label: "Connecting" },
     offline: { color: "var(--danger)", label: "Offline" },
   } as const;
 
@@ -268,7 +268,6 @@ function SyncStatus() {
       type="button"
       className="sync-btn"
       onClick={toggleOnlineStatus}
-      disabled={dbState.remoteState === "pending"}
       title={`${dbState.remoteState} — click to toggle`}
     >
       <span className="sync-dot" style={{ background: cfg.color }} />

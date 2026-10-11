@@ -261,7 +261,7 @@ const onlineStatusConfig = {
     icon: <Wifi className="size-4" />,
     className: "text-emerald-500",
   },
-  pending: {
+  connecting: {
     label: "Connecting",
     icon: <Loader2 className="size-4 animate-spin" />,
     className: "text-amber-500",
@@ -279,10 +279,10 @@ function OnlineStatusIndicator() {
   const status = onlineStatusConfig[remoteState ?? "offline"];
 
   const toggleOnlineStatus = () => {
-    if (remoteState === "online") {
-      state.goOffline();
-    } else {
+    if (remoteState === "offline") {
       state.goOnline();
+    } else {
+      state.goOffline();
     }
   };
 

@@ -691,7 +691,7 @@ function SyncStatus() {
     <span>
       {remoteState === "online" && "Connected"}
       {remoteState === "offline" && "Offline"}
-      {remoteState === "pending" && "Connecting..."}
+      {remoteState === "connecting" && "Connecting..."}
       {schemaVersionMismatched && "New version available"}
       {deSynced && "Local data out of sync"}
     </span>
@@ -703,7 +703,7 @@ function SyncStatus() {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `remoteState` | `"online" \| "offline" \| "pending"` | Current remote connection state. `pending` means a connection attempt is in progress; it turns `online` once the remote answers the first request. Goes `offline` as soon as the connection drops or the browser reports the network is gone. After a dropped connection or a failed request, the library reconnects on its own with exponential backoff (about 1s doubling up to 30s, with jitter). The backoff restarts on `goOnline()` and `state.sync()`. If the remote rejects pushed events, the library waits for the next `state.sync()` instead, since the same batch would be rejected again. |
+| `remoteState` | `"online" \| "offline" \| "connecting"` | Current remote connection state. `online` means the remote answered a request on the current connection. `connecting` means the library is getting there on its own: a connection attempt is in progress, or a retry is scheduled after a dropped connection or a failed request. Retries use exponential backoff (about 1s doubling up to 30s, with jitter), and the state stays `connecting` throughout. The backoff restarts on `goOnline()` and `state.sync()`. `offline` means nothing happens until something triggers it: after `goOffline()`, a schema version mismatch, the browser reporting the network is gone (the library reconnects on the browser's `online` event), or the remote rejecting pushed events (the same batch would be rejected again, so the library waits for the next `state.sync()`). |
 | `deSynced` | `boolean` | `true` after the worker detects that local applied events and remote applied events diverged. Stays `true` until the page reloads, since reconnecting does not fix the divergence. |
 | `schemaVersionMismatched` | `boolean` | `true` after the worker receives an event from a newer schema version than the local code can apply. |
 
@@ -1247,8 +1247,8 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.getState()` | `() => WorkerState` | Get current sync state |
 | `state.subscribe(onChange)` | `(fn) => () => void` | Subscribe to state changes |
 | `state.goOnline()` | `() => Promise<void>` | Connect to remote server. Resolves once the remote answers the first request, the attempt fails, or it is cancelled; the initial sync continues in the background |
-| `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a pending connection attempt |
-| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` going `offline` via `state.subscribe`. If a connection error, a dropped connection, or the browser going offline took the remote offline, reconnects right away instead of waiting for the next backoff retry; does nothing after `goOffline()` or a schema version mismatch (call `goOnline()` to connect). Also runs automatically whenever the page becomes visible or the browser comes back online. While the browser reports it is offline, the library does not retry on its own |
+| `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a connection attempt in progress or a scheduled retry |
+| `state.sync()` | `() => void` | Start pulling new remote events and pushing pending local events in the background. Returns immediately: new data reaches the tab like any other remote change, and failures show up as `remoteState` leaving `online` via `state.subscribe`. If the remote is `connecting` while waiting for a retry, or went `offline` because the browser lost the network or the remote rejected pushed events, reconnects right away; does nothing after `goOffline()` or a schema version mismatch (call `goOnline()` to connect). Also runs automatically whenever the page becomes visible or the browser comes back online. While the browser reports it is offline, the library does not retry on its own |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |
@@ -1372,7 +1372,7 @@ type RemoteSource = {
 
 - One source is one connection. Each call must return a new source, synchronously. Do any async setup, like fetching a token, inside the source.
 - The library calls `disconnect` on every returned source exactly once, also to cancel an attempt that is still connecting. It does not wait for `disconnect` to finish.
-- Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then goes `offline` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
+- Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then reports `connecting` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
 - `pullEvents` and `pushEvents` may wait for the connection to open. Once the connection has closed, they should reject so failures surface quickly.
 - The library times requests out after 10 seconds and does not retry on the same source: any failed request closes the connection, and the library reconnects with backoff. A push response with `ok: false` also closes the connection, but the library does not reconnect until the next `state.sync()`. The remote counts as `online` once the first request succeeds.
 

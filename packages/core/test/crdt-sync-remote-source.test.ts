@@ -338,13 +338,13 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
-    it("reconnects when a pull error took it offline", async () => {
+    it("reconnects right away after a pull error", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const failing = createSource({ pullEvents: () => Promise.reject(new Error("pull failed")) });
       const next = createSource({});
       const remoteSource = setup({ sources: [failing, next] });
       await remoteSource.goOnline();
-      await vi.waitFor(() => expect(remoteSource.getState().remoteState).toBe("offline"));
+      expect(failing.disconnect).toHaveBeenCalledTimes(1);
 
       await remoteSource.syncWithRemote();
 
@@ -394,7 +394,7 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(remoteSource.getState()).toMatchObject({ remoteState: "offline", schemaVersionMismatched: true });
     });
 
-    it("does not start another connection while one is pending", async () => {
+    it("does not start another connection while one is connecting", async () => {
       const remoteFactory = vi.fn(() => createSource({ pullEvents: hangingPull }));
       const remoteSource = setup({ remoteFactory });
       void remoteSource.goOnline();
@@ -402,17 +402,17 @@ describe("createCrdtSyncRemoteSource", () => {
       void remoteSource.syncWithRemote();
 
       expect(remoteFactory).toHaveBeenCalledTimes(1);
-      expect(remoteSource.getState().remoteState).toBe("pending");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
     });
   });
 
   describe("reconnecting", () => {
-    it("shows the remote as pending until the first request succeeds", async () => {
+    it("shows the remote as connecting until the first request succeeds", async () => {
       const pulled = createDeferredPromise<EventsPullResponse>();
       const remoteSource = setup({ sources: [createSource({ pullEvents: () => pulled.promise })] });
 
       const online = remoteSource.goOnline();
-      expect(remoteSource.getState().remoteState).toBe("pending");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
 
       pulled.resolve({ events: [], hasMore: false, nextSyncId: 0 });
       await online;
@@ -442,7 +442,7 @@ describe("createCrdtSyncRemoteSource", () => {
       await remoteSource.goOnline();
 
       closers[0]?.();
-      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
       expect(first.disconnect).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(999);
@@ -451,6 +451,35 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(remoteFactory).toHaveBeenCalledTimes(2);
       expect(second.pullEvents).toHaveBeenCalledWith({ afterSyncId: 0, excludeNodeId: "local-node" });
       expect(remoteSource.getState().remoteState).toBe("online");
+    });
+
+    it("stays connecting through failed retries until it is back online", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const closers: ((error?: unknown) => void)[] = [];
+      let failing = false;
+      const remoteSource = setup({
+        remoteFactory: ({ onClosed }) => {
+          closers.push(onClosed);
+          if (failing) {
+            throw new Error("connect failed");
+          }
+          return createSource({});
+        },
+      });
+      vi.spyOn(Math, "random").mockReturnValue(1);
+      const states: string[] = [];
+      remoteSource.addEventListener("state-changed", (event) => states.push(event.payload));
+      await remoteSource.goOnline();
+
+      failing = true;
+      closers[0]?.();
+      await vi.advanceTimersByTimeAsync(3_000);
+      failing = false;
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      expect(closers).toHaveLength(4);
+      expect(states).toEqual(["connecting", "online", "connecting", "online"]);
     });
 
     it("doubles the backoff while attempts fail and restarts it after a stable connection", async () => {
@@ -516,7 +545,7 @@ describe("createCrdtSyncRemoteSource", () => {
 
       await remoteSource.goOnline();
 
-      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
       expect(source.disconnect).toHaveBeenCalledTimes(1);
       expect(source.pullEvents).not.toHaveBeenCalled();
     });
@@ -532,7 +561,7 @@ describe("createCrdtSyncRemoteSource", () => {
       const online = remoteSource.goOnline();
       await vi.advanceTimersByTimeAsync(10_000);
       await online;
-      expect(remoteSource.getState().remoteState).toBe("offline");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
       expect(stuck.disconnect).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(1_000);
@@ -625,6 +654,7 @@ describe("createCrdtSyncRemoteSource", () => {
       closers[0]?.();
 
       await remoteSource.goOffline("DISCONNECTED");
+      expect(remoteSource.getState().remoteState).toBe("offline");
       await vi.advanceTimersByTimeAsync(60_000);
 
       expect(remoteFactory).toHaveBeenCalledTimes(1);
@@ -744,6 +774,7 @@ describe("createCrdtSyncRemoteSource", () => {
       closers[0]?.();
 
       remoteSource.dropConnection("NETWORK_OFFLINE");
+      expect(remoteSource.getState().remoteState).toBe("offline");
       await vi.advanceTimersByTimeAsync(60_000);
       expect(remoteFactory).toHaveBeenCalledTimes(1);
 
@@ -799,7 +830,7 @@ describe("createCrdtSyncRemoteSource", () => {
       const remoteFactory = vi.fn(() => createSource({}));
       const remoteSource = setup({ remoteFactory });
       remoteSource.addEventListener("state-changed", (event) => {
-        if (event.payload === "pending") {
+        if (event.payload === "connecting") {
           remoteSource.goOffline("DISCONNECTED");
         }
       });
@@ -825,7 +856,7 @@ describe("createCrdtSyncRemoteSource", () => {
       expect(remoteSource.getState().remoteState).toBe("offline");
     });
 
-    it("shows a reconnect started by disconnect as pending", async () => {
+    it("shows a reconnect started by disconnect as connecting", async () => {
       const previous = createSource({});
       previous.disconnect.mockImplementation(() => {
         remoteSource.goOnline();
@@ -836,7 +867,7 @@ describe("createCrdtSyncRemoteSource", () => {
       await remoteSource.goOffline("DISCONNECTED");
 
       expect(previous.disconnect).toHaveBeenCalled();
-      expect(remoteSource.getState().remoteState).toBe("pending");
+      expect(remoteSource.getState().remoteState).toBe("connecting");
     });
 
     it("shares one connection attempt between concurrent goOnline calls", async () => {
@@ -1035,8 +1066,12 @@ describe("createCrdtSyncRemoteSource", () => {
                 }
               }
 
-              if (remoteSource.getState().remoteState === "online" && ![...disconnects.values()].includes(0)) {
+              const hasLiveSource = [...disconnects.values()].includes(0);
+              if (remoteSource.getState().remoteState === "online" && !hasLiveSource) {
                 violations.push("online without a live source");
+              }
+              if (remoteSource.getState().remoteState === "offline" && hasLiveSource) {
+                violations.push("offline with a live source");
               }
               if (action.type !== "step" && action.type !== "advance") {
                 await vi.advanceTimersByTimeAsync(0);
