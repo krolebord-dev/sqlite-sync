@@ -56,7 +56,7 @@
     "@tanstack/react-virtual": "^3.13.18",
     "@tanstack/router-plugin": "^1.156.0",
     "agents": "^0.17.0",
-    "ai": "^6.0.208",
+    "ai": "catalog:",
     "arctic": "^3.7.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -84,7 +84,7 @@
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.5",
     "workers-ai-provider": "^3.0.2",
-    "zod": "^4.3.6"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@better-auth/cli": "^1.4.17",

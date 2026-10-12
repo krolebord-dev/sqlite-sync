@@ -1,3 +1,4 @@
+import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import type { AiMutationInput, AiMutationResult, AiQueryInput, AiQueryResult } from "../src/db-access";
 import { createDbTools } from "../src/tools";
@@ -25,6 +26,37 @@ describe("createDbTools", () => {
 
     expect(Object.keys(tools)).toEqual(["getDbSchema", "queryDb", "mutateDb"]);
     expect(tools.mutateDb?.description).toBeTruthy();
+  });
+
+  it("exposes JSON Schema inputs, including the no-id rule for create payloads", async () => {
+    const tools = createDbTools({
+      access: () => ({ getSchemaDoc: () => "doc", query: () => emptyResult }),
+      mutations: true,
+    });
+
+    const queryJsonSchema = await asSchema(tools.queryDb?.inputSchema).jsonSchema;
+    const mutateJsonSchema = await asSchema(tools.mutateDb?.inputSchema).jsonSchema;
+
+    expect(queryJsonSchema).toMatchObject({ type: "object", required: ["sql"], additionalProperties: false });
+
+    const eventVariants = (mutateJsonSchema as { properties: { events: { items: { anyOf: unknown[] } } } }).properties
+      .events.items.anyOf as { properties: { payload: Record<string, unknown> } }[];
+    expect(eventVariants).toHaveLength(2);
+    for (const variant of eventVariants) {
+      expect(variant.properties.payload.additionalProperties).not.toBe(false);
+    }
+    expect(eventVariants[0]?.properties.payload.not).toEqual({ required: ["id"] });
+  });
+
+  it("leaves input validation to the access layer", () => {
+    const tools = createDbTools({
+      access: () => ({ getSchemaDoc: () => "doc", query: () => emptyResult }),
+      mutations: true,
+    });
+
+    for (const tool of Object.values(tools)) {
+      expect(asSchema(tool.inputSchema).validate).toBeUndefined();
+    }
   });
 
   it("resolves the access factory on every call and awaits async docs", async () => {

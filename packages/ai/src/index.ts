@@ -22,4 +22,5 @@ export {
   runWithForcedRollback,
 } from "./query-guard";
 export { createSchemaDoc, type SchemaDocContext } from "./schema-doc";
-export { type CreateDbToolsOptions, createDbTools, type DbToolsAccess } from "./tools";
+export type { DbToolsAccess } from "./tool-definitions";
+export { type CreateDbToolsOptions, createDbTools } from "./tools";

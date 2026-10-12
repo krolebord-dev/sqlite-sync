@@ -37,8 +37,8 @@ pnpm add @sqlite-sync/devtools
 # Cloudflare Durable Objects adapter (server)
 pnpm add @sqlite-sync/cloudflare
 
-# AI agent tools (server)
-pnpm add @sqlite-sync/ai
+# AI agent tools and MCP helpers (server)
+pnpm add @sqlite-sync/ai ai zod
 ```
 
 Peer dependencies:
@@ -49,7 +49,7 @@ Peer dependencies:
 | `@sqlite-sync/react` | `@sqlite-sync/core`, `react ^18 \|\| ^19`, `kysely` |
 | `@sqlite-sync/devtools` | `@sqlite-sync/core`, `react ^18 \|\| ^19` |
 | `@sqlite-sync/cloudflare` | `@sqlite-sync/core`, `@cloudflare/workers-types`, `kysely` |
-| `@sqlite-sync/ai` | `@sqlite-sync/core`, `ai ^6` |
+| `@sqlite-sync/ai` | `@sqlite-sync/core`, `ai ^6`, `zod ^4.1.8`; optional `@modelcontextprotocol/sdk ^1.29` (`@sqlite-sync/ai/mcp`) |
 
 ---
 
@@ -1070,6 +1070,32 @@ const tools = createDbTools({ access: () => aiDbAccess, mutations: true });
 
 This adds `mutateDb`, which accepts `item-created`, `item-updated`, and `item-deleted` CRDT events. It applies them through sqlite-sync's own-event path, not arbitrary write SQL, so writes are validated, persisted to the event log, applied locally, and synced normally. For `item-created` events, omit `item_id` and `payload.id`; the tool generates ids, injects them into the CRDT events, and returns them as `createdIds`.
 
+### MCP servers
+
+`@sqlite-sync/ai/mcp` registers the same tools on an MCP server you own, next to your domain tools:
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createDbMcpInstructions, registerDbTools } from "@sqlite-sync/ai/mcp";
+
+const server = new McpServer(
+  { name: "my-app", version: "1.0.0" },
+  { instructions: createDbMcpInstructions({ multiDatabase: true, mutations: true }) },
+);
+
+registerDbTools(server, {
+  databases: {
+    list: (extra) => listUserDatabases(extra.authInfo),
+    access: (databaseId, extra) => resolveUserDatabase(databaseId, extra.authInfo), // null rejects
+  },
+  mutations: true,
+});
+```
+
+With `access: (extra) => DbToolsAccess` instead of `databases`, the server exposes a single database. With `databases`, it adds `listDatabases` and a required `databaseId` input to every tool. The id is model input, so `databases.access` must check that the caller may use it. Access is resolved per call, so the tools work with both session-based (`McpAgent`) and stateless transports. Auth is up to the app.
+
+Results come back as JSON text plus `structuredContent`; `{ error }` results set `isError`. `mutateDb` carries the `destructiveHint` annotation and the read tools carry `readOnlyHint`, so clients can confirm writes with the user.
+
 ### Limiting what an agent may touch
 
 By default the agent can read every table in the database file and mutate every table in the sync
@@ -1447,6 +1473,36 @@ function createDbTools(options: {
   access: () => DbToolsAccess | Promise<DbToolsAccess>;
   mutations?: boolean; // expose mutateDb
 }): ToolSet
+```
+
+#### `registerDbTools(server, options)`
+
+From `@sqlite-sync/ai/mcp`. Registers `getDbSchema`, `queryDb`, and optional `mutateDb` on an existing `McpServer`. Pass either `access` (single database) or `databases` (adds `listDatabases` and a required `databaseId` input); see [MCP servers](#mcp-servers).
+
+```ts
+function registerDbTools(server: McpServer, options: {
+  mutations?: boolean; // register mutateDb
+} & (
+  | { access: (extra: DbMcpRequestExtra) => DbToolsAccess | Promise<DbToolsAccess> }
+  | {
+      databases: {
+        list(extra: DbMcpRequestExtra): DbMcpDatabase[] | Promise<DbMcpDatabase[]>; // { id, name, description? }
+        access(databaseId: string, extra: DbMcpRequestExtra): DbToolsAccess | null | Promise<DbToolsAccess | null>;
+      };
+    }
+)): RegisteredDbTools // { getDbSchema, queryDb, mutateDb?, listDatabases? }
+```
+
+#### `createDbMcpInstructions(options?)`
+
+From `@sqlite-sync/ai/mcp`. Builds default `instructions` for the `McpServer` constructor, matching the registered tools.
+
+```ts
+function createDbMcpInstructions(options?: {
+  overview?: string; // app-level notes, placed first
+  multiDatabase?: boolean;
+  mutations?: boolean;
+}): string
 ```
 
 #### `createSchemaDoc(options)`

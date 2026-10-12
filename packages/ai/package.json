@@ -1,7 +1,7 @@
 {
   "name": "@sqlite-sync/ai",
   "version": "0.12.1",
-  "description": "AI agent tools for @sqlite-sync databases",
+  "description": "AI agent tools and MCP helpers for @sqlite-sync databases",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -15,6 +15,7 @@
     "ai",
     "agent",
     "tools",
+    "mcp",
     "offline-first",
     "local-first"
   ],
@@ -27,6 +28,12 @@
       "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./mcp": {
+      "@sqlite-sync/source": "./src/mcp.ts",
+      "workerd": "./src/mcp.ts",
+      "types": "./dist/mcp.d.ts",
+      "import": "./dist/mcp.js"
     }
   },
   "files": [
@@ -37,6 +44,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./mcp": {
+        "types": "./dist/mcp.d.ts",
+        "import": "./dist/mcp.js"
       }
     }
   },
@@ -48,14 +59,23 @@
     "prepublishOnly": "pnpm build"
   },
   "peerDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@sqlite-sync/core": "^0.12.1",
-    "ai": "^6.0.0"
+    "ai": "^6.0.0",
+    "zod": "^4.1.8"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
     "@sqlite-sync/core": "workspace:*",
-    "ai": "^6.0.201",
+    "ai": "catalog:",
     "tsdown": "0.22.14",
     "typescript": "catalog:",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "zod": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/sdk": {
+      "optional": true
+    }
   }
 }

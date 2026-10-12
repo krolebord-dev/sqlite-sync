@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/mcp.ts"],
   format: ["esm"],
   target: "es2022",
   fixedExtension: false,
@@ -12,6 +12,6 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   deps: {
-    neverBundle: ["ai", "@sqlite-sync/core"],
+    neverBundle: ["ai", "zod", "@sqlite-sync/core", /^@modelcontextprotocol\/sdk/],
   },
 });
