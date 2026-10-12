@@ -1,11 +1,105 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createMigrations } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";
 import { createSyncedDb, createSyncedDbDatabase, type SyncedDb } from "../src/sync-db";
+import { createDeferredPromise } from "../src/utils";
 import { runWithNoActiveReplicas } from "../src/worker-db/replica-lock";
 import { createBroadcastChannels, type WorkerResponseMessage } from "../src/worker-db/worker-common";
+
+describe.runIf(globalThis.navigator?.locks)("SyncedDb initialization cleanup", () => {
+  const schema = defineSyncSchema({
+    tables: { todo: t.table({ title: t.text() }) },
+    migrations: createMigrations(() => ({ 0: [] })),
+  });
+
+  let dbId: string;
+  let close: MockInstance<BroadcastChannel["close"]>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    close = vi.spyOn(BroadcastChannel.prototype, "close");
+    dbId = `sync-test-${crypto.randomUUID()}`;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  const createWorker = (postMessage: () => void) =>
+    Object.assign(new EventTarget(), {
+      onerror: null,
+      onmessage: null,
+      onmessageerror: null,
+      postMessage: vi.fn(postMessage),
+      terminate: vi.fn(),
+    }) satisfies Worker;
+
+  const expectReleased = async () => {
+    const { held, pending } = await navigator.locks.query();
+    expect(held?.some((lock) => lock.name.endsWith(dbId))).toBe(false);
+    expect(pending?.some((lock) => lock.name.endsWith(dbId))).toBe(false);
+    expect(close.mock.contexts).toHaveLength(2);
+    for (const channel of close.mock.contexts) {
+      expect(() => channel.postMessage("closed")).toThrow();
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  };
+
+  it("releases resources when posting the worker config fails", async () => {
+    const error = new DOMException("Worker props cannot be cloned", "DataCloneError");
+    const worker = createWorker(() => {
+      throw error;
+    });
+    await expect(createSyncedDb({ dbId, worker, syncDbSchema: schema })).rejects.toBe(error);
+    await expectReleased();
+  });
+
+  it("releases resources and pending requests when the worker state times out", async () => {
+    const started = createDeferredPromise<void>();
+    const worker = createWorker(() => started.resolve());
+    const rejected = expect(createSyncedDb({ dbId, worker, syncDbSchema: schema })).rejects.toThrow(
+      "Promise timed out after 15000ms",
+    );
+    await started.promise;
+    await vi.advanceTimersByTimeAsync(15_000);
+    await rejected;
+    await expectReleased();
+  });
+
+  it("rejects and closes channels when the client lock request fails", async () => {
+    const error = new Error("Client lock unavailable");
+    vi.spyOn(navigator.locks, "request").mockRejectedValueOnce(error);
+    const worker = createWorker(() => {});
+    await expect(createSyncedDb({ dbId, worker, syncDbSchema: schema })).rejects.toBe(error);
+    expect(worker.postMessage).not.toHaveBeenCalled();
+    await expectReleased();
+  });
+
+  it("disposes the initialized worker client when the replica lock request fails", async () => {
+    const channels = createBroadcastChannels(dbId);
+    const error = new Error("Replica lock unavailable");
+    const requestLock = navigator.locks.request.bind(navigator.locks);
+    vi.spyOn(navigator.locks, "request").mockImplementationOnce(requestLock).mockRejectedValueOnce(error);
+    const worker = createWorker(() =>
+      channels.responses.postMessage({
+        notificationType: "state-changed",
+        state: { remoteState: "offline", deSynced: false, schemaVersionMismatched: false },
+        storageGeneration: "gen-1",
+      }),
+    );
+    try {
+      await expect(createSyncedDb({ dbId, worker, syncDbSchema: schema })).rejects.toBe(error);
+      expect(worker.postMessage).toHaveBeenCalledOnce();
+      await expectReleased();
+    } finally {
+      channels.requests.close();
+      channels.responses.close();
+    }
+  });
+});
 
 describe("SyncedDb database facade", () => {
   it("drains through normal execution and bypasses only through unsafe execution", async () => {
@@ -257,6 +351,8 @@ describe("SyncedDb storage generation", () => {
     expect(await runWithNoActiveReplicas({ dbId: tab.dbId, run: () => {} })).toBe(false);
     await tab[Symbol.asyncDispose]();
     expect(await runWithNoActiveReplicas({ dbId: tab.dbId, run: () => {} })).toBe(true);
+    const { held } = await navigator.locks.query();
+    expect(held?.some((lock) => lock.name === `sync-db-client-lock-${tab.dbId}`)).toBe(false);
   });
 
   it.runIf(realLocks)("releases the replica lock when memory schema setup fails", async () => {

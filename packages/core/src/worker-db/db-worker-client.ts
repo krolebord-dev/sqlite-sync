@@ -44,12 +44,6 @@ export const createWorkerDbClient = async ({
       return Promise.reject(new Error("Worker client disposed"));
     }
     const requestId = crypto.randomUUID();
-    const promise = createDeferredPromise<unknown>({
-      timeout: 30_000,
-      onTimeout: () => workerRequestsMap.delete(requestId),
-    });
-    workerRequestsMap.set(requestId, promise);
-
     const request: WorkerRequestMessage<TMethod> = {
       type: "request",
       requestId,
@@ -57,7 +51,17 @@ export const createWorkerDbClient = async ({
       args,
     };
 
-    broadcastChannels.requests.postMessage(request);
+    try {
+      broadcastChannels.requests.postMessage(request);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+
+    const promise = createDeferredPromise<unknown>({
+      timeout: 30_000,
+      onTimeout: () => workerRequestsMap.delete(requestId),
+    });
+    workerRequestsMap.set(requestId, promise);
 
     return promise.promise as Promise<Awaited<ReturnType<WorkerRpc[TMethod]>>>;
   };
@@ -108,21 +112,6 @@ export const createWorkerDbClient = async ({
     requestReload: (options) => queryWorker("requestReload", [options]),
   };
 
-  const statePromise = awaitWorkerState(eventTarget);
-  postWorkerConfig(worker, config);
-  // On first tab, the worker may not have its BroadcastChannel listener ready yet,
-  // so this request can be silently dropped and timeout. The worker will independently
-  // post state at the end of init. For subsequent tabs, this triggers the already-running
-  // worker to send its current state.
-  rpc.postState().catch(noop);
-
-  let { state: workerState, storageGeneration } = await statePromise;
-
-  eventTarget.addEventListener("state-changed", (event) => {
-    workerState = event.payload.state;
-    storageGeneration = event.payload.storageGeneration;
-  });
-
   const dispose = () => {
     isDisposed = true;
     broadcastChannels.responses.onmessage = null;
@@ -132,13 +121,32 @@ export const createWorkerDbClient = async ({
     }
   };
 
-  return {
-    ...rpc,
-    subscribe: eventTarget.addEventListener,
-    getState: () => workerState,
-    getStorageGeneration: () => storageGeneration,
-    dispose,
-  };
+  try {
+    postWorkerConfig(worker, config);
+    // On first tab, the worker may not have its BroadcastChannel listener ready yet,
+    // so this request can be silently dropped and timeout. The worker will independently
+    // post state at the end of init. For subsequent tabs, this triggers the already-running
+    // worker to send its current state.
+    rpc.postState().catch(noop);
+
+    let { state: workerState, storageGeneration } = await awaitWorkerState(eventTarget);
+
+    eventTarget.addEventListener("state-changed", (event) => {
+      workerState = event.payload.state;
+      storageGeneration = event.payload.storageGeneration;
+    });
+
+    return {
+      ...rpc,
+      subscribe: eventTarget.addEventListener,
+      getState: () => workerState,
+      getStorageGeneration: () => storageGeneration,
+      dispose,
+    };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
 };
 
 function awaitWorkerState(eventTarget: TypedEventTarget<NotificationEvents>) {

@@ -17,7 +17,7 @@ import type {
   QueryBuilderOutput,
   SQLiteTransactionWrapper,
 } from "./sqlite-db-wrapper";
-import { createDeferredPromise, generateId } from "./utils";
+import { acquireLock, generateId } from "./utils";
 import { createWorkerDbClient } from "./worker-db/db-worker-client";
 import { acquireReplicaLock } from "./worker-db/replica-lock";
 import { createBroadcastChannels, syncDbClientLockName } from "./worker-db/worker-common";
@@ -124,27 +124,9 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
   const broadcastChannels = createBroadcastChannels(options.dbId);
 
-  const clientLockAcquired = createDeferredPromise<void>();
-  const clientLockRelease = createDeferredPromise<void>();
-  navigator.locks.request(`${syncDbClientLockName}-${options.dbId}`, { mode: "shared" }, () => {
-    clientLockAcquired.resolve();
-    return clientLockRelease.promise;
-  });
-  await clientLockAcquired.promise;
-
-  const workerClient = await createWorkerDbClient({
-    worker: options.worker,
-    config: {
-      clientId: generateId(),
-      dbId: options.dbId,
-      props: options.workerProps as never,
-    },
-    broadcastChannels,
-  });
-
-  const hlcCounter = new HLCCounter(tabId, () => Date.now());
-
-  const releaseReplicaLock = await acquireReplicaLock({ dbId: options.dbId });
+  let releaseClientLock: (() => Promise<void>) | undefined;
+  let disposeWorkerClient: (() => void) | undefined;
+  let releaseReplicaLock: (() => Promise<void>) | undefined;
   let disposeReactiveDb: (() => void) | undefined;
   let disposeRemoteSource: (() => Promise<void>) | undefined;
   const cleanupCallbacks: (() => void)[] = [];
@@ -158,22 +140,37 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
     for (const cleanup of cleanupCallbacks) {
       cleanup();
     }
-    clientLockRelease.resolve();
     try {
       await disposeRemoteSource?.();
     } finally {
       broadcastChannels.requests.close();
       broadcastChannels.responses.close();
-      workerClient.dispose();
+      disposeWorkerClient?.();
       try {
         disposeReactiveDb?.();
       } finally {
-        await releaseReplicaLock();
+        await Promise.all([releaseClientLock?.(), releaseReplicaLock?.()]);
       }
     }
   };
 
   try {
+    releaseClientLock = await acquireLock(`${syncDbClientLockName}-${options.dbId}`, { mode: "shared" });
+
+    const workerClient = await createWorkerDbClient({
+      worker: options.worker,
+      config: {
+        clientId: generateId(),
+        dbId: options.dbId,
+        props: options.workerProps as never,
+      },
+      broadcastChannels,
+    });
+    disposeWorkerClient = () => workerClient.dispose();
+
+    const hlcCounter = new HLCCounter(tabId, () => Date.now());
+
+    releaseReplicaLock = await acquireReplicaLock({ dbId: options.dbId });
     const workerClientSnapshot = await workerClient.getSnapshot();
     const reactiveDb = await createSQLiteReactiveDb<Database>({
       snapshot: workerClientSnapshot.file,

@@ -1,21 +1,9 @@
-import { createDeferredPromise } from "../utils";
+import { acquireLock } from "../utils";
 
 const replicaLockName = (dbId: string) => `sync-db-replica-lock-${dbId}`;
 
-export async function acquireReplicaLock({ dbId }: { dbId: string }) {
-  const acquired = createDeferredPromise<void>();
-  const released = createDeferredPromise<void>();
-  const request = navigator.locks.request(replicaLockName(dbId), { mode: "shared" }, () => {
-    acquired.resolve();
-    return released.promise;
-  });
-  void request.catch((error: unknown) => acquired.reject(error instanceof Error ? error : new Error(String(error))));
-  await acquired.promise;
-
-  return async () => {
-    released.resolve();
-    await request;
-  };
+export function acquireReplicaLock({ dbId }: { dbId: string }) {
+  return acquireLock(replicaLockName(dbId), { mode: "shared" });
 }
 
 export function runWithNoActiveReplicas({ dbId, run }: { dbId: string; run: () => void | Promise<void> }) {

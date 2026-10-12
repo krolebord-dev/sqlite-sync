@@ -37,6 +37,25 @@ function rejectTimeout(reject: (reason?: unknown) => void, opts: DeferredPromise
   tryCatch(() => opts?.onTimeout?.());
 }
 
+/**
+ * Resolves once the Web Lock is held and keeps holding it until the returned release function is called.
+ */
+export async function acquireLock(name: string, options: LockOptions) {
+  const acquired = createDeferredPromise<void>();
+  const released = createDeferredPromise<void>();
+  const request = navigator.locks.request(name, options, () => {
+    acquired.resolve();
+    return released.promise;
+  });
+  void request.catch((error: unknown) => acquired.reject(error instanceof Error ? error : new Error(String(error))));
+  await acquired.promise;
+
+  return async () => {
+    released.resolve();
+    await request;
+  };
+}
+
 export const generateId = () => {
   return crypto.randomUUID();
 };
