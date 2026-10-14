@@ -18,7 +18,6 @@ import {
   HashIcon,
   Loader2,
   SettingsIcon,
-  ShuffleIcon,
   SquareDashed,
   SquareDashedMousePointerIcon,
   StarIcon,
@@ -66,10 +65,10 @@ import {
   searchQueryAtom,
   selectAllAtom,
   selectedItemsAtom,
-  selectRandomFromSelectedItemsAtom,
 } from "./-/list-atoms";
 import { ListSettingsSheet } from "./-/list-settings";
 import { ReviewDialog } from "./-/review-dialog";
+import { RouletteButton } from "./-/roulette-dialog";
 
 export const Route = createFileRoute("/_app/list/$id/")({
   component: RouteComponent,
@@ -110,7 +109,10 @@ function ListPage() {
         <div className="grid w-full max-w-7xl grid-cols-[1fr_auto] items-center justify-start gap-x-4 gap-y-1 px-4 pt-2 sm:grid-cols-[auto_1fr_auto]">
           <SortingHeader />
           <SearchInput className="max-sm:col-span-2 max-sm:row-start-2 sm:max-w-52" />
-          <HeaderMenu />
+          <div className="flex items-center gap-1 sm:gap-2">
+            <RouletteButton />
+            <HeaderMenu />
+          </div>
         </div>
       </div>
       <div className="flex w-full flex-col items-center">
@@ -129,7 +131,6 @@ function HeaderMenu({ className }: { className?: string }) {
 
   const clearSelectedItems = useSetAtom(clearSelectedItemsAtom);
   const selectAllItems = useSetAtom(selectAllAtom);
-  const selectRandomFromSelectedItems = useSetAtom(selectRandomFromSelectedItemsAtom);
   const clearRandomizedItem = useSetAtom(clearRandomizedItemAtom);
   const bulkDelete = useSetAtom(bulkDeleteAtom);
   const bulkMarkWatched = useSetAtom(bulkMarkWatchedAtom);
@@ -162,16 +163,6 @@ function HeaderMenu({ className }: { className?: string }) {
             <SquareDashedMousePointerIcon /> Select all
           </DropdownMenuItem>
         )}
-        {isSelectionMode && !isRandomizedItem && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.preventDefault();
-              selectRandomFromSelectedItems();
-            }}
-          >
-            <ShuffleIcon /> Select random
-          </DropdownMenuItem>
-        )}
         {isRandomizedItem && (
           <DropdownMenuItem
             onClick={(e) => {
@@ -179,7 +170,7 @@ function HeaderMenu({ className }: { className?: string }) {
               clearRandomizedItem();
             }}
           >
-            <CheckIcon /> Clear randomized
+            <CheckIcon /> Clear roulette pick
           </DropdownMenuItem>
         )}
         {isSelectionMode && (

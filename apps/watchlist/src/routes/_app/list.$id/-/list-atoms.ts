@@ -21,6 +21,13 @@ export const randomizedItemAtom = atom<string | null>(null);
 export const reviewItemAtom = atom<string | null>(null);
 export const searchQueryAtom = atom<string>("");
 
+export type RouletteOptions = {
+  type: "all" | "movie" | "tv";
+  maxDuration: number | null;
+};
+export const rouletteOptionsAtom = atom<RouletteOptions>({ type: "all", maxDuration: null });
+export const rouletteSkippedItemsAtom = atom<string[]>([]);
+
 export const isSelectionModeAtom = atom((get) => get(selectedItemsAtom).length > 0);
 
 export const isItemSelectedAtom = atomFamily((itemId: string) =>
@@ -39,11 +46,6 @@ export const clearSelectedItemsAtom = atom(null, (_, set) => {
   set(selectedItemsAtom, []);
 });
 
-export const selectRandomFromSelectedItemsAtom = atom(null, (get, set) => {
-  const selectedItems = get(selectedItemsAtom);
-  const randomItemId = selectedItems[Math.floor(Math.random() * selectedItems.length)];
-  set(randomizedItemAtom, randomItemId);
-});
 export const clearRandomizedItemAtom = atom(null, (_, set) => {
   set(randomizedItemAtom, null);
 });
