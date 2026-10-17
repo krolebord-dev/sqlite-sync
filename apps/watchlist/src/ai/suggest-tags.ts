@@ -1,7 +1,8 @@
 import z from "zod";
 
 const JEV_MODEL = "typesafe/jev-1.14";
-const TAG_THRESHOLD = 0.7;
+const TAG_THRESHOLD = 0.55;
+const MAX_TAGS = 8;
 
 const GENRES = {
   action: { label: "action", description: "Fights, chases, stunts, and physical set pieces drive the story." },
@@ -176,8 +177,11 @@ export async function suggestTags({ item, apiKey }: SuggestTagsProps) {
 
   const { answers } = decisionsResponseSchema.parse(await response.json());
   const tags = Object.entries(TAGS)
-    .filter(([key]) => (answers[key]?.noul ?? 0) >= TAG_THRESHOLD)
-    .map(([, { label }]) => label);
+    .map(([key, { label }]) => ({ label, probability: answers[key]?.noul ?? 0 }))
+    .filter(({ probability }) => probability >= TAG_THRESHOLD)
+    .sort((a, b) => b.probability - a.probability)
+    .slice(0, MAX_TAGS)
+    .map(({ label }) => label);
 
   return { genre: GENRES[answers.genre.choice].label, tags };
 }
