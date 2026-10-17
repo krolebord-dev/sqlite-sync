@@ -1,10 +1,10 @@
 import { RPCHandler } from "@orpc/server/fetch";
-import { aiSuggestionsRouter } from "./routers/ai-suggestions";
+import { itemIndexingRouter } from "./routers/item-indexing";
 import { listSettingsRouter } from "./routers/list-settings";
 import { listWatchProvidersRouter } from "./routers/watch-providers";
 
 export const listDbOrpcRouter = {
-  aiSuggestions: aiSuggestionsRouter,
+  itemIndexing: itemIndexingRouter,
   listSettings: listSettingsRouter,
   watchProviders: listWatchProvidersRouter,
 };

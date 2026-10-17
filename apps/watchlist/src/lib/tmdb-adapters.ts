@@ -139,3 +139,42 @@ export async function getTmdbTrending(
 
   return options?.limit ? mapped.slice(0, options.limit) : mapped;
 }
+
+export type TmdbItemDetails = {
+  overview: string | null;
+  posterUrl: string | null;
+  rating: number | null;
+  releaseDate: number | null;
+  duration: number | null;
+  episodeCount: number | null;
+};
+
+function parseReleaseDate(date: string | null | undefined) {
+  return date ? new Date(date).getTime() : null;
+}
+
+export async function getTmdbItemDetails(tmdb: TMDB, tmdbId: number, type: "movie" | "tv"): Promise<TmdbItemDetails> {
+  if (type === "movie") {
+    const movie = await tmdb.movies.details(tmdbId);
+    return {
+      overview: movie.overview || null,
+      posterUrl: posterUrl(movie.poster_path ?? null),
+      rating: Math.round(movie.vote_average * 10),
+      releaseDate: parseReleaseDate(movie.release_date),
+      duration: movie.runtime || null,
+      episodeCount: null,
+    };
+  }
+
+  const show = await tmdb.tvShows.details(tmdbId);
+  // tmdb-ts types omit `runtime`, but TMDB returns it on last_episode_to_air
+  const lastEpisode = show.last_episode_to_air as { runtime?: number | null } | null;
+  return {
+    overview: show.overview || null,
+    posterUrl: posterUrl(show.poster_path),
+    rating: Math.round(show.vote_average * 10),
+    releaseDate: parseReleaseDate(show.first_air_date),
+    duration: show.episode_run_time.find((runtime) => runtime > 0) ?? (lastEpisode?.runtime || null),
+    episodeCount: show.number_of_episodes || null,
+  };
+}

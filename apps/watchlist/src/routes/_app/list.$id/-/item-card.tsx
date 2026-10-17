@@ -16,9 +16,9 @@ import {
   LoaderCircleIcon,
   MinusIcon,
   PlusIcon,
+  RefreshCwIcon,
   SkullIcon,
   StarIcon,
-  StarsIcon,
   ThumbsUpIcon,
   TrashIcon,
   TvIcon,
@@ -243,7 +243,7 @@ const ListItemMenuContent = memo(({ type, item }: ListItemMenuContentProps) => {
       <DeleteMenuItem item={item} />
       <SetWatchedMenuItem item={item} />
       <SetPriorityMenuItem item={item} />
-      <AiSuggestTagsMenuItem item={item} />
+      <ReindexMenuItem item={item} />
       <LoadWatchProvidersMenuItem item={item} />
     </DynamicMenuContent>
   );
@@ -449,11 +449,11 @@ export function PriorityBadge({ priority, className }: { priority: number; class
   );
 }
 
-function AiSuggestTagsMenuItem({ item }: ItemMenuActioProps) {
+function ReindexMenuItem({ item }: ItemMenuActioProps) {
   const listDbOrpc = useListOrpc();
   const db = useDb();
-  const suggestTagsMutation = useMutation(
-    listDbOrpc.aiSuggestions.suggestTags.mutationOptions({
+  const reindexMutation = useMutation(
+    listDbOrpc.itemIndexing.indexItem.mutationOptions({
       onMutate: () => {
         db.db.executeKysely((db) =>
           db.updateTable("item").set({ processingStatus: "pending" }).where("id", "=", item.id),
@@ -463,9 +463,9 @@ function AiSuggestTagsMenuItem({ item }: ItemMenuActioProps) {
   );
 
   return (
-    <DynamicMenuItem onClick={() => suggestTagsMutation.mutate({ itemId: item.id })}>
-      <StarsIcon />
-      Suggest Tags
+    <DynamicMenuItem onClick={() => reindexMutation.mutate({ itemId: item.id })}>
+      <RefreshCwIcon />
+      Re-index
     </DynamicMenuItem>
   );
 }

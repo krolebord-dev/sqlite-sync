@@ -56,7 +56,7 @@ src/list-db/                           # Per-list Durable Object sync
   list-orpc-client.ts
   list-orpc-context.tsx
   list-worker.ts                       # Web Worker entry
-  routers/ai-recommendations.ts, ai-suggestions.ts
+  routers/ai-recommendations.ts, item-indexing.ts
           list-settings.ts, watch-providers.ts, orpc-base.ts
 src/api/
   api-handler.ts

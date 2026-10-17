@@ -115,9 +115,7 @@ export class ListDbServer extends Server<Env> {
   async onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
     if (event.type === "item-created" && event.dataset === "_item") {
       const aiSuggestionsEnabled = this.ctx.storage.kv.get<boolean>("settings:ai-suggestions-enabled");
-      if (aiSuggestionsEnabled !== false) {
-        await this.orpc.aiSuggestions.suggestTags({ itemId: event.item_id });
-      }
+      await this.orpc.itemIndexing.indexItem({ itemId: event.item_id, includeTags: aiSuggestionsEnabled !== false });
     }
   }
 }

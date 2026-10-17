@@ -54,7 +54,7 @@ export const syncDbSchema = defineSyncSchema({
           .text()
           .$type<"idle" | "pending" | (string & {})>()
           .default("idle")
-          .describe("AI enrichment status."),
+          .describe("Item indexing status (TMDB details and tags)."),
         tags: t.text().default("[]").describe("JSON array of user-facing tags."),
         createdAt: t.integer().describe("When the item was added, as unix epoch milliseconds."),
         userRating: t.real().nullable().default(null).describe("User rating, if set."),
