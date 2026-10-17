@@ -2,7 +2,8 @@ import z from "zod";
 import { suggestTags } from "../../ai/suggest-tags";
 import { createTmdb } from "../../lib/tmdb";
 import { getTmdbItemDetails } from "../../lib/tmdb-adapters";
-import { listProcedure } from "./orpc-base";
+import { enqueueIndexing } from "../indexing-queue";
+import { adminListProcedure, listProcedure } from "./orpc-base";
 
 const indexItem = listProcedure
   .input(z.object({ itemId: z.string(), includeTags: z.boolean().default(true) }))
@@ -78,6 +79,26 @@ const indexItem = listProcedure
     return { ok: true };
   });
 
+const reindexAll = adminListProcedure.handler(async ({ context }) => {
+  const itemIds = context.syncDb.executeKysely((db) => db.selectFrom("item").select("id")).rows.map(({ id }) => id);
+
+  for (const itemId of itemIds) {
+    context.syncDb.applyEvent({
+      type: "item-updated",
+      dataset: "_item",
+      item_id: itemId,
+      payload: {
+        processingStatus: "pending",
+      },
+    });
+  }
+
+  await enqueueIndexing(context.storage, itemIds);
+
+  return { queued: itemIds.length };
+});
+
 export const itemIndexingRouter = {
   indexItem,
+  reindexAll,
 };

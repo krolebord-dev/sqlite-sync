@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useSetAtom } from "jotai";
 import { sql } from "kysely";
-import { CheckIcon, DownloadIcon, MailIcon, PenIcon, Trash2Icon, UploadIcon } from "lucide-react";
+import { CheckIcon, DownloadIcon, MailIcon, PenIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -29,8 +29,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
-import { useAuth } from "@/lib/auth-client";
+import { useAuth, useIsAdmin } from "@/lib/auth-client";
 import { useListId } from "@/lib/use-list";
+import { cn } from "@/lib/utils";
 import { downloadJson, exportItemsToJson } from "@/lib/utils/export-json";
 import { formatDuration } from "@/lib/utils/format-duration";
 import { parseImportItemsFromJson } from "@/lib/utils/import-json";
@@ -97,6 +98,52 @@ export function ListSettingsSheet({ children, asChild }: ListSettingsSheetProps)
         <ListSettingsForm />
       </SheetContent>
     </Sheet>
+  );
+}
+
+function ReindexAllButton() {
+  const isAdmin = useIsAdmin();
+  const listOrpc = useListOrpc();
+  const { data: pendingCount } = useDbQuery(
+    (db) =>
+      db
+        .selectFrom("item")
+        .where("processingStatus", "=", "pending")
+        .select(({ fn }) => fn.countAll<number>().as("count")),
+    { mapData: ([row]) => row?.count ?? 0 },
+  );
+
+  const reindexMutation = useMutation(
+    listOrpc.itemIndexing.reindexAll.mutationOptions({
+      onSuccess: ({ queued }) => {
+        if (queued === 0) {
+          toast.info("No items to re-index.");
+        } else {
+          toast.success(`Re-indexing ${queued} items in the background.`);
+        }
+      },
+      onError: () => {
+        toast.error("Failed to start re-indexing.");
+      },
+    }),
+  );
+
+  if (!isAdmin) {
+    return null;
+  }
+
+  const isIndexing = reindexMutation.isPending || !!pendingCount;
+
+  return (
+    <Button
+      variant="outline"
+      onClick={() => reindexMutation.mutate(undefined)}
+      disabled={reindexMutation.isPending}
+      className="w-full"
+    >
+      <RefreshCwIcon className={cn("mr-2 size-4", isIndexing && "animate-spin")} />
+      {pendingCount ? `Re-indexing... ${pendingCount} left` : "Re-index all items"}
+    </Button>
   );
 }
 
@@ -197,6 +244,7 @@ function ListSettingsForm() {
           {importMutation.isPending ? "Importing..." : "Import from JSON"}
         </Button>
         <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
+        <ReindexAllButton />
         {list && <DeleteListButton listId={list.id} createdBy={list.createdBy} />}
       </div>
     </div>

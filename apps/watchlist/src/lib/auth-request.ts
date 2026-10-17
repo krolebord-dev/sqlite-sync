@@ -1,14 +1,19 @@
 import { getCookie, unsign } from "@orpc/server/helpers";
 import { getContext } from "@/lib/context";
 import { db } from "@/lib/db";
+import type { UserRole } from "@/lib/user-role";
 
 type SessionData = {
   sessionId: string;
 };
 
-// Resolves the signed `session` cookie on a raw Request to a user id, mirroring the oRPC
-// auth middleware but usable in the bare fetch handler (e.g. the /agents/* guard).
 export async function getUserIdFromRequest(request: Request): Promise<string | null> {
+  return (await getUserFromRequest(request))?.userId ?? null;
+}
+
+// Resolves the signed `session` cookie on a raw Request to a user, mirroring the oRPC
+// auth middleware but usable in the bare fetch handler (e.g. the /agents/* guard).
+export async function getUserFromRequest(request: Request): Promise<{ userId: string; userRole: UserRole } | null> {
   const env = getContext();
   const cookie = getCookie(request.headers, "session");
   if (!cookie) {
@@ -27,13 +32,13 @@ export async function getUserIdFromRequest(request: Request): Promise<string | n
     .selectFrom("session as s")
     .where("s.id", "=", sessionId)
     .innerJoin("user as u", "s.userId", "u.id")
-    .select(["u.id as userId", "s.expiresAt as sessionExpiresAt"])
+    .select(["u.id as userId", "u.role as userRole", "s.expiresAt as sessionExpiresAt"])
     .executeTakeFirst();
 
   if (!session || new Date(session.sessionExpiresAt) < new Date()) {
     return null;
   }
-  return session.userId;
+  return { userId: session.userId, userRole: session.userRole as UserRole };
 }
 
 export async function userCanAccessList(userId: string, listId: string): Promise<boolean> {

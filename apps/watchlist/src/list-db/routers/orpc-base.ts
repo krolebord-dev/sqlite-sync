@@ -1,15 +1,20 @@
 import { isDefinedError, os } from "@orpc/server";
 import type { ServerSyncDb } from "@sqlite-sync/cloudflare";
+import { getUserFromRequest } from "@/lib/auth-request";
+import { isAdmin } from "@/lib/user-role";
 import type { ListSyncDbSchema } from "../migrations";
 
 export interface ORPCContext {
   env: Env;
   syncDb: ServerSyncDb<ListSyncDbSchema>;
   kv: SyncKvStorage;
+  storage: DurableObjectStorage;
+  request?: Request;
 }
 
 export const orpcErrors = {
   UNAUTHORIZED: {},
+  FORBIDDEN: {},
   NOT_FOUND: {},
   BAD_REQUEST: {},
 } as const;
@@ -43,3 +48,11 @@ const loggingMiddleware = osBase.middleware(async ({ next, path }) => {
 });
 
 export const listProcedure = osBase.use(loggingMiddleware);
+
+export const adminListProcedure = listProcedure.use(async ({ context, next, errors }) => {
+  const user = context.request ? await getUserFromRequest(context.request) : null;
+  if (!user || !isAdmin(user.userRole)) {
+    throw errors.FORBIDDEN();
+  }
+  return next();
+});

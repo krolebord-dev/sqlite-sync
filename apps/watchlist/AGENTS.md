@@ -56,6 +56,7 @@ src/list-db/                           # Per-list Durable Object sync
   list-orpc-client.ts
   list-orpc-context.tsx
   list-worker.ts                       # Web Worker entry
+  indexing-queue.ts                    # Alarm-driven bulk re-index queue
   routers/ai-recommendations.ts, item-indexing.ts
           list-settings.ts, watch-providers.ts, orpc-base.ts
 src/api/

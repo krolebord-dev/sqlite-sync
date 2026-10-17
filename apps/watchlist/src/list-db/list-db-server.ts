@@ -9,6 +9,7 @@ import {
 } from "@sqlite-sync/ai";
 import { durableObjectAdapter, type RemoteHandler, type TypedPersistedCrdtEvent } from "@sqlite-sync/cloudflare";
 import { type Connection, Server } from "partyserver";
+import { processIndexingBatch } from "./indexing-queue";
 import { listDbOrpcRouter, listOrpcHandler } from "./list-db-router";
 import { syncDbSchema } from "./migrations";
 import type { ORPCContext } from "./routers/orpc-base";
@@ -49,6 +50,7 @@ export class ListDbServer extends Server<Env> {
       env: this.env,
       syncDb,
       kv: this.ctx.storage.kv,
+      storage: this.ctx.storage,
     };
     this.orpc = createRouterClient(listDbOrpcRouter, {
       context: this.context,
@@ -102,7 +104,7 @@ export class ListDbServer extends Server<Env> {
   async onRequest(request: Request): Promise<Response> {
     const { matched, response } = await listOrpcHandler.handle(request, {
       prefix: `/list-db/list-db-server/${this.name}/rpc`,
-      context: this.context,
+      context: { ...this.context, request },
     });
 
     if (matched) {
@@ -110,6 +112,10 @@ export class ListDbServer extends Server<Env> {
     }
 
     return super.onRequest(request);
+  }
+
+  async onAlarm() {
+    await processIndexingBatch(this.ctx.storage, (itemId) => this.orpc.itemIndexing.indexItem({ itemId }));
   }
 
   async onEventApplied(event: TypedPersistedCrdtEvent<typeof syncDbSchema>) {
