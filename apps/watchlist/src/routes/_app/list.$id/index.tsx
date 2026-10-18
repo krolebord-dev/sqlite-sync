@@ -15,7 +15,9 @@ import {
   EllipsisVertical,
   EyeIcon,
   EyeOffIcon,
+  FilmIcon,
   HashIcon,
+  LayersIcon,
   Loader2,
   SettingsIcon,
   SquareDashed,
@@ -23,6 +25,7 @@ import {
   StarIcon,
   TrashIcon,
   TrendingUpIcon,
+  TvIcon,
   Wifi,
   WifiOff,
   XIcon,
@@ -321,6 +324,7 @@ function SortingHeader({ className }: { className?: string }) {
         </Link>
       </Button>
       <WatchedFilterToggle />
+      <TypeFilterToggle />
       <FilterButton />
     </div>
   );
@@ -347,6 +351,36 @@ function WatchedFilterToggle() {
       <TooltipTrigger asChild>
         <Button variant="outline" size="icon" className={config.className} asChild>
           <Link to="." search={(prev) => ({ ...prev, watched: watchedNextState[watched] })}>
+            {config.icon}
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent sideOffset={6}>{config.label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const typeNextState: Record<SortingOptions["type"], SortingOptions["type"]> = {
+  all: "movie",
+  movie: "tv",
+  tv: "all",
+};
+
+const typeConfig: Record<SortingOptions["type"], { icon: React.ReactNode; label: string; className?: string }> = {
+  all: { icon: <LayersIcon />, label: "Movies & shows" },
+  movie: { icon: <FilmIcon />, label: "Movies only", className: "text-sky-500" },
+  tv: { icon: <TvIcon />, label: "Shows only", className: "text-violet-500" },
+};
+
+function TypeFilterToggle() {
+  const { type } = useSearch({ from: "/_app/list/$id/" });
+  const config = typeConfig[type];
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="icon" className={config.className} asChild>
+          <Link to="." search={(prev) => ({ ...prev, type: typeNextState[type] })}>
             {config.icon}
           </Link>
         </Button>
@@ -462,7 +496,7 @@ function SearchInput({ className }: { className?: string }) {
 }
 
 function useOrderedAndFilteredItems() {
-  const { sortBy, sortOrder, priority, watched } = useSearch({ from: "/_app/list/$id/" });
+  const { sortBy, sortOrder, priority, watched, type } = useSearch({ from: "/_app/list/$id/" });
   const searchQuery = useAtomValue(searchQueryAtom);
   const randomizedItem = useAtomValue(randomizedItemAtom);
 
@@ -481,6 +515,10 @@ function useOrderedAndFilteredItems() {
       query = query.where("watchedAt", "is not", null);
     } else if (watched === "unwatched") {
       query = query.where("watchedAt", "is", null);
+    }
+
+    if (type !== "all") {
+      query = query.where("type", "=", type);
     }
 
     if (searchQuery) {
