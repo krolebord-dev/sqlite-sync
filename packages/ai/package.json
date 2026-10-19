@@ -1,6 +1,6 @@
 {
   "name": "@sqlite-sync/ai",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "AI agent tools and MCP helpers for @sqlite-sync databases",
   "type": "module",
   "license": "MIT",
@@ -60,7 +60,7 @@
   },
   "peerDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@sqlite-sync/core": "^0.12.2",
+    "@sqlite-sync/core": "^0.12.3",
     "ai": "^6.0.0",
     "zod": "^4.1.8"
   },
