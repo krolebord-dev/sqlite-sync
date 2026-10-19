@@ -10,9 +10,14 @@ import { ShadowRoot } from "./shadow-root";
 
 export type SQLiteSyncDevtoolsProps = {
   className?: string;
+  /** Render the floating launcher button. Set to `false` to open the dialog only via `open`. Defaults to `true`. */
+  launcher?: boolean;
   /** Hide the floating launcher. Omit to let the user toggle it with Ctrl+Alt+S (⌘⌥S on macOS). */
   hidden?: boolean;
   onHiddenChange?: (hidden: boolean) => void;
+  /** Control whether the devtools dialog is open. Omit to let the launcher manage it. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 type DevtoolsTab = "overview" | "schema" | "live-queries" | "event-log" | "query-runner";
@@ -191,16 +196,19 @@ function isToggleLauncherShortcut(event: KeyboardEvent): boolean {
 }
 
 function useLauncherVisibility({
+  launcher,
   hidden: hiddenProp,
   onHiddenChange,
-}: Pick<SQLiteSyncDevtoolsProps, "hidden" | "onHiddenChange">) {
+  onHide,
+}: Pick<SQLiteSyncDevtoolsProps, "hidden" | "onHiddenChange"> & { launcher: boolean; onHide: () => void }) {
   const isControlled = hiddenProp !== undefined;
   const [uncontrolledHidden, setUncontrolledHidden] = useState(readStoredTriggerHidden);
-  const hidden = isControlled ? hiddenProp : uncontrolledHidden;
-  const canToggle = !isControlled || onHiddenChange !== undefined;
+  const hidden = !launcher || (isControlled ? hiddenProp : uncontrolledHidden);
+  const canToggle = launcher && (!isControlled || onHiddenChange !== undefined);
 
   const setHidden = useCallback(
     (next: boolean) => {
+      if (next) onHide();
       if (isControlled) {
         onHiddenChange?.(next);
         return;
@@ -210,7 +218,7 @@ function useLauncherVisibility({
         window.localStorage.setItem(TRIGGER_HIDDEN_STORAGE_KEY, next ? "1" : "0");
       } catch {}
     },
-    [isControlled, onHiddenChange],
+    [isControlled, onHiddenChange, onHide],
   );
 
   useEffect(() => {
@@ -229,15 +237,44 @@ function useLauncherVisibility({
   return { hidden, setHidden, canToggle };
 }
 
-export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChange }: SQLiteSyncDevtoolsProps) {
+function useOpenState({ open: openProp, onOpenChange }: Pick<SQLiteSyncDevtoolsProps, "open" | "onOpenChange">) {
+  const isControlled = openProp !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isOpen = isControlled ? openProp : uncontrolledOpen;
+
+  const setIsOpen = useCallback(
+    (next: boolean) => {
+      if (!isControlled) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  return { isOpen, setIsOpen };
+}
+
+export function SQLiteSyncDevtools({
+  className,
+  launcher = true,
+  hidden: hiddenProp,
+  onHiddenChange,
+  open: openProp,
+  onOpenChange,
+}: SQLiteSyncDevtoolsProps) {
   const registry = getOrCreateSQLiteSyncDevtoolsRegistry();
   const snapshot = useSyncExternalStore(registry.subscribe, registry.getSnapshot, getEmptySnapshot);
   const instances = snapshot.instances;
 
   const { buttonRef, positionStyle, triggerHandlers, consumeDragClick } = useDraggableTrigger();
-  const { hidden, setHidden, canToggle } = useLauncherVisibility({ hidden: hiddenProp, onHiddenChange });
+  const { isOpen, setIsOpen } = useOpenState({ open: openProp, onOpenChange });
+  const closeDialog = useCallback(() => setIsOpen(false), [setIsOpen]);
+  const { hidden, setHidden, canToggle } = useLauncherVisibility({
+    launcher,
+    hidden: hiddenProp,
+    onHiddenChange,
+    onHide: closeDialog,
+  });
 
-  const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<DevtoolsTab>("overview");
   const [selectedInstanceId, setSelectedInstanceId] = useState<string>("");
   const [queryTarget, setQueryTarget] = useState<QueryTarget>("memory");
@@ -247,15 +284,11 @@ export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChan
   });
 
   useEffect(() => {
-    if (hidden) setIsOpen(false);
-  }, [hidden]);
-
-  useEffect(() => {
     if (!isOpen) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        closeDialog();
       }
     };
 
@@ -263,7 +296,7 @@ export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChan
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isOpen]);
+  }, [isOpen, closeDialog]);
 
   useEffect(() => {
     if (instances.length === 0) {
@@ -376,7 +409,7 @@ export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChan
       )}
 
       {isOpen ? (
-        <div className="overlay" onClick={() => setIsOpen(false)}>
+        <div className="overlay" onClick={closeDialog}>
           <section
             role="dialog"
             aria-modal="true"
@@ -424,7 +457,7 @@ export function SQLiteSyncDevtools({ className, hidden: hiddenProp, onHiddenChan
                     Hide
                   </button>
                 )}
-                <button type="button" className="closeButton" onClick={() => setIsOpen(false)} aria-label="Close">
+                <button type="button" className="closeButton" onClick={closeDialog} aria-label="Close">
                   ✕
                 </button>
               </div>

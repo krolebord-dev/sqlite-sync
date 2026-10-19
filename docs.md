@@ -630,6 +630,17 @@ If your app has its own toggle, pass `hidden` and `onHiddenChange`:
 
 Leave those off if the button should manage itself: `Ctrl+Alt+S` (⌘⌥S on macOS) or Hide in the dialog toggles it, and the choice sticks in `localStorage`. The shortcut also works when you pass `onHiddenChange`.
 
+To open the dialog from your own UI instead, pass `open` and `onOpenChange`. Add `launcher={false}` to drop the floating button, the shortcut, and the Hide button:
+
+```tsx
+const [devtoolsOpen, setDevtoolsOpen] = useState(false);
+
+<button onClick={() => setDevtoolsOpen(true)}>Open devtools</button>
+<SQLiteSyncDevtools launcher={false} open={devtoolsOpen} onOpenChange={setDevtoolsOpen} />
+```
+
+`onOpenChange` fires when the user closes the dialog (✕, Escape, backdrop click, or Hide), and it also fires when you leave `open` uncontrolled.
+
 Databases register when `createSyncedDb()` finishes initialization and unregister on `dispose()`, so there is nothing to pass in.
 
 ### Current Tools
@@ -1391,8 +1402,11 @@ Floating button and dialog for databases created with `createSyncedDb()`. See [D
 ```tsx
 function SQLiteSyncDevtools(props?: {
   className?: string;
+  launcher?: boolean; // default true
   hidden?: boolean;
   onHiddenChange?: (hidden: boolean) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }): React.ReactElement
 ```
 

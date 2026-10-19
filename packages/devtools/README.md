@@ -29,6 +29,12 @@ Database instances register when `createSyncedDb()` completes and unregister on 
 
 Pass `hidden` and `onHiddenChange` if your app has its own toggle. Skip them and `Ctrl+Alt+S` (⌘⌥S on macOS) hides the button. That choice is stored in `localStorage`.
 
+To open the dialog from your own UI, pass `open` and `onOpenChange`. Add `launcher={false}` to drop the floating button entirely:
+
+```tsx
+<SQLiteSyncDevtools launcher={false} open={devtoolsOpen} onOpenChange={setDevtoolsOpen} />
+```
+
 Query runner rules:
 
 - Worker DB queries are read-only.
