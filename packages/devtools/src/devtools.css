@@ -1375,3 +1375,110 @@
   color: var(--ss-text-muted);
   background-color: var(--ss-bg-card);
 }
+
+@media (max-width: 640px) {
+  .overlay {
+    padding: 0;
+  }
+
+  .dialog {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 0;
+  }
+
+  .header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    padding-top: max(0.6rem, env(safe-area-inset-top));
+  }
+
+  .headerRight {
+    flex: 1;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .instancePickerLabel {
+    min-width: 0;
+  }
+
+  .instancePickerSelect {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .instanceCountBadge {
+    display: none;
+  }
+
+  .closeButton {
+    flex-shrink: 0;
+    width: 36px;
+    height: 36px;
+  }
+
+  .contentLayout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 0.4rem 0.5rem;
+    border-right: none;
+    border-bottom: 1px solid var(--ss-border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .nav {
+    flex-direction: row;
+    margin-bottom: 0;
+  }
+
+  .tabButton {
+    width: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+
+  .tabButton[data-active="true"] {
+    border-left: none;
+    border-bottom: 2px solid var(--ss-teal);
+  }
+
+  .sidebarInfo {
+    display: none;
+  }
+
+  .mainPane {
+    padding: 0.75rem;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .liveQueryHeaderRow,
+  .liveQueryRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.6fr) 6.5rem;
+  }
+
+  .liveQueryHeaderRow .schemaColHeader,
+  .liveQuerySql,
+  .liveQueryParameters {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .liveQueryHeaderRow .schemaColHeader {
+    letter-spacing: 0.02em;
+  }
+}
+
+@media (hover: none) {
+  .hideLauncherButton {
+    display: none;
+  }
+}

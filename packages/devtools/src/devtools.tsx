@@ -66,6 +66,15 @@ function readStoredTriggerPosition(): TriggerPosition | null {
   return null;
 }
 
+function clampTriggerPosition(position: TriggerPosition, button: HTMLElement): TriggerPosition {
+  const maxX = window.innerWidth - button.offsetWidth - VIEWPORT_MARGIN_PX;
+  const maxY = window.innerHeight - button.offsetHeight - VIEWPORT_MARGIN_PX;
+  return {
+    x: Math.max(VIEWPORT_MARGIN_PX, Math.min(position.x, maxX)),
+    y: Math.max(VIEWPORT_MARGIN_PX, Math.min(position.y, maxY)),
+  };
+}
+
 function useDraggableTrigger() {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [position, setPosition] = useState<TriggerPosition | null>(readStoredTriggerPosition);
@@ -97,6 +106,29 @@ function useDraggableTrigger() {
     button.setPointerCapture(event.pointerId);
   }, []);
 
+  const clampToViewport = useCallback(() => {
+    const button = buttonRef.current;
+    if (!button) return;
+    setPosition((current) => {
+      if (!current) return current;
+      const next = clampTriggerPosition(current, button);
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, []);
+
+  const setButtonRef = useCallback(
+    (button: HTMLButtonElement | null) => {
+      buttonRef.current = button;
+      clampToViewport();
+    },
+    [clampToViewport],
+  );
+
+  useEffect(() => {
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  }, [clampToViewport]);
+
   const onPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     const drag = dragRef.current;
     const button = buttonRef.current;
@@ -105,12 +137,7 @@ function useDraggableTrigger() {
       return;
     }
     drag.moved = true;
-    const maxX = window.innerWidth - button.offsetWidth - VIEWPORT_MARGIN_PX;
-    const maxY = window.innerHeight - button.offsetHeight - VIEWPORT_MARGIN_PX;
-    setPosition({
-      x: Math.max(VIEWPORT_MARGIN_PX, Math.min(event.clientX - drag.offsetX, maxX)),
-      y: Math.max(VIEWPORT_MARGIN_PX, Math.min(event.clientY - drag.offsetY, maxY)),
-    });
+    setPosition(clampTriggerPosition({ x: event.clientX - drag.offsetX, y: event.clientY - drag.offsetY }, button));
   }, []);
 
   const endDrag = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -141,7 +168,7 @@ function useDraggableTrigger() {
     : {};
 
   return {
-    buttonRef,
+    buttonRef: setButtonRef,
     positionStyle,
     triggerHandlers: { onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag },
     consumeDragClick,
