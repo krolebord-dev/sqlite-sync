@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import type { SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 
 const noopLogger = () => {};
 

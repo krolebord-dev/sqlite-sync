@@ -37,6 +37,19 @@ export const workerDbConfig = createSystemDbConfig({
   updateLogTableName: "crdt_update_log",
 });
 
+export type LocalDbSchema = {
+  crdt_update_log: CrdtUpdateLogItem;
+  crdt_events: PersistedCrdtEvent;
+  sync_kv: KvStoreItem;
+};
+
+export const localDbConfig = createSystemDbConfig({
+  eventsTableName: "crdt_events",
+  updateLogTableName: "crdt_update_log",
+});
+
+export const LOCAL_KV_TABLE_NAME = "sync_kv";
+
 export type MemoryDbSchema = {
   crdt_update_log: CrdtUpdateLogItem;
   persisted_crdt_events: PersistedCrdtEvent;
@@ -138,15 +151,26 @@ export function runSystemMigrations(opts: {
 }
 
 export function applyWorkerDbSchema(db: SQLiteDbWrapper<any>) {
+  return applySystemDbSchema(db, { kvTableName: "worker.kv", dbConfig: workerDbConfig });
+}
+
+export function applyLocalDbSchema(db: SQLiteDbWrapper<any>) {
+  return applySystemDbSchema(db, { kvTableName: LOCAL_KV_TABLE_NAME, dbConfig: localDbConfig });
+}
+
+function applySystemDbSchema(
+  db: SQLiteDbWrapper<any>,
+  { kvTableName, dbConfig }: { kvTableName: string; dbConfig: SystemDbConfig },
+) {
   // KV table stays separate — needed before system migrations for version tracking
-  db.executeKysely((kysely) => createKvStoreTableQuery(kysely.schema, "worker.kv"), { loggerLevel: "system" });
+  db.executeKysely((kysely) => createKvStoreTableQuery(kysely.schema, kvTableName), { loggerLevel: "system" });
 
   // System schema migrations (each in its own transaction)
-  const kvStore = createSQLiteKvStore({ db, metaTableName: "worker.kv" });
+  const kvStore = createSQLiteKvStore({ db, metaTableName: kvTableName });
   runSystemMigrations({
     migrations: baseSystemMigrations,
     version: kvStore.createNumberStoredValue("internal-schema-version", -1),
-    dbConfig: workerDbConfig,
+    dbConfig,
     execute: (sql) => db.execute(sql, { loggerLevel: "system" }),
     transaction: (callback) => db.executeTransaction(callback),
   });

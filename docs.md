@@ -1,6 +1,6 @@
 # sqlite-sync Documentation
 
-**sqlite-sync** is an offline-first SQLite synchronization library with CRDT support for local-first applications. All writes happen locally against an in-memory SQLite database, persist to OPFS via a Web Worker, and sync automatically to a remote server over WebSocket.
+**sqlite-sync** is an offline-first SQLite synchronization library with CRDT support for local-first applications. In the browser, all writes happen locally against an in-memory SQLite database, persist to OPFS via a Web Worker, and sync automatically to a remote server over WebSocket. On React Native, the same engine runs on a single persisted [op-sqlite](https://github.com/OP-Engineering/op-sqlite) connection (see [React Native](#react-native)).
 
 ## Table of Contents
 
@@ -8,6 +8,7 @@
 - [Architecture Overview](#architecture-overview)
 - [Schema Definition](#schema-definition)
 - [Client Setup](#client-setup)
+- [React Native](#react-native)
 - [React Integration](#react-integration)
 - [Queries](#queries)
 - [Mutations](#mutations)
@@ -31,6 +32,9 @@ pnpm add @sqlite-sync/core
 # React bindings
 pnpm add @sqlite-sync/react
 
+# React Native (op-sqlite) adapter
+pnpm add @sqlite-sync/react-native @op-engineering/op-sqlite react-native-get-random-values
+
 # Optional: floating browser devtools UI
 pnpm add @sqlite-sync/devtools
 
@@ -47,6 +51,7 @@ Peer dependencies:
 |---------|-------|
 | `@sqlite-sync/core` | `@sqlite.org/sqlite-wasm`, `kysely` |
 | `@sqlite-sync/react` | `@sqlite-sync/core`, `react ^18 \|\| ^19`, `kysely` |
+| `@sqlite-sync/react-native` | `@sqlite-sync/core`, `@op-engineering/op-sqlite >=18.2`, `react-native >=0.76`, `react-native-get-random-values ^1.11 \|\| ^2`, `kysely` |
 | `@sqlite-sync/devtools` | `@sqlite-sync/core`, `react ^18 \|\| ^19` |
 | `@sqlite-sync/cloudflare` | `@sqlite-sync/core`, `@cloudflare/workers-types`, `kysely` |
 | `@sqlite-sync/ai` | `@sqlite-sync/core`, `ai ^6`, `zod ^4.1.8`; optional `@modelcontextprotocol/sdk ^1.29` (`@sqlite-sync/ai/mcp`) |
@@ -305,6 +310,89 @@ await startDbWorker({
   }),
 });
 ```
+
+## React Native
+
+`@sqlite-sync/react-native` runs the sync engine on a single [op-sqlite](https://github.com/OP-Engineering/op-sqlite) connection. A React Native app has one JS runtime per database, so there is no worker, tab coordination or in-memory copy: reads, writes and sync all go to the persisted database file. Schemas, migrations, CRDT views, the remote protocol and the React hooks are the same as on the web.
+
+### Native setup
+
+sqlite-sync needs SQLite's bytecode virtual tables (`tables_used`) to track which tables a query reads and writes. Enable them in your app's `package.json` and rebuild the native app (`pod install` on iOS):
+
+```json
+{
+  "op-sqlite": {
+    "sqliteFlags": "-DSQLITE_ENABLE_BYTECODE_VTAB=1"
+  }
+}
+```
+
+`sqliteFlags` only apply to the SQLite that op-sqlite compiles, so this setup does not work with `"iosSqlite": true`. `createSyncedDb` throws an error explaining this when the virtual tables are missing.
+
+React Native has no `crypto.getRandomValues`, which sqlite-sync uses to generate UUID v4 IDs. `@sqlite-sync/react-native` imports [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) to provide it, so there is nothing to import yourself, but the package must be listed in your app's dependencies so its native module is autolinked. It leaves an existing `crypto.getRandomValues` (for example from `react-native-quick-crypto`) in place.
+
+Hermes has no WebAssembly, so the event checksum falls back to a JavaScript xxh64 that produces the same hashes as the web build. `@sqlite-sync/core` ships a `react-native` export condition, which Metro picks automatically, so the app bundle does not include sqlite-wasm.
+
+### Initialize the Database
+
+```ts
+// src/db.ts
+import { createSyncedDb, createWsRemoteSource } from "@sqlite-sync/react-native";
+import { syncDbSchema } from "./db-schema";
+
+export function initDb() {
+  return createSyncedDb({
+    dbId: "my-app-db",
+    syncDbSchema,
+    createRemoteSource: createWsRemoteSource({
+      createWebSocket: () => new WebSocket("wss://your-server.example.com/sync"),
+    }),
+    verifySchema: __DEV__,
+  });
+}
+```
+
+The result has the same shape as the browser `SyncedDb`, so `createDbContext` from `@sqlite-sync/react` and the [query](#queries), [mutation](#mutations) and [sync state](#sync-state) APIs work unchanged.
+
+**`createSyncedDb` options (`@sqlite-sync/react-native`):**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `dbId` | `string` | Database identifier, same format as on the web. The file is named `<dbId>.sqlite`. |
+| `syncDbSchema` | `SyncDbSchema` | The schema built with `defineSyncSchema`. |
+| `createRemoteSource` | `CreateRemoteSourceFactory` | Optional. Usually `createWsRemoteSource(...)`. Without it the database stays local-only. |
+| `location` | `string` | Optional directory for the database file. Defaults to op-sqlite's default location. |
+| `encryptionKey` | `string` | Optional. Requires op-sqlite built with SQLCipher. |
+| `storageVersion` | `string` | Optional. See [Breaking Storage Changes](#breaking-storage-changes); a mismatch deletes the local database on startup. |
+| `verifySchema` | `boolean` | Optional dev-time check that replays the migrations on an in-memory database. |
+| `eventLogGc` | `boolean` | Optional event-log garbage collection on startup. |
+| `syncOnAppStateChange` | `boolean` | Default `true`. Syncs when the app returns to the foreground and drops the connection when it goes to the background. |
+| `logger` | `Logger` | Optional logger. |
+
+`state.dropConnection()` is also available, for example to react to a network library reporting the device offline. Call `state.sync()` once the network is back.
+
+### Reload on React Native
+
+There is no page to reload, so `requestReload({ clean })` disposes the instance (and with `clean: true` deletes the database file), then emits `reload-requested`. Create a new instance when that event fires:
+
+```tsx
+const [db, setDb] = useState<SyncedDb<Database> | null>(null);
+
+useEffect(() => {
+  if (!db) {
+    void initDb().then(setDb);
+    return;
+  }
+  const { unsubscribe } = db.subscribe("reload-requested", () => setDb(null));
+  return unsubscribe;
+}, [db]);
+```
+
+Writes that were not pushed yet are lost with `clean: true`. Unlike the browser, pending local writes otherwise survive restarts: they are stored in the same database file and pushed on the next start.
+
+### Other SQLite drivers
+
+`createSyncedDb` is a thin wrapper over `createLocalSyncedDb` from `@sqlite-sync/core/local`, which accepts any synchronous `SqliteDriver` (see `createOpSqliteDriver` for a reference implementation). Hooks may be delivered asynchronously, as long as they arrive in order.
 
 ---
 
@@ -772,7 +860,7 @@ function SyncToggle() {
 
 ### Reload and Recovery
 
-`requestReload({ clean })` asks the elected worker to reload every tab for the same `dbId`. With `clean: true`, the persisted worker DB is also wiped on the next startup.
+`requestReload({ clean })` asks the elected worker to reload every tab for the same `dbId`. With `clean: true`, the persisted worker DB is also wiped on the next startup. React Native works differently, see [Reload on React Native](#reload-on-react-native).
 
 Notes:
 

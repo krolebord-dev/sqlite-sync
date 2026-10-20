@@ -21,6 +21,11 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "react-native": {
+        "@sqlite-sync/source": "./src/index.native.ts",
+        "types": "./dist/index.native.d.ts",
+        "default": "./dist/index.native.js"
+      },
       "@sqlite-sync/source": "./src/index.ts",
       "workerd": "./src/index.ts",
       "types": "./dist/index.d.ts",
@@ -31,6 +36,12 @@
       "workerd": "./src/internal.ts",
       "types": "./dist/internal.d.ts",
       "import": "./dist/internal.js"
+    },
+    "./local": {
+      "@sqlite-sync/source": "./src/local.ts",
+      "workerd": "./src/local.ts",
+      "types": "./dist/local.d.ts",
+      "default": "./dist/local.js"
     },
     "./worker": {
       "@sqlite-sync/source": "./src/worker.ts",
@@ -51,12 +62,20 @@
   "publishConfig": {
     "exports": {
       ".": {
+        "react-native": {
+          "types": "./dist/index.native.d.ts",
+          "default": "./dist/index.native.js"
+        },
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
       },
       "./internal": {
         "types": "./dist/internal.d.ts",
         "import": "./dist/internal.js"
+      },
+      "./local": {
+        "types": "./dist/local.d.ts",
+        "default": "./dist/local.js"
       },
       "./worker": {
         "types": "./dist/worker.d.ts",

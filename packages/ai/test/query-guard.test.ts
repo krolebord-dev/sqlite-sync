@@ -1,4 +1,4 @@
-import { SQLiteReactiveDb } from "@sqlite-sync/core";
+import { createSQLiteReactiveDb } from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { AiDbExecutor } from "../src/db-access";
 import { createQueryGuard, type QueryGuard, QueryGuardError, runWithForcedRollback } from "../src/query-guard";
@@ -13,7 +13,7 @@ let countItems: () => number;
 // what the DO adapter produces: base tables with a tombstone column, read-only views named
 // after the CRDT tables, plus internal tables (readable — the guard only blocks writes).
 beforeAll(async () => {
-  const reactiveDb = await SQLiteReactiveDb.create<Record<string, never>>({
+  const reactiveDb = await createSQLiteReactiveDb<Record<string, never>>({
     snapshot: new Uint8Array(),
     logger: noopLogger,
   });

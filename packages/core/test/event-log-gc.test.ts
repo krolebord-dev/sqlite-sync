@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSQLiteReactiveDb, type SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import type { SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../src/migrations/system-schema";
 import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 import { runWorkerEventLogGc } from "../src/worker-db/event-log-gc";

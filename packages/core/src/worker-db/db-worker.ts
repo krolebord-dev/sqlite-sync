@@ -5,7 +5,8 @@ import { HLCCounter } from "../hlc";
 import type { Logger } from "../logger";
 import { createMigrator, type SyncDbMigrator } from "../migrations/migrator";
 import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../migrations/system-schema";
-import { formatSchemaVerificationIssues, verifySyncSchema } from "../schema/verify-sync-schema";
+import { formatSchemaVerificationIssues } from "../schema/verify-sync-schema";
+import { verifySyncSchema } from "../schema/verify-sync-schema-wasm";
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { type CrdtStorage, createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
@@ -18,6 +19,7 @@ import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise, generateId } from "../utils";
+import { createWasmSqliteDriver } from "../wasm-driver";
 import { runWorkerEventLogGc } from "./event-log-gc";
 import { runWithNoActiveReplicas } from "./replica-lock";
 import { createIdbResetStore, createReloadRequestHandler, createResetStateStore, type ResetStore } from "./reset-state";
@@ -97,10 +99,9 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
   });
 
   const db = new SQLiteDbWrapper<WorkerDbSchema>({
-    db: () => new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`),
+    driver: createWasmSqliteDriver(sqlite3, new pool.OpfsSAHPoolDb(`/${config.dbId}-main.db`)),
     logger: logger,
     loggerPrefix: "worker",
-    sqlite3,
   });
 
   db.execute("PRAGMA locking_mode=exclusive", { loggerLevel: "system" });

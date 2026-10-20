@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_MAX_DRIFT_MS, serializeHLC } from "../src/hlc";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";

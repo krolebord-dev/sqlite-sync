@@ -1,6 +1,6 @@
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 import { describe, expect, it } from "vitest";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { t } from "../src/schema/table-builder";
 import type { CrdtChangeIntent } from "../src/sqlite-crdt/crdt-storage";
 import {

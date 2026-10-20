@@ -32,5 +32,5 @@ function toHex128(value: bigint) {
 }
 
 function hash128BigInt(value: string) {
-  return xxhash.h64(value, 0n) | (xxhash.h64(value, 1n) << 64n);
+  return xxhash.h64Concat(value);
 }

@@ -1,7 +1,13 @@
 import type { SyncServerMessage, SyncServerRequest } from "../server";
 import { HEARTBEAT_PING, HEARTBEAT_PONG } from "../server/heartbeat";
 import type { CreateRemoteSourceFactory } from "../sqlite-crdt/crdt-sync-remote-source";
-import { createDeferredPromise, type DeferredPromise, type DistributiveOmit, jsonSafeParse } from "../utils";
+import {
+  createDeferredPromise,
+  type DeferredPromise,
+  type DistributiveOmit,
+  generateId,
+  jsonSafeParse,
+} from "../utils";
 import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
 
 const WS_OPEN = 1;
@@ -56,7 +62,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
       if (closed) {
         throw new Error("WebSocket closed");
       }
-      const requestId = crypto.randomUUID();
+      const requestId = generateId();
       const promise = createDeferredPromise<T>();
       requestsMap.set(requestId, promise as DeferredPromise<unknown>);
       socket.send(JSON.stringify({ ...request, requestId }));

@@ -40,6 +40,10 @@ export type WorkerNotificationMessage =
       localSchemaVersion: number;
     };
 
+export type WorkerNotificationEvents = {
+  [K in WorkerNotificationMessage["notificationType"]]: Extract<WorkerNotificationMessage, { notificationType: K }>;
+};
+
 export type WorkerState = {
   remoteState: "online" | "offline" | "connecting";
   deSynced: boolean;

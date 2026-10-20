@@ -21,6 +21,7 @@ const RESERVED_TABLE_NAMES = new Set<string>([
   "crdt_update_log",
   "crdt_change_intents",
   "worker.kv",
+  "sync_kv",
 ]);
 
 type RowOf<Table extends AnyTableBuilder> =

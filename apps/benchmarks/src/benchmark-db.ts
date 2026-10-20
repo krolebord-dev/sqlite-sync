@@ -2,6 +2,7 @@ import {
   createMigrations,
   createMigrator,
   createStoredValue,
+  createWasmMemoryDriver,
   HLCCounter,
   type PendingCrdtEvent,
   type PersistedCrdtEvent,
@@ -67,7 +68,8 @@ export async function createPlainBenchmarkTable() {
 }
 
 export async function createSyncBenchmarkHarness({ snapshot }: { snapshot?: Uint8Array<ArrayBufferLike> } = {}) {
-  const reactiveDb = await SQLiteReactiveDb.create<SyncBenchmarkDbSchema>({
+  const reactiveDb = SQLiteReactiveDb.create<SyncBenchmarkDbSchema>({
+    driver: await createWasmMemoryDriver(),
     snapshot: snapshot ?? new Uint8Array(),
     logger: noopLogger,
   });

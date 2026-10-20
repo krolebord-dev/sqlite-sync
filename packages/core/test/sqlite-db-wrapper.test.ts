@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { SQLiteDbWrapper } from "../src/sqlite-db-wrapper";
 
 describe(SQLiteDbWrapper, () => {

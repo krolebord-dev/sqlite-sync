@@ -1,16 +1,16 @@
-import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
 import { BoundMap } from "../bound-map";
 import { type Logger, startPerformanceLogger } from "../logger";
 import { type PreparedStatement, SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import type { SqliteDriver } from "../sqlite-driver";
 import { createTypedEventTarget, type TypedEvent } from "../utils";
-
-let sqliteModule: Sqlite3Static | null = null;
 
 type TableName<Database> = keyof Database extends string ? keyof Database : never;
 
-type SQLiteReactiveDbOptions = {
-  snapshot: Uint8Array<ArrayBufferLike>;
+export type SQLiteReactiveDbOptions = {
+  driver: SqliteDriver;
+  snapshot?: Uint8Array<ArrayBufferLike>;
   logger: Logger;
+  loggerPrefix?: string;
 };
 
 type EventsMap = {
@@ -43,42 +43,34 @@ export type SharedLiveQuerySnapshot = {
   subscriberCount: number;
 };
 
-export function createSQLiteReactiveDb<Database>(opts: SQLiteReactiveDbOptions) {
-  return SQLiteReactiveDb.create<Database>(opts);
-}
-
 export class SQLiteReactiveDb<Database> {
   readonly db: SQLiteDbWrapper<Database>;
-  private sqlite3: Sqlite3Static;
+  private readonly driver: SqliteDriver;
 
   private readonly logger: Logger;
 
   private tablesUsedStatement: PreparedStatement<[string], { name: string; isWrite: boolean }> | null = null;
 
   private eventTarget = createTypedEventTarget<EventsMap>();
+  private isDisposed = false;
   private mutationVersion = 0;
   private tableMutationVersions = new Map<string, number>();
 
-  private constructor(sqlite3: Sqlite3Static, logger: Logger) {
-    this.sqlite3 = sqlite3;
-    this.logger = logger;
+  private constructor(opts: SQLiteReactiveDbOptions) {
+    this.driver = opts.driver;
+    this.logger = opts.logger;
 
     this.db = new SQLiteDbWrapper({
-      db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
+      driver: opts.driver,
       logger: this.logger,
-      loggerPrefix: "memory",
-      sqlite3,
+      loggerPrefix: opts.loggerPrefix ?? "memory",
     });
   }
 
-  static async create<Database>(opts: SQLiteReactiveDbOptions) {
-    const logger = opts.logger;
-    const perf = startPerformanceLogger(logger, "system");
-    if (!sqliteModule) {
-      sqliteModule = await sqlite3InitModule();
-    }
+  static create<Database>(opts: SQLiteReactiveDbOptions) {
+    const perf = startPerformanceLogger(opts.logger, "system");
 
-    const db = new SQLiteReactiveDb<Database>(sqliteModule, logger);
+    const db = new SQLiteReactiveDb<Database>(opts);
 
     if (opts.snapshot) {
       db.useSnapshot(opts.snapshot);
@@ -88,6 +80,14 @@ export class SQLiteReactiveDb<Database> {
     perf.logEnd("createSQLiteMemoryDb", "success", "system");
 
     return db;
+  }
+
+  /**
+   * When false, table mutation versions only advance after the writing statement
+   * returns, so they cannot tell whether that statement wrote to a table.
+   */
+  get hasSynchronousHooks() {
+    return this.driver.synchronousHooks;
   }
 
   private liveQueryStatements = new BoundMap<string, PreparedStatement<any[], unknown>>({
@@ -383,35 +383,26 @@ export class SQLiteReactiveDb<Database> {
   private registerDbHooks() {
     let updateQueue = new Set<string>();
 
-    this.sqlite3.capi.sqlite3_update_hook(
-      this.db.ensureDb,
-      (_ctx, _opId, _db, table) => {
+    // Asynchronous drivers can deliver hooks that were queued before dispose.
+    this.driver.setHooks({
+      onUpdate: (table) => {
+        if (this.isDisposed) {
+          return;
+        }
         updateQueue.add(table);
         this.tableMutationVersions.set(table, ++this.mutationVersion);
       },
-      0,
-    );
-
-    this.sqlite3.capi.sqlite3_rollback_hook(
-      this.db.ensureDb,
-      () => {
-        if (updateQueue.size === 0) {
-          return 0;
+      onRollback: () => {
+        if (this.isDisposed || updateQueue.size === 0) {
+          return;
         }
 
         updateQueue.clear();
         this.eventTarget.dispatchEvent("transaction-rolled-back", undefined);
-
-        return 0;
       },
-      0,
-    );
-
-    this.sqlite3.capi.sqlite3_commit_hook(
-      this.db.ensureDb,
-      () => {
-        if (updateQueue.size === 0) {
-          return 0;
+      onCommit: () => {
+        if (this.isDisposed || updateQueue.size === 0) {
+          return;
         }
 
         const tables = updateQueue;
@@ -419,17 +410,17 @@ export class SQLiteReactiveDb<Database> {
         this.eventTarget.dispatchEvent("transaction-committed", undefined);
 
         queueMicrotask(() => {
-          this.notifyTableSubscribers(tables);
+          if (!this.isDisposed) {
+            this.notifyTableSubscribers(tables);
+          }
         });
-        return 0;
       },
-      0,
-    );
+    });
   }
 
   createSnapshot() {
     const perf = startPerformanceLogger(this.logger);
-    const snapshot = this.sqlite3.capi.sqlite3_js_db_export(this.db.ensureDb);
+    const snapshot = this.db.createSnapshot();
     perf.logEnd("createSnapshot", `snapshot size: ${snapshot.byteLength}`, "info");
 
     return snapshot;
@@ -442,6 +433,7 @@ export class SQLiteReactiveDb<Database> {
   }
 
   dispose() {
+    this.isDisposed = true;
     for (const entries of this.sharedLiveQueries.values()) {
       for (const entry of entries) {
         this.cancelSharedLiveQueryCleanup(entry);
@@ -456,6 +448,7 @@ export class SQLiteReactiveDb<Database> {
       this.tablesUsedStatement.finalize();
       this.tablesUsedStatement = null;
     }
+    this.driver.setHooks(null);
     this.db.close();
   }
 }

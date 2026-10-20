@@ -1,5 +1,5 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: benchmark page wiring */
-import { SQLiteReactiveDb } from "@sqlite-sync/core";
+import { createWasmMemoryDriver, SQLiteReactiveDb } from "@sqlite-sync/core";
 import {
   buildBenchmarkRows,
   countEvents,
@@ -123,7 +123,8 @@ export function renderSnapshotInitRestorePage(container: HTMLElement) {
     updateStatus("building populated snapshot...");
 
     const sourceHarness = await createSyncBenchmarkHarness();
-    const restoreDb = await SQLiteReactiveDb.create({
+    const restoreDb = SQLiteReactiveDb.create({
+      driver: await createWasmMemoryDriver(),
       snapshot: new Uint8Array(),
       logger: noopLogger,
     });
@@ -149,7 +150,8 @@ export function renderSnapshotInitRestorePage(container: HTMLElement) {
           await measureDurations({
             rounds,
             task: async () => {
-              const reactiveDb = await SQLiteReactiveDb.create({
+              const reactiveDb = SQLiteReactiveDb.create({
+                driver: await createWasmMemoryDriver(),
                 snapshot: populatedSnapshot,
                 logger: noopLogger,
               });

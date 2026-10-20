@@ -1,5 +1,10 @@
-import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
-import { applyMemoryDbSchema, type Logger, type PersistedCrdtEvent, SQLiteDbWrapper } from "@sqlite-sync/core";
+import {
+  applyMemoryDbSchema,
+  createWasmMemoryDriver,
+  type Logger,
+  type PersistedCrdtEvent,
+  SQLiteDbWrapper,
+} from "@sqlite-sync/core";
 import type { Bench } from "tinybench";
 
 export type BenchRow = {
@@ -21,10 +26,8 @@ export type MeasurementRow = {
 export const noopLogger: Logger = () => {};
 
 export async function createBenchmarkDb<TSchema>(): Promise<SQLiteDbWrapper<TSchema>> {
-  const sqlite3 = await sqlite3InitModule();
   const db = new SQLiteDbWrapper<TSchema>({
-    db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
-    sqlite3,
+    driver: await createWasmMemoryDriver(),
     loggerPrefix: "benchmarks",
   });
   applyMemoryDbSchema(db);

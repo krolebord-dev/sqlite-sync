@@ -10,10 +10,12 @@ export function makeCrdtTable({
   db,
   baseTableName,
   crdtTableName,
+  temp,
 }: {
   db: SQLiteDbWrapper<any>;
   baseTableName: string;
   crdtTableName: string;
+  temp?: boolean;
 }) {
   const tableSchema = db.dbSchema[baseTableName];
 
@@ -52,6 +54,7 @@ export function makeCrdtTable({
     baseTableName,
     crdtTableName,
     columns: tableSchema.columns.map((column) => ({ name: column.name, nullable: column.isNullable })),
+    temp,
   })) {
     db.execute(sql, { loggerLevel: "system" });
   }
@@ -111,16 +114,23 @@ export function createCrdtViewStatements({
   baseTableName,
   crdtTableName,
   columns,
+  temp = false,
 }: {
   baseTableName: string;
   crdtTableName: string;
   columns: CrdtViewColumn[];
+  /**
+   * Create the view, its triggers and the intents table in the connection's temp schema,
+   * so a persisted database never stores them and they always match the current schema.
+   */
+  temp?: boolean;
 }) {
   const createdPayload = createdPayloadSql(columns);
   const updatePayload = sparseUpdatePayloadSql(columns.map((column) => column.name));
+  const tempKeyword = temp ? "temp " : "";
 
   return [
-    `create table if not exists ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
+    `create ${tempKeyword}table if not exists ${quoteId(CRDT_CHANGE_INTENTS_TABLE)} (
   "seq" integer primary key,
   "dataset" text not null,
   "type" text not null,
@@ -128,10 +138,10 @@ export function createCrdtViewStatements({
   "new_item_id" text,
   "payload_json" text not null
 )`,
-    `create view ${quoteId(crdtTableName)} as
+    `create ${tempKeyword}view ${quoteId(crdtTableName)} as
 select * from ${quoteId(baseTableName)}
 where tombstone = 0`,
-    `create trigger ${quoteId(`${crdtTableName}_created`)}
+    `create ${tempKeyword}trigger ${quoteId(`${crdtTableName}_created`)}
 instead of insert on ${quoteId(crdtTableName)}
 for each row
 begin
@@ -141,7 +151,7 @@ begin
     ${sqlStringLiteral(baseTableName)}, 'item-created', new."id", null, ${createdPayload}
   );
 end`,
-    `create trigger ${quoteId(`${crdtTableName}_updated`)}
+    `create ${tempKeyword}trigger ${quoteId(`${crdtTableName}_updated`)}
 instead of update on ${quoteId(crdtTableName)}
 for each row
 begin
@@ -151,7 +161,7 @@ begin
     ${sqlStringLiteral(baseTableName)}, 'item-updated', old."id", new."id", ${updatePayload}
   );
 end`,
-    `create trigger ${quoteId(`${crdtTableName}_deleted`)}
+    `create ${tempKeyword}trigger ${quoteId(`${crdtTableName}_deleted`)}
 instead of delete on ${quoteId(crdtTableName)}
 for each row
 when old."tombstone" = 0
@@ -176,7 +186,10 @@ export function registerCrdtIntentDrainer({
   let processedIntentMutationVersion = reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE);
 
   reactiveDb.db.setAfterMutatingStatement((tx) => {
-    if (reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE) === processedIntentMutationVersion) {
+    if (
+      reactiveDb.hasSynchronousHooks &&
+      reactiveDb.getTableMutationVersion(CRDT_CHANGE_INTENTS_TABLE) === processedIntentMutationVersion
+    ) {
       return;
     }
 
@@ -189,15 +202,14 @@ export function registerCrdtIntentDrainer({
     }
   });
 
+  // A rolled-back drain leaves `eventApplied` set on purpose: with asynchronous hooks the
+  // rollback can be delivered after a later transaction drained again, and clearing the flag
+  // then would strand that transaction's events. Processing with nothing pending is a no-op.
   reactiveDb.addEventListener("transaction-committed", () => {
     if (eventApplied) {
       eventApplied = false;
       void storage.internal.processEnqueuedEvents();
     }
-  });
-
-  reactiveDb.addEventListener("transaction-rolled-back", () => {
-    eventApplied = false;
   });
 }
 

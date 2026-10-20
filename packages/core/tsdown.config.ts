@@ -3,7 +3,9 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: {
     index: "src/index.ts",
+    "index.native": "src/index.native.ts",
     internal: "src/internal.ts",
+    local: "src/local.ts",
     worker: "src/worker.ts",
     server: "src/server/index.ts",
   },

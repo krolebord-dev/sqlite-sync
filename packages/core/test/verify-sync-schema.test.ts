@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createMigrations } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";
-import { formatSchemaVerificationIssues, verifySyncSchema } from "../src/schema/verify-sync-schema";
+import { formatSchemaVerificationIssues } from "../src/schema/verify-sync-schema";
+import { verifySyncSchema } from "../src/schema/verify-sync-schema-wasm";
 
 const baseMigrations = createMigrations((b) => ({
   0: [

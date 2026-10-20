@@ -56,8 +56,24 @@ export async function acquireLock(name: string, options: LockOptions) {
   };
 }
 
-export const generateId = () => {
-  return crypto.randomUUID();
+export const generateId = (): string => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index++) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
 export type DistributiveOmit<T, K extends keyof T> = T extends any ? Omit<T, K> : never;
@@ -156,10 +172,11 @@ export class TypedBroadcastChannel<TMessage> {
   }
 }
 
-export class TypedEvent<T = unknown> extends Event {
+export class TypedEvent<T = unknown> {
+  readonly type: string;
   readonly payload: T;
   constructor(type: string, payload: T) {
-    super(type);
+    this.type = type;
     this.payload = payload;
   }
 }
@@ -173,25 +190,46 @@ export type TypedEventTarget<T extends Record<string, unknown>> = {
   dispatchEvent: <K extends keyof T & string>(type: K, payload: T[K]) => void;
 };
 
+/** Follows EventTarget semantics without requiring the global, which React Native lacks. */
 export const createTypedEventTarget = <T extends Record<string, unknown>>(): TypedEventTarget<T> => {
-  const eventTarget = new EventTarget();
+  const listeners = new Map<string, Set<(event: TypedEvent<any>) => void>>();
+
+  const removeEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
+    listeners.get(type)?.delete(listener);
+  };
 
   const addEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
-    eventTarget.addEventListener(type, listener as (e: Event) => void);
+    let typeListeners = listeners.get(type);
+    if (!typeListeners) {
+      typeListeners = new Set();
+      listeners.set(type, typeListeners);
+    }
+    typeListeners.add(listener);
 
     return {
-      unsubscribe: () => {
-        eventTarget.removeEventListener(type, listener as (e: Event) => void);
-      },
+      unsubscribe: () => removeEventListener(type, listener),
     };
   };
 
-  const removeEventListener = <K extends keyof T & string>(type: K, listener: (event: TypedEvent<T[K]>) => void) => {
-    eventTarget.removeEventListener(type, listener as (e: Event) => void);
-  };
-
   const dispatchEvent = <K extends keyof T & string>(type: K, payload: T[K]) => {
-    eventTarget.dispatchEvent(new TypedEvent(type, payload));
+    const typeListeners = listeners.get(type);
+    if (!typeListeners || typeListeners.size === 0) {
+      return;
+    }
+
+    const event = new TypedEvent(type, payload);
+    for (const listener of Array.from(typeListeners)) {
+      if (!typeListeners.has(listener)) {
+        continue;
+      }
+      try {
+        listener(event);
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
   };
 
   return {

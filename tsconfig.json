@@ -15,6 +15,7 @@
     { "path": "./packages/core" },
     { "path": "./packages/ai" },
     { "path": "./packages/react" },
+    { "path": "./packages/react-native" },
     { "path": "./packages/devtools" },
     { "path": "./apps/example" },
     { "path": "./packages/cloudflare" }

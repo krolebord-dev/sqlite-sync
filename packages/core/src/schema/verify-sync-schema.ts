@@ -1,9 +1,9 @@
-import sqlite3InitModule, { type Sqlite3Static } from "@sqlite.org/sqlite-wasm";
 import { introspectDb, type TableMetadata } from "../introspection";
 import { createMigrator } from "../migrations/migrator";
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { createStoredValue } from "../sqlite-crdt/stored-value";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
+import type { SqliteDriver } from "../sqlite-driver";
 import type { ColumnKind, ColumnMeta } from "./table-builder";
 
 export type SchemaVerificationIssue = {
@@ -20,29 +20,21 @@ const acceptedDataTypes: Record<ColumnKind, string[]> = {
   enum: ["TEXT"],
 };
 
-let sqliteModule: Sqlite3Static | null = null;
-
 /**
  * Verify that replaying the full migration history on a fresh database produces
- * exactly the declared table schema. Creates a throwaway in-memory SQLite db,
- * applies all migrations, introspects the result, and diffs it against the
- * `t.table()` declarations.
+ * exactly the declared table schema. Applies all migrations to `driver`, which
+ * must be an empty throwaway database (it is closed afterwards), introspects the
+ * result, and diffs it against the `t.table()` declarations.
  *
  * Returns an empty array when migrations and schema agree. Intended for dev-time
  * checks (`startDbWorker({ verifySchema: true })`) and tests:
  * `expect(await verifySyncSchema(syncDbSchema)).toEqual([])`.
  */
-export async function verifySyncSchema(schema: SyncDbSchema): Promise<SchemaVerificationIssue[]> {
-  if (!sqliteModule) {
-    sqliteModule = await sqlite3InitModule();
-  }
-  const sqlite3 = sqliteModule;
-
+export function verifySyncSchemaWithDriver(schema: SyncDbSchema, driver: SqliteDriver): SchemaVerificationIssue[] {
   const db = new SQLiteDbWrapper({
-    db: () => new sqlite3.oo1.DB({ filename: ":memory:" }),
+    driver,
     logger: () => {},
     loggerPrefix: "schema-verify",
-    sqlite3,
   });
 
   try {

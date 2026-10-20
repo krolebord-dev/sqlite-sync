@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { applyMemoryDbSchema, memoryDbConfig } from "../src/migrations/system-schema";
 import { createSQLiteCrdtApplyFunction } from "../src/sqlite-crdt/apply-crdt-event";

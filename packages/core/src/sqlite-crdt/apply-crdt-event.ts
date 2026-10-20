@@ -1,7 +1,7 @@
-import type { SqlValue } from "@sqlite.org/sqlite-wasm";
 import type { Kysely } from "kysely";
 import type { SystemDbConfig } from "../migrations/system-schema";
 import type { InternalSQLiteWrapper } from "../sqlite-db-wrapper";
+import type { SqliteDriverValue } from "../sqlite-driver";
 import { quoteId } from "../utils";
 import {
   type CrdtEventType,
@@ -103,7 +103,7 @@ export const createSQLiteCrdtApplyFunction = ({
       db.executePreparedRaw({
         key: `update-item-${opts.dataset}-${keys.join("-")}`,
         sql: `update ${quoteId(opts.dataset)} set ${keys.map((key) => `${quoteId(key)} = ?`).join(",")} where id = ?`,
-        params: [...keys.map((key) => opts.payload[key]), opts.itemId] as SqlValue[],
+        params: [...keys.map((key) => opts.payload[key]), opts.itemId] as SqliteDriverValue[],
         meta: { loggerLevel: "system" },
       });
     },

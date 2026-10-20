@@ -1,4 +1,10 @@
-import { CrdtEventValidationError, createMigrations, defineSyncSchema, SQLiteReactiveDb, t } from "@sqlite-sync/core";
+import {
+  CrdtEventValidationError,
+  createMigrations,
+  createSQLiteReactiveDb,
+  defineSyncSchema,
+  t,
+} from "@sqlite-sync/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import { type AiDbAccess, type AiDbExecutor, type AiDbMutatorEvent, createAiDbAccess } from "../src/db-access";
 
@@ -196,7 +202,7 @@ describe("createAiDbAccess query", () => {
   let executor: AiDbExecutor;
 
   beforeAll(async () => {
-    const reactiveDb = await SQLiteReactiveDb.create<Record<string, never>>({
+    const reactiveDb = await createSQLiteReactiveDb<Record<string, never>>({
       snapshot: new Uint8Array(),
       logger: () => {},
     });
@@ -315,7 +321,7 @@ describe("createAiDbAccess query with a hidden table", () => {
   let access: AiDbAccess;
 
   beforeAll(async () => {
-    const reactiveDb = await SQLiteReactiveDb.create<Record<string, never>>({
+    const reactiveDb = await createSQLiteReactiveDb<Record<string, never>>({
       snapshot: new Uint8Array(),
       logger: () => {},
     });

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { HLCCounter, serializeHLC } from "../src/hlc";
 import type { Logger } from "../src/logger";
 import { createMemoryDb } from "../src/memory-db/memory-db";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
 import { applyMemoryDbSchema } from "../src/migrations/system-schema";
 import { t } from "../src/schema/table-builder";

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { createSQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
+import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { createMigrations } from "../src/migrations/migrator";
 import { defineSyncSchema } from "../src/schema/define-sync-schema";
 import { t } from "../src/schema/table-builder";

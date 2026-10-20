@@ -11,7 +11,7 @@ import type {
   WorkerConfig,
   WorkerErrorResponseMessage,
   WorkerInitMessage,
-  WorkerNotificationMessage,
+  WorkerNotificationEvents,
   WorkerRequestMessage,
   WorkerRequestMethod,
   WorkerResponseMessage,
@@ -19,9 +19,7 @@ import type {
 } from "./worker-common";
 import { isWorkerErrorResponseMessage, isWorkerNotificationMessage, isWorkerResponseMessage } from "./worker-common";
 
-type NotificationEvents = {
-  [K in WorkerNotificationMessage["notificationType"]]: Extract<WorkerNotificationMessage, { notificationType: K }>;
-};
+type NotificationEvents = WorkerNotificationEvents;
 
 export const createWorkerDbClient = async ({
   broadcastChannels,

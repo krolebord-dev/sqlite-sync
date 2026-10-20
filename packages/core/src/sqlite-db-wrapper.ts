@@ -1,14 +1,9 @@
-import type {
-  BindableValue,
-  FunctionOptions,
-  Database as SQLiteDatabase,
-  Sqlite3Static,
-  SqlValue,
-} from "@sqlite.org/sqlite-wasm";
 import type { Compilable, CompiledQuery, Kysely } from "kysely";
+import { BoundMap } from "./bound-map";
 import { dummyKysely } from "./dummy-kysely";
 import { type DatabaseIntrospection, introspectDb } from "./introspection";
 import { type Logger, startPerformanceLogger } from "./logger";
+import type { SqliteDriver, SqliteDriverStatement, SqliteDriverValue } from "./sqlite-driver";
 
 export type ExecuteParams = {
   sql: string;
@@ -25,16 +20,21 @@ export type PreparedStatement<TParams extends unknown[], TResult> = {
   isFinalized: boolean;
 };
 
-type ScalarFunctionOptions<TArgs extends readonly SqlValue[], TResult extends SqlValue | undefined> = {
+type ScalarFunctionOptions<
+  TArgs extends readonly SqliteDriverValue[],
+  TResult extends SqliteDriverValue | undefined,
+> = {
   name: string;
   callback: (...args: TArgs) => TResult;
-} & Pick<FunctionOptions, "deterministic" | "directOnly" | "innocuous">;
+  deterministic?: boolean;
+  directOnly?: boolean;
+  innocuous?: boolean;
+};
 
 type SqliteWrapperOptions = {
   logger?: Logger;
   loggerPrefix?: string;
-  sqlite3: Sqlite3Static;
-  db: () => SQLiteDatabase;
+  driver: SqliteDriver;
 };
 
 export type SQLiteTransactionWrapper<TDatabase = unknown> = Pick<
@@ -63,33 +63,34 @@ type ExecuteOptions = QueryMetaOpts & {
   skipAfterMutatingStatement?: boolean;
 };
 
+// sqlite3_stmt_readonly reports transaction control statements as read-only.
+const TRANSACTION_CONTROL_PATTERN =
+  /^(?:\s|--[^\n]*\n|\/\*[\s\S]*?\*\/)*(?:begin|commit|end|rollback|savepoint|release)\b/i;
+
 export class SQLiteDbWrapper<TDatabase = unknown> {
-  private db: SQLiteDatabase | null = null;
-  private sqlite3: Sqlite3Static;
+  private driver: SqliteDriver | null;
   private logger?: Logger;
   private loggerPrefix?: string;
 
   private loadedDbSchema: DatabaseIntrospection | null = null;
 
-  private readonly dataPointers = [] as number[];
-
-  private preparedStatements: PreparedStatement<SqlValue[], unknown>[] = [];
+  private preparedStatements: PreparedStatement<SqliteDriverValue[], unknown>[] = [];
   private preparedStatementsMap = new Map<string, TypedStatement<Record<string, unknown>, unknown>>();
-  private preparedRawStatementsMap = new Map<string, PreparedStatement<SqlValue[], unknown>>();
+  private preparedRawStatementsMap = new Map<string, PreparedStatement<SqliteDriverValue[], unknown>>();
+  private readonlyStatementCache = new BoundMap<string, boolean>({ maxSize: 500, onRemove: undefined });
   private afterMutatingStatement: AfterMutatingStatement<TDatabase> | null = null;
 
   constructor(opts: SqliteWrapperOptions) {
-    this.db = opts.db();
-    this.sqlite3 = opts.sqlite3;
+    this.driver = opts.driver;
     this.logger = opts.logger;
     this.loggerPrefix = opts.loggerPrefix;
   }
 
-  get ensureDb() {
-    if (!this.db) {
+  get ensureDriver() {
+    if (!this.driver) {
       throw new Error("Database is already closed");
     }
-    return this.db;
+    return this.driver;
   }
 
   get dbSchema() {
@@ -106,48 +107,29 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     skipAfterMutatingStatement: boolean,
   ): ExecuteResult<T> {
     const perf = startPerformanceLogger(this.logger, loggerLevel);
-    const statement = this.ensureDb.prepare(sql);
+    const driver = this.ensureDriver;
+    const statement = driver.prepare(sql);
     let transaction: { commit: () => void; rollback: () => void } | undefined;
 
     try {
-      const statementPointer = statement.pointer;
-      if (!statementPointer) {
-        throw new Error("Prepared statement is already finalized");
-      }
       const afterMutatingStatement =
-        !skipAfterMutatingStatement &&
-        this.afterMutatingStatement &&
-        this.sqlite3.capi.sqlite3_stmt_readonly(statementPointer) === 0
+        !skipAfterMutatingStatement && this.afterMutatingStatement && !this.isReadonlyStatement(statement, sql)
           ? this.afterMutatingStatement
           : null;
 
       let totalChangesBefore = 0;
       if (afterMutatingStatement) {
         transaction = this.beginStatementTransaction();
-        totalChangesBefore = this.sqlite3.capi.sqlite3_total_changes(this.ensureDb);
+        totalChangesBefore = driver.totalChanges();
       }
 
-      if (bind && bind.length > 0) {
-        statement.bind(bind as BindableValue[]);
-      }
-
-      const rows: T[] = [];
-      let columnNames: string[] | undefined;
-      while (statement.step()) {
-        columnNames ??= statement.getColumnNames([]);
-        const values = statement.get([]);
-        const row = Object.create(null) as Record<string, unknown>;
-        for (let index = 0; index < columnNames.length; index++) {
-          row[columnNames[index]] = values[index];
-        }
-        rows.push(row as T);
-      }
+      const rows = toRowObjects<T>(statement.run(bind ?? []), () => Object.create(null));
       statement.finalize();
       perf.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
 
       if (transaction) {
         // Nothing was written, so the statement cannot have produced any work for the callback.
-        if (this.sqlite3.capi.sqlite3_total_changes(this.ensureDb) !== totalChangesBefore) {
+        if (driver.totalChanges() !== totalChangesBefore) {
           afterMutatingStatement?.(this);
         }
         transaction.commit();
@@ -159,6 +141,31 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       transaction?.rollback();
       throw error;
     }
+  }
+
+  private isReadonlyStatement(statement: SqliteDriverStatement, sql: string) {
+    if (statement.readonly !== undefined) {
+      return statement.readonly;
+    }
+
+    let readonly = this.readonlyStatementCache.get(sql);
+    if (readonly === undefined) {
+      readonly = TRANSACTION_CONTROL_PATTERN.test(sql) || this.isReadonlyByTablesUsed(sql);
+      this.readonlyStatementCache.set(sql, readonly);
+    }
+    return readonly;
+  }
+
+  private isReadonlyByTablesUsed(sql: string) {
+    // Statements that open no b-tree (PRAGMAs, table-less selects, full-table deletes)
+    // are reported with no rows, so they are treated as writes.
+    const tables = this.executePreparedRaw<[string], { wr: number }>({
+      key: "$tables-used-writes",
+      sql: `select "wr" from tables_used(?)`,
+      params: [sql],
+      meta: { loggerLevel: "system" },
+    });
+    return tables.length > 0 && tables.every((table) => !table.wr);
   }
 
   execute<T = unknown>(opts: ExecuteParams | string | CompiledQuery<T>, options?: ExecuteOptions): ExecuteResult<T> {
@@ -185,10 +192,6 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       transaction.rollback();
       throw error;
     }
-  }
-
-  isInTransaction() {
-    return this.sqlite3.capi.sqlite3_get_autocommit(this.ensureDb) === 0;
   }
 
   beginTransaction() {
@@ -222,11 +225,8 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     };
   }
 
+  // A savepoint opens a transaction when none is active, so this nests inside user transactions too.
   private beginStatementTransaction() {
-    if (!this.isInTransaction()) {
-      return this.beginTransaction();
-    }
-
     this.executePreparedRaw({
       key: "$begin-statement-savepoint",
       sql: "savepoint sqlite_sync_statement",
@@ -258,7 +258,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
   prepare<TParams extends unknown[], TResult>(sql: string, opts?: QueryMetaOpts) {
     const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
-    const stmt = this.ensureDb.prepare(sql);
+    const stmt = this.ensureDriver.prepare(sql);
     perf.logEnd(`${this.loggerPrefix ?? ""}:prepare`, sql, opts?.loggerLevel);
 
     let isFinalized = false;
@@ -270,27 +270,8 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
       const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
       try {
-        if (params.length > 0) {
-          stmt.bind(params as SqlValue[]);
-        }
-
-        const results = [] as TResult[];
-        // Reading rows as arrays and naming them here keeps sqlite from looking up
-        // every column name again for every row.
-        let columnNames: string[] | undefined;
-        while (stmt.step()) {
-          columnNames ??= stmt.getColumnNames([]);
-          const values = stmt.get([]);
-          const row = {} as Record<string, unknown>;
-          for (let index = 0; index < columnNames.length; index++) {
-            row[columnNames[index]] = values[index];
-          }
-          results.push(row as TResult);
-        }
-
-        return results;
+        return toRowObjects<TResult>(stmt.run(params), () => ({}));
       } finally {
-        stmt.reset(true);
         perf.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       }
     };
@@ -308,7 +289,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       },
     };
 
-    this.preparedStatements.push(preparedStatement as PreparedStatement<SqlValue[], unknown>);
+    this.preparedStatements.push(preparedStatement as PreparedStatement<SqliteDriverValue[], unknown>);
 
     return preparedStatement;
   }
@@ -318,10 +299,10 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
       factory: KyselyStatementFactory<TParams, TDatabase, TQuery, TResult>,
     ): TypedStatement<TParams, TResult> => {
       const query = compileKyselyStatement(factory);
-      const statement = this.prepare<SqlValue[], TResult>(query.sql, opts);
+      const statement = this.prepare<SqliteDriverValue[], TResult>(query.sql, opts);
 
       return {
-        execute: (parameters) => statement.execute(query.bindParameters(parameters) as SqlValue[]),
+        execute: (parameters) => statement.execute(query.bindParameters(parameters) as SqliteDriverValue[]),
       };
     };
   }
@@ -386,19 +367,20 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     });
   }
 
-  createScalarFunction<TArgs extends SqlValue[], TResult extends SqlValue | undefined>({
+  createScalarFunction<TArgs extends SqliteDriverValue[], TResult extends SqliteDriverValue | undefined>({
     name,
     callback,
     deterministic,
     directOnly,
     innocuous,
   }: ScalarFunctionOptions<TArgs, TResult>) {
-    return this.ensureDb.createFunction({
+    const driver = this.ensureDriver;
+    if (!driver.createScalarFunction) {
+      throw new Error("This SQLite driver does not support scalar functions");
+    }
+    driver.createScalarFunction({
       name,
-      xFunc: (_, ...args) => {
-        const result = callback(...(args as TArgs)) as SqlValue;
-        return result;
-      },
+      callback: (...args) => callback(...(args as TArgs)),
       arity: callback.length,
       deterministic,
       directOnly,
@@ -408,19 +390,11 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
   useSnapshot(snapshot: Uint8Array<ArrayBufferLike>) {
     const perf = startPerformanceLogger(this.logger, "system");
-    const dataPointer = this.sqlite3.wasm.allocFromTypedArray(snapshot);
-    this.dataPointers.push(dataPointer);
-
-    const resultCode = this.sqlite3.capi.sqlite3_deserialize(
-      this.ensureDb,
-      "main",
-      dataPointer,
-      snapshot.byteLength,
-      snapshot.byteLength,
-      this.sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE | this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE,
-    );
-
-    this.ensureDb.checkRc(resultCode);
+    const driver = this.ensureDriver;
+    if (!driver.deserialize) {
+      throw new Error("This SQLite driver does not support snapshots");
+    }
+    driver.deserialize(snapshot);
 
     this.invalidateDbSchema();
 
@@ -428,7 +402,11 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
   }
 
   createSnapshot() {
-    return this.sqlite3.capi.sqlite3_js_db_export(this.ensureDb);
+    const driver = this.ensureDriver;
+    if (!driver.serialize) {
+      throw new Error("This SQLite driver does not support snapshots");
+    }
+    return driver.serialize();
   }
 
   invalidateDbSchema() {
@@ -442,14 +420,30 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
     this.preparedStatements.splice(0);
     this.preparedStatementsMap.clear();
     this.preparedRawStatementsMap.clear();
+    this.readonlyStatementCache.clear();
   }
 
   close() {
     this.cleanup();
 
-    this.db?.close();
-    this.db = null;
+    this.driver?.close();
+    this.driver = null;
   }
+}
+
+function toRowObjects<T>(
+  { columns, rows }: { columns: string[]; rows: SqliteDriverValue[][] },
+  createRow: () => Record<string, unknown>,
+): T[] {
+  const result: T[] = [];
+  for (const values of rows) {
+    const row = createRow();
+    for (let index = 0; index < columns.length; index++) {
+      row[columns[index]] = values[index];
+    }
+    result.push(row as T);
+  }
+  return result;
 }
 
 export type QueryBuilderOutput<QB> = QB extends Compilable<infer O> ? O : never;
