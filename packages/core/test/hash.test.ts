@@ -24,7 +24,7 @@ async function loadHash() {
 function expectReferenceHashes(xxhash: Awaited<ReturnType<typeof loadHash>>) {
   for (const input of inputs) {
     expect(xxhash.h64(input, 7n)).toBe(reference.h64(input, 7n));
-    expect(xxhash.h64Concat(input)).toBe(reference.h64(input, 0n) | (reference.h64(input, 1n) << 64n));
+    expect(xxhash.h64(input)).toBe(reference.h64(input, 0n));
   }
 }
 

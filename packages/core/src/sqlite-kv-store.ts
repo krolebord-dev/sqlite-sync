@@ -1,4 +1,5 @@
 import { type SchemaModule, sql } from "kysely";
+import type { StateHashStore } from "./sqlite-crdt/state-hash";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
 import type { InternalSQLiteWrapper } from "./sqlite-db-wrapper";
 
@@ -84,3 +85,12 @@ export function createSQLiteKvStore({ db, metaTableName }: { db: InternalSQLiteW
 }
 
 export type KvStore = ReturnType<typeof createSQLiteKvStore>;
+
+export const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
+
+export function createKvStateHashStore(kvStore: Pick<KvStore, "get" | "set">): StateHashStore {
+  return {
+    read: () => kvStore.get(STATE_HASH_KV_KEY),
+    write: (value) => kvStore.set(STATE_HASH_KV_KEY, value),
+  };
+}

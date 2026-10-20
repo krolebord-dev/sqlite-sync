@@ -16,8 +16,8 @@ export type WorkerNotificationMessage =
   | {
       notificationType: "new-event-chunk-applied";
       newSyncId: number;
-      /** Worker's HLC checksum after applying up to `newSyncId`. */
-      eventHlcSum: string | null;
+      /** Worker's state hash after applying up to `newSyncId`. */
+      stateHash: string | null;
     }
   | {
       notificationType: "state-changed";

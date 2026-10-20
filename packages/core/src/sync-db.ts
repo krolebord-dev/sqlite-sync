@@ -149,7 +149,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       migrator: memoryDbMigrator,
       remoteFactory: ({ onEventsAvailable }) => {
         const subscription = workerClient.subscribe("new-event-chunk-applied", (event) => {
-          onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteEventHlcSum: event.payload.eventHlcSum });
+          onEventsAvailable({ newSyncId: event.payload.newSyncId, remoteStateHash: event.payload.stateHash ?? null });
         });
 
         return {

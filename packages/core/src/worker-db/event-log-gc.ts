@@ -9,28 +9,11 @@ type EventLogGcOptions = {
   db: InternalSQLiteWrapper<any>;
   dbConfig: SystemDbConfig;
   pushSyncId: StoredValue<number>;
-  eventHlcAccumulator: StoredValue<string>;
   logger?: Logger;
 };
 
-export function runWorkerEventLogGc({ db, dbConfig, pushSyncId, eventHlcAccumulator, logger }: EventLogGcOptions) {
+export function runWorkerEventLogGc({ db, dbConfig, pushSyncId, logger }: EventLogGcOptions) {
   const eventsTable = dbConfig.eventsTable.fullIdentifier;
-
-  if (eventHlcAccumulator.current === "") {
-    const [{ count }] = db.executePreparedRaw<[], { count: number }>({
-      key: "event-log-gc-count-applied-events",
-      sql: `SELECT count(*) AS count FROM ${eventsTable} WHERE "status" = 'applied'`,
-      meta: { loggerLevel: "system" },
-    });
-    if (count > 0) {
-      logger?.(
-        "worker",
-        "Skipping event log GC until the event HLC checksum has been computed from full history",
-        "info",
-      );
-    }
-    return { skipped: true as const };
-  }
 
   const [{ deleteBeforeSyncId }] = db.executePreparedRaw<[number], { deleteBeforeSyncId: number | null }>({
     key: "event-log-gc-delete-before-sync-id",
@@ -49,7 +32,7 @@ export function runWorkerEventLogGc({ db, dbConfig, pushSyncId, eventHlcAccumula
   });
 
   if (deleteBeforeSyncId === null) {
-    return { skipped: false as const };
+    return;
   }
 
   db.executePreparedRaw<[number, number], never>({
@@ -65,5 +48,4 @@ export function runWorkerEventLogGc({ db, dbConfig, pushSyncId, eventHlcAccumula
   });
 
   logger?.("worker", "Event log GC completed", "info");
-  return { skipped: false as const };
 }

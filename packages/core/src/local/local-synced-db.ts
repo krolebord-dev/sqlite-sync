@@ -23,7 +23,7 @@ import {
 } from "../sqlite-crdt/crdt-sync-remote-source";
 import { makeCrdtTable, registerCrdtIntentDrainer } from "../sqlite-crdt/make-crdt-table";
 import type { SqliteDriver } from "../sqlite-driver";
-import { createKvStoreTableQuery, createSQLiteKvStore } from "../sqlite-kv-store";
+import { createKvStateHashStore, createKvStoreTableQuery, createSQLiteKvStore } from "../sqlite-kv-store";
 import type { SyncedDb } from "../sync-db";
 import { createSyncedDbDatabase } from "../synced-db-database";
 import { createTypedEventTarget, generateId } from "../utils";
@@ -132,14 +132,14 @@ export async function createLocalSyncedDb<Database>(
 
     const pullSyncId = kvStore.createNumberStoredValue("pull-sync-id", -1);
     const pushSyncId = kvStore.createNumberStoredValue("push-sync-id", -1);
-    const eventHlcAccumulator = kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", "");
+    const stateHash = createKvStateHashStore(kvStore);
     const storageGeneration = kvStore.createStringStoredValue("storage-generation", "");
     if (!storageGeneration.current) {
       storageGeneration.current = generateId();
     }
 
     if (options.eventLogGc === true) {
-      runWorkerEventLogGc({ db, dbConfig: localDbConfig, pushSyncId, eventHlcAccumulator, logger });
+      runWorkerEventLogGc({ db, dbConfig: localDbConfig, pushSyncId, logger });
     }
 
     for (const table of options.syncDbSchema.tablesConfig) {
@@ -154,7 +154,7 @@ export async function createLocalSyncedDb<Database>(
       hlc: new HLCCounter(nodeId, () => Date.now()),
       db,
       dbConfig: localDbConfig,
-      eventHlcAccumulator,
+      stateHash,
       schema: options.syncDbSchema,
     });
     registerCrdtIntentDrainer({ reactiveDb, storage: crdtStorage });
@@ -172,7 +172,7 @@ export async function createLocalSyncedDb<Database>(
         notify({
           notificationType: "new-event-chunk-applied",
           newSyncId: chunk.newSyncId,
-          eventHlcSum: chunk.eventHlcSum,
+          stateHash: chunk.stateHash,
         });
       },
     });

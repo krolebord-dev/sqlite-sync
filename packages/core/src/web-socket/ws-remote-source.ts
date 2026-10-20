@@ -112,7 +112,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
           break;
         }
         case "events-applied":
-          onEventsAvailable({ newSyncId: message.newSyncId, remoteEventHlcSum: message.eventHlcSum });
+          onEventsAvailable({ newSyncId: message.newSyncId, remoteStateHash: message.stateHash ?? null });
           break;
         default:
           message satisfies never;

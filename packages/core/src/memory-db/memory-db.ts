@@ -5,7 +5,7 @@ import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../mig
 import type { CrdtTableConfig, SyncDbSchema } from "../sqlite-crdt/crdt-schema";
 import { createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { makeCrdtTable, registerCrdtIntentDrainer } from "../sqlite-crdt/make-crdt-table";
-import type { StoredValue } from "../sqlite-crdt/stored-value";
+import type { StateHashStore } from "../sqlite-crdt/state-hash";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import type { SQLiteReactiveDb } from "./sqlite-reactive-db";
 
@@ -17,7 +17,7 @@ type MemoryDbOptions<Database> = {
   crdtTables: CrdtTableConfig[];
   initializeSchema?: boolean;
   initialSyncId?: number;
-  eventHlcAccumulator?: StoredValue<string>;
+  stateHash?: StateHashStore;
   syncDbSchema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
 };
 
@@ -29,7 +29,7 @@ export async function createMemoryDb<Database>({
   crdtTables,
   initializeSchema = true,
   initialSyncId,
-  eventHlcAccumulator,
+  stateHash,
   syncDbSchema,
 }: MemoryDbOptions<Database>) {
   await xxhash.ensureLoaded();
@@ -55,7 +55,7 @@ export async function createMemoryDb<Database>({
     migrator,
     db,
     dbConfig: memoryDbConfig,
-    eventHlcAccumulator,
+    stateHash,
     schema: syncDbSchema,
   });
 

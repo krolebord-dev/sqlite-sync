@@ -17,8 +17,13 @@ import {
   type NewCrdtEvent,
   type PersistedCrdtEvent,
 } from "./crdt-table-schema";
-import { createEventHlcAccumulator } from "./event-consistency";
-import type { StoredValue } from "./stored-value";
+import {
+  createStateHashAccumulator,
+  formatStateHash,
+  parseStateHash,
+  type StateHashAccumulator,
+  type StateHashStore,
+} from "./state-hash";
 
 type LocalCrdtEvent = {
   type: CrdtEventType;
@@ -112,7 +117,7 @@ type DbSyncerStorage = {
   db: InternalSQLiteWrapper<any>;
   dbConfig: SystemDbConfig;
   hlc: StorageHLC;
-  eventHlcAccumulator?: StoredValue<string>;
+  stateHash?: StateHashStore;
   onEventApplied?: (event: PersistedCrdtEvent) => void;
   schema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
 };
@@ -123,7 +128,7 @@ export type InternalCrdtStorage = ReturnType<typeof createCrdtStorage>;
 
 type EventsAppliedPayload = {
   syncId: number;
-  eventHlcSum: string | null;
+  stateHash: string | null;
 };
 
 type InternalDbSchema = {
@@ -381,9 +386,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         }),
       );
       persistEvents(tx, persistedEvents);
-      for (const persistedEvent of persistedEvents) {
-        applyCrdtEvent(persistedEvent);
-      }
+      withStateHash(() => {
+        for (const persistedEvent of persistedEvents) {
+          applyCrdtEvent(persistedEvent);
+        }
+      });
     });
 
     void processEnqueuedEvents();
@@ -473,32 +480,33 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
   const applyOwnIntentsFromTransaction = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
     intents: CrdtChangeIntent[],
-  ) => {
-    let appliedEvents = 0;
+  ) =>
+    withStateHash(() => {
+      let appliedEvents = 0;
 
-    for (const intent of intents) {
-      if (intent.type === "item-updated") {
-        if (intent.item_id !== intent.new_item_id) {
-          throw new Error(
-            `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
-          );
+      for (const intent of intents) {
+        if (intent.type === "item-updated") {
+          if (intent.item_id !== intent.new_item_id) {
+            throw new Error(
+              `Cannot update the "id" column of an item. It is used to identify the item and must be immutable.`,
+            );
+          }
+          if (intent.payload_json === "{}") {
+            continue;
+          }
         }
-        if (intent.payload_json === "{}") {
-          continue;
-        }
+
+        applyOwnEventFromTransaction(tx, {
+          type: intent.type,
+          dataset: intent.dataset,
+          item_id: intent.item_id,
+          payload: intent.payload_json,
+        });
+        appliedEvents++;
       }
 
-      applyOwnEventFromTransaction(tx, {
-        type: intent.type,
-        dataset: intent.dataset,
-        item_id: intent.item_id,
-        payload: intent.payload_json,
-      });
-      appliedEvents++;
-    }
-
-    return { appliedEvents };
-  };
+      return { appliedEvents };
+    });
 
   const dispatchEventsApplied = (previousSequentialSyncId: number) => {
     if (sequentialSyncId <= previousSequentialSyncId) {
@@ -506,7 +514,7 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     }
     eventTarget.dispatchEvent("events-applied", {
       syncId: sequentialSyncId,
-      eventHlcSum: sequentialSyncId === localSyncId ? (eventHlcAccumulator?.current ?? null) : null,
+      stateHash: sequentialSyncId === localSyncId ? getStateHash() : null,
     });
   };
 
@@ -609,68 +617,84 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     return unpushed.events.length === 0;
   };
 
-  const applyCrdtEvent = createSQLiteCrdtApplyFunction({
-    db,
-    dbConfig: storage.dbConfig,
-  });
-  const eventHlcAccumulator = storage.eventHlcAccumulator
-    ? createEventHlcAccumulator(storage.eventHlcAccumulator.current)
-    : null;
+  const stateHashStore = storage.stateHash ?? null;
+  const stateHashColumnsByDataset = new Map(
+    (storage.schema?.tablesConfig ?? []).flatMap((config) => {
+      const table = storage.schema.tables[config.crdtTableName];
+      return table ? [[config.baseTableName, Object.keys(table.columns).filter((column) => column !== "id")]] : [];
+    }),
+  );
+  const getStateHashColumns = (dataset: string) => stateHashColumnsByDataset.get(dataset) ?? null;
+  let activeStateHash: StateHashAccumulator | null = null;
 
-  const persistEventHlcAccumulator = () => {
-    if (eventHlcAccumulator && storage.eventHlcAccumulator) {
-      storage.eventHlcAccumulator.current = eventHlcAccumulator.current;
-    }
-  };
-
-  // Rebuild the accumulator from the full applied-event history when it has
-  // never been computed for this storage. An empty stored value is the "never
-  // computed" sentinel: once any event is applied the accumulator is persisted
-  // as padded hex, never "". This recovers storages created before the
-  // accumulator existed and lets us force a recompute by bumping the stored
-  // value's key version. The accumulator is a commutative sum, so scan order
-  // does not matter.
-  const recomputeEventHlcAccumulatorIfNeeded = () => {
-    if (!eventHlcAccumulator || !storage.eventHlcAccumulator) {
-      return;
-    }
-    if (storage.eventHlcAccumulator.current !== "") {
-      return;
-    }
-
+  const rebuildStateHash = () => {
+    const accumulator = createStateHashAccumulator({ sum: 0n, getColumns: getStateHashColumns });
     const batchSize = 1000;
-    let afterSyncId = 0;
+    let after: [string, string] = ["", ""];
     for (;;) {
-      const rows = db.executePrepared(
-        "get-applied-event-timestamps",
-        { status: "applied" as const, afterSyncId, limit: batchSize },
-        (db, params) =>
-          db
-            .selectFrom(crdtEventsTable)
-            .select(["sync_id", "timestamp"])
-            .where("status", "=", params("status"))
-            .where("sync_id", ">", params("afterSyncId"))
-            .orderBy("sync_id", "asc")
-            .limit(params("limit")),
-        { loggerLevel: "system" },
-      );
-
-      if (rows.length === 0) {
-        break;
-      }
+      const rows = db.executePreparedRaw<[string, string, number], CrdtUpdateLogItem>({
+        key: "get-update-log-batch",
+        sql: `select "dataset", "item_id", "payload" from ${quoteId(storage.dbConfig.updateLogTable.fullIdentifier)}
+where ("item_id", "dataset") > (?, ?)
+order by "item_id", "dataset"
+limit ?`,
+        params: [...after, batchSize],
+        meta: { loggerLevel: "system" },
+      });
 
       for (const row of rows) {
-        eventHlcAccumulator.add(row.timestamp);
-        afterSyncId = row.sync_id;
+        accumulator.addItem(row.dataset, row.item_id, JSON.parse(row.payload));
       }
 
-      if (rows.length < batchSize) {
+      const lastRow = rows[rows.length - 1];
+      if (!lastRow || rows.length < batchSize) {
         break;
       }
+      after = [lastRow.item_id, lastRow.dataset];
     }
-
-    persistEventHlcAccumulator();
+    return accumulator.sum;
   };
+
+  // Hashes computed for another schema version cover a different set of columns,
+  // and migrations rewrite the update log directly, so those are rebuilt.
+  const readStateHashSum = (store: StateHashStore) => {
+    const stored = parseStateHash(store.read());
+    if (stored && stored.schemaVersion === storage.migrator.currentSchemaVersion) {
+      return stored.sum;
+    }
+    const sum = rebuildStateHash();
+    store.write(formatStateHash(storage.migrator.currentSchemaVersion, sum));
+    return sum;
+  };
+
+  // Must run inside the transaction that applies the events, so a rollback reverts the hash too.
+  const withStateHash = <T>(callback: () => T): T => {
+    if (!stateHashStore || activeStateHash) {
+      return callback();
+    }
+    const initialSum = readStateHashSum(stateHashStore);
+    const accumulator = createStateHashAccumulator({ sum: initialSum, getColumns: getStateHashColumns });
+    activeStateHash = accumulator;
+    try {
+      const result = callback();
+      if (accumulator.sum !== initialSum) {
+        stateHashStore.write(formatStateHash(storage.migrator.currentSchemaVersion, accumulator.sum));
+      }
+      return result;
+    } finally {
+      activeStateHash = null;
+    }
+  };
+
+  const getStateHash = () => stateHashStore?.read() ?? null;
+
+  const applyCrdtEventWithoutStateHash = createSQLiteCrdtApplyFunction({
+    db,
+    dbConfig: storage.dbConfig,
+    getStateHash: () => activeStateHash,
+  });
+  const applyCrdtEvent = (event: Parameters<typeof applyCrdtEventWithoutStateHash>[0]) =>
+    withStateHash(() => applyCrdtEventWithoutStateHash(event));
 
   const getFirstAcceptedSyncIdsByTimestamp = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
@@ -863,24 +887,24 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
         );
         const statusOnlyEvents: PersistedCrdtEvent[] = [];
 
-        for (const event of events) {
-          processPersistedEvent(tx, event, firstAcceptedSyncIdByTimestamp, statusOnlyEvents);
-          if (event.status === "applied") {
-            const firstAcceptedSyncId = firstAcceptedSyncIdByTimestamp.get(event.timestamp);
-            if (firstAcceptedSyncId === undefined || event.sync_id < firstAcceptedSyncId) {
-              firstAcceptedSyncIdByTimestamp.set(event.timestamp, event.sync_id);
+        withStateHash(() => {
+          for (const event of events) {
+            processPersistedEvent(tx, event, firstAcceptedSyncIdByTimestamp, statusOnlyEvents);
+            if (event.status === "applied") {
+              const firstAcceptedSyncId = firstAcceptedSyncIdByTimestamp.get(event.timestamp);
+              if (firstAcceptedSyncId === undefined || event.sync_id < firstAcceptedSyncId) {
+                firstAcceptedSyncIdByTimestamp.set(event.timestamp, event.sync_id);
+              }
+              if (storage.onEventApplied) {
+                appliedEventsToNotify.push(event);
+              }
             }
-            eventHlcAccumulator?.add(event.timestamp);
-            if (storage.onEventApplied) {
-              appliedEventsToNotify.push(event);
+            if (event.status === "failed" && event.origin === "remote") {
+              failedRemoteSyncIds.push(event.sync_id);
             }
           }
-          if (event.status === "failed" && event.origin === "remote") {
-            failedRemoteSyncIds.push(event.sync_id);
-          }
-        }
+        });
         updateEventStatuses(tx, statusOnlyEvents);
-        persistEventHlcAccumulator();
       });
       publishProcessedBatch({
         previousSequentialSyncId,
@@ -896,7 +920,11 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     }
   });
 
-  recomputeEventHlcAccumulatorIfNeeded();
+  if (stateHashStore) {
+    db.executeTransaction(() => {
+      readStateHashSum(stateHashStore);
+    });
+  }
 
   void processEnqueuedEvents();
 
@@ -907,7 +935,7 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     applyOwnEvents,
     applyOwnSnapshot,
     checkIsQuiescent,
-    getEventHlcAccumulator: () => eventHlcAccumulator?.current ?? null,
+    getStateHash,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,

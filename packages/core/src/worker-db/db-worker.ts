@@ -17,7 +17,7 @@ import {
 } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import type { KvStore } from "../sqlite-kv-store";
+import { createKvStateHashStore, type KvStore } from "../sqlite-kv-store";
 import { createDeferredPromise, generateId } from "../utils";
 import { createWasmSqliteDriver } from "../wasm-driver";
 import { runWorkerEventLogGc } from "./event-log-gc";
@@ -131,7 +131,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const pullSyncId = kvStore.createNumberStoredValue("pull-sync-id", -1);
   const pushSyncId = kvStore.createNumberStoredValue("push-sync-id", -1);
-  const eventHlcAccumulator = kvStore.createStringStoredValue("crdt.consistency.event_hlc_sum.v2", "");
+  const stateHash = createKvStateHashStore(kvStore);
   const storageGeneration = kvStore.createStringStoredValue("storage-generation", "");
   if (!storageGeneration.current) {
     storageGeneration.current = generateId();
@@ -155,7 +155,6 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
           db,
           dbConfig: workerDbConfig,
           pushSyncId,
-          eventHlcAccumulator,
           logger,
         });
       },
@@ -169,7 +168,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     hlc: new HLCCounter(config.clientId, () => Date.now()),
     db,
     dbConfig: workerDbConfig,
-    eventHlcAccumulator,
+    stateHash,
     schema: opts.syncDbSchema,
   });
 
@@ -179,7 +178,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       broadcastChannels.responses.postMessage({
         notificationType: "new-event-chunk-applied",
         newSyncId: chunk.newSyncId,
-        eventHlcSum: chunk.eventHlcSum,
+        stateHash: chunk.stateHash,
       });
     },
   });

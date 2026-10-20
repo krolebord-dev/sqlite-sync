@@ -331,7 +331,7 @@ sqlite-sync needs SQLite's bytecode virtual tables (`tables_used`) to track whic
 
 React Native has no `crypto.getRandomValues`, which sqlite-sync uses to generate UUID v4 IDs. `@sqlite-sync/react-native` imports [`react-native-get-random-values`](https://github.com/LinusU/react-native-get-random-values) to provide it, so there is nothing to import yourself, but the package must be listed in your app's dependencies so its native module is autolinked. It leaves an existing `crypto.getRandomValues` (for example from `react-native-quick-crypto`) in place.
 
-Hermes has no WebAssembly, so the event checksum falls back to a JavaScript xxh64 that produces the same hashes as the web build. `@sqlite-sync/core` ships a `react-native` export condition, which Metro picks automatically, so the app bundle does not include sqlite-wasm.
+Hermes has no WebAssembly, so the state hash falls back to a JavaScript xxh64 that produces the same hashes as the web build. `@sqlite-sync/core` ships a `react-native` export condition, which Metro picks automatically, so the app bundle does not include sqlite-wasm.
 
 ### Initialize the Database
 
@@ -795,7 +795,7 @@ function SyncStatus() {
 
 sqlite-sync detects two recovery conditions while syncing:
 
-- **De-sync detected** — the local worker is caught up to the remote sync ID and no local events are waiting to push, but the local and remote HLC checksums differ. This means the applied event sets have diverged, for example because the server rejected some of this client's pushed events (see [Client push validation](#client-push-validation)). It can also be raised if applying a remote event fails.
+- **De-sync detected** — the local worker is caught up to the remote sync ID and no local events are waiting to push, but the local and remote state hashes differ. The state hash covers the winning HLC of every synced cell, so a mismatch means the materialized CRDT state has diverged, for example because the server rejected some of this client's pushed events (see [Client push validation](#client-push-validation)). Hashes are only compared at the same schema version. It can also be raised if applying a remote event fails.
 - **Schema version mismatch** — the remote sends an event with a `schema_version` greater than the local migrator's current schema version. This usually means another client has already written data with newer app code.
 
 You can react to these conditions through `useDbState()` for UI state, or subscribe to the underlying worker notifications with `useDbEvent()`:
@@ -1061,7 +1061,7 @@ syncDb.applySnapshot({
 
 `applySnapshot` reads the current row if there is one, applies the patch, and writes an `item-created` event with the complete row and `tombstone: false`. Existing rows treat it as an update, and a deleted row is restored. Event listeners receive it as `item-created`.
 
-Older events for the row stay in the log, but their payloads are replaced with a no-op marker. Sync cursors and checksums stay intact while superseded data is dropped. Fresh replicas replay the no-ops, then the snapshot.
+Older events for the row stay in the log, but their payloads are replaced with a no-op marker. Sync cursors and the state hash stay intact while superseded data is dropped. Fresh replicas replay the no-ops, then the snapshot.
 
 - If an event for the row is newer than the snapshot (e.g. a pending client edit from a clock running ahead), the history is kept: that event still wins for its fields, and fresh replicas need the history to replay it. The next snapshot newer than every event for the row compacts it.
 - If the row does not exist, the patch must supply every required column. This path does not run runtime schema validation, so SQLite rejects an incomplete create. TypeScript prevents patching `id` or `tombstone`.
@@ -1114,7 +1114,7 @@ push still returns `ok: true`. An event is rejected when:
 Older-version events are migrated before they are checked. Events whose table was dropped by a
 migration, and events with a no-op payload, are stored as no-ops.
 
-The client that pushed a rejected event keeps its local copy. Its checksum no longer matches the
+The client that pushed a rejected event keeps its local copy. Its state hash no longer matches the
 server's, so it reports a [de-sync](#de-sync-and-schema-mismatch) once it is caught up. A device
 whose clock runs more than 6 hours fast cannot sync until its clock is corrected.
 
@@ -1408,7 +1408,7 @@ Requests wait for the socket to open before they are sent. The source implements
 
 ```ts
 type CreateRemoteSourceFactory = (opts: {
-  onEventsAvailable: (event: { newSyncId: number; remoteEventHlcSum: string | null }) => void;
+  onEventsAvailable: (event: { newSyncId: number; remoteStateHash: string | null }) => void;
   onClosed: (error?: unknown) => void;
 }) => RemoteSource;
 
@@ -1423,6 +1423,7 @@ type RemoteSource = {
 - One source is one connection. Each call must return a new source, synchronously. Do any async setup, like fetching a token, inside the source.
 - The library calls `disconnect` on every returned source exactly once, also to cancel an attempt that is still connecting. It does not wait for `disconnect` to finish.
 - Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then reports `connecting` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
+- Call `onEventsAvailable` when the remote broadcasts new events. Pass its `stateHash` as `remoteStateHash`, or `null` if it reports none, which skips [de-sync detection](#de-sync-and-schema-mismatch).
 - `pullEvents` and `pushEvents` may wait for the connection to open. Once the connection has closed, they should reject so failures surface quickly.
 - `ping` is optional. When present, the library pings a connection that has received nothing (no response or broadcast) for 25 seconds, and replaces it if the ping fails or gets no answer within 10 seconds. Pings never overlap, run only on an online connection, and never start after the connection closes, so a ping does not need to settle once the source has closed. Without `ping`, a connection that dies without closing is only noticed when a request times out.
 - The library times requests out after 10 seconds and does not retry on the same source: any failed request closes the connection, and the library reconnects with backoff. A push response with `ok: false` also closes the connection, but the library does not reconnect until the next `state.sync()`. The remote counts as `online` once the first request succeeds.
@@ -1645,5 +1646,6 @@ The sync protocol uses JSON messages over WebSocket.
 { type: "events-push-response", requestId: string, data: { ok: true, beforeSyncId: number, afterSyncId: number } }
 
 // Server push notification when new events are available
-{ type: "events-applied", newSyncId: number, eventHlcSum: string | null }
+// eventHlcSum is always null; clients from before the state hash skip their comparison for it
+{ type: "events-applied", newSyncId: number, stateHash: string | null, eventHlcSum: null }
 ```

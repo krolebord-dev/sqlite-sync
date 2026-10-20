@@ -570,8 +570,8 @@ export function SQLiteSyncDevtools({
   );
 }
 
-const EVENT_HLC_ACCUMULATOR_KV_KEY = "crdt.consistency.event_hlc_sum.v2";
-const EVENT_HLC_ACCUMULATOR_QUERY = `SELECT value FROM "worker"."kv" WHERE key = '${EVENT_HLC_ACCUMULATOR_KV_KEY}'`;
+const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
+const STATE_HASH_QUERY = `SELECT value FROM "worker"."kv" WHERE key = '${STATE_HASH_KV_KEY}'`;
 const EVENT_STATUS_COUNTS_QUERY = `SELECT status, COUNT(*) AS count FROM "worker"."crdt_events" GROUP BY status`;
 const MEMORY_DB_SIZE_QUERY =
   "SELECT (SELECT page_count FROM pragma_page_count()) * (SELECT page_size FROM pragma_page_size()) AS bytes";
@@ -653,9 +653,9 @@ function OverviewTab({
   selectedInstance: SQLiteSyncDevtoolsInstance | null;
   dbIdCounts: Map<string, number>;
 }) {
-  const [eventHlcAccumulator, setEventHlcAccumulator] = useState<string | null>(null);
-  const [accumulatorError, setAccumulatorError] = useState<string | null>(null);
-  const [isAccumulatorLoading, setIsAccumulatorLoading] = useState(false);
+  const [stateHash, setStateHash] = useState<string | null>(null);
+  const [stateHashError, setStateHashError] = useState<string | null>(null);
+  const [isStateHashLoading, setIsStateHashLoading] = useState(false);
   const [eventCounts, setEventCounts] = useState<EventStatusCounts | null>(null);
   const [eventCountsError, setEventCountsError] = useState<string | null>(null);
   const [isEventCountsLoading, setIsEventCountsLoading] = useState(false);
@@ -665,24 +665,24 @@ function OverviewTab({
   const [workerSizeError, setWorkerSizeError] = useState<string | null>(null);
   const [isSizeLoading, setIsSizeLoading] = useState(false);
 
-  const refreshEventHlcAccumulator = useCallback(async () => {
+  const refreshStateHash = useCallback(async () => {
     if (!selectedInstance) return;
-    setIsAccumulatorLoading(true);
-    setAccumulatorError(null);
+    setIsStateHashLoading(true);
+    setStateHashError(null);
     try {
       const result = await selectedInstance.instance._internal.executeAsync({
-        sql: EVENT_HLC_ACCUMULATOR_QUERY,
+        sql: STATE_HASH_QUERY,
         parameters: [],
       });
       const row = result.rows[0];
       const value =
         typeof row === "object" && row !== null && "value" in row && typeof row.value === "string" ? row.value : "";
-      setEventHlcAccumulator(value);
+      setStateHash(value);
     } catch (error) {
-      setAccumulatorError(error instanceof Error ? error.message : String(error));
-      setEventHlcAccumulator(null);
+      setStateHashError(error instanceof Error ? error.message : String(error));
+      setStateHash(null);
     } finally {
-      setIsAccumulatorLoading(false);
+      setIsStateHashLoading(false);
     }
   }, [selectedInstance]);
 
@@ -746,18 +746,18 @@ function OverviewTab({
   }, [selectedInstance]);
 
   useEffect(() => {
-    setEventHlcAccumulator(null);
-    setAccumulatorError(null);
+    setStateHash(null);
+    setStateHashError(null);
     setEventCounts(null);
     setEventCountsError(null);
     setMemoryBytes(null);
     setMemorySizeError(null);
     setWorkerBytes(null);
     setWorkerSizeError(null);
-    void refreshEventHlcAccumulator();
+    void refreshStateHash();
     void refreshEventCounts();
     void refreshDbSizes();
-  }, [refreshEventHlcAccumulator, refreshEventCounts, refreshDbSizes]);
+  }, [refreshStateHash, refreshEventCounts, refreshDbSizes]);
 
   if (!selectedInstance) return null;
 
@@ -831,25 +831,25 @@ function OverviewTab({
 
       <div className="overviewSection">
         <div className="overviewSectionHeader">
-          <div className="overviewSectionTitle">Event HLC accumulator</div>
+          <div className="overviewSectionTitle">State hash</div>
           <button
             type="button"
             className="refreshButton"
-            disabled={isAccumulatorLoading}
-            onClick={() => void refreshEventHlcAccumulator()}
+            disabled={isStateHashLoading}
+            onClick={() => void refreshStateHash()}
           >
-            {isAccumulatorLoading ? "…" : "↻"} Refresh
+            {isStateHashLoading ? "…" : "↻"} Refresh
           </button>
         </div>
         <div className="overviewAccumulatorValue">
-          {accumulatorError ? (
-            <span className="overviewAccumulatorError">{accumulatorError}</span>
-          ) : isAccumulatorLoading && eventHlcAccumulator === null ? (
+          {stateHashError ? (
+            <span className="overviewAccumulatorError">{stateHashError}</span>
+          ) : isStateHashLoading && stateHash === null ? (
             "Loading…"
-          ) : eventHlcAccumulator === "" ? (
+          ) : stateHash === "" ? (
             <span className="overviewAccumulatorEmpty">(empty)</span>
           ) : (
-            eventHlcAccumulator
+            stateHash
           )}
         </div>
       </div>

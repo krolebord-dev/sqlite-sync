@@ -3,6 +3,7 @@ import { createDeferredPromise, createTypedEventTarget, ensureSingletonExecution
 import type { EventsPullResponse, WorkerState } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
 import type { CrdtStorage } from "./crdt-storage";
+import { parseStateHash } from "./state-hash";
 import type { StoredValue } from "./stored-value";
 
 type CrdtSyncRemoteSourceConfig = {
@@ -49,7 +50,7 @@ export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>
 
 export type EventsAvailable = {
   newSyncId: number;
-  remoteEventHlcSum: string | null;
+  remoteStateHash: string | null;
 };
 
 /**
@@ -264,9 +265,9 @@ export const createCrdtSyncRemoteSource = ({
       let created: RemoteSource;
       try {
         created = factory({
-          onEventsAvailable: ({ newSyncId, remoteEventHlcSum }) => {
+          onEventsAvailable: ({ newSyncId, remoteStateHash }) => {
             lastActivityAt = Date.now();
-            pull({ remoteSyncId: newSyncId, remoteEventHlcSum, includeSelf: false });
+            pull({ remoteSyncId: newSyncId, remoteStateHash, includeSelf: false });
           },
           onClosed: (error) => {
             if (signal.aborted) {
@@ -320,7 +321,7 @@ export const createCrdtSyncRemoteSource = ({
     let activePull: ActivePull | null = null;
     const pull = (request?: {
       remoteSyncId?: number;
-      remoteEventHlcSum?: string | null;
+      remoteStateHash?: string | null;
       includeSelf?: boolean;
     }): Promise<void> => {
       if (!source || signal.aborted) {
@@ -335,7 +336,7 @@ export const createCrdtSyncRemoteSource = ({
         // This is the quiescent moment to verify we have not diverged from the
         // remote (the check is a no-op unless we are exactly aligned: remoteSyncId
         // === pullSyncId.current).
-        checkRemoteConsistency(remoteSyncId, request?.remoteEventHlcSum ?? null);
+        checkRemoteConsistency(remoteSyncId, request?.remoteStateHash ?? null);
         return Promise.resolve();
       }
 
@@ -560,41 +561,45 @@ export const createCrdtSyncRemoteSource = ({
   };
 
   // De-sync detection: when we are exactly caught up to the remote's broadcast
-  // sync id and fully quiescent, our applied-event set must equal the remote's,
-  // so our HLC checksums must match. A mismatch means the nodes have diverged.
-  const checkRemoteConsistency = (remoteSyncId: number, remoteEventHlcSum: string | null) => {
-    // A remote with no accumulator gives us nothing to compare against.
-    if (remoteEventHlcSum === null) {
+  // sync id and fully quiescent, we hold the same events as the remote, so our
+  // materialized CRDT state and its hash must match. A mismatch means the nodes
+  // have diverged.
+  const checkRemoteConsistency = (remoteSyncId: number, remoteStateHash: string | null) => {
+    // A remote that does not report a state hash gives us nothing to compare against.
+    if (remoteStateHash == null) {
       return;
     }
 
     // Only meaningful when we are exactly caught up: if we are behind we still
-    // need to pull; if we are ahead our state covers events the remote checksum
+    // need to pull; if we are ahead our state covers events the remote hash
     // does not.
     if (remoteSyncId !== pullSyncId.current) {
       return;
     }
 
-    // Quiescence: the accumulator only matches the remote's when nothing is left
-    // to apply locally and no local applied events are still waiting to be pushed
-    // (those are in our accumulator but the remote has not seen them yet).
+    // Quiescence: the hashes only match when nothing is left to apply locally and
+    // no local applied events are still waiting to be pushed (those are in our
+    // state but the remote has not seen them yet).
     if (!storage.checkIsQuiescent(pushSyncId.current)) {
       return;
     }
 
-    const localEventHlcSum = storage.getEventHlcAccumulator();
-    if (localEventHlcSum === null) {
+    const localStateHash = storage.getStateHash();
+    if (localStateHash === null || localStateHash === remoteStateHash) {
       return;
     }
 
-    if (localEventHlcSum === remoteEventHlcSum) {
-      // No de-sync detected.
+    // Hashes for different schema versions cover different columns, e.g. while
+    // the remote has been migrated by a deploy that this client has not loaded yet.
+    const local = parseStateHash(localStateHash);
+    const remote = parseStateHash(remoteStateHash);
+    if (!local || !remote || local.schemaVersion !== remote.schemaVersion) {
       return;
     }
 
     eventTarget.dispatchEvent("de-sync-detected", { reason: "CHECKSUM_MISMATCH" });
     console.warn(
-      `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local HLC checksum ${localEventHlcSum} != remote ${remoteEventHlcSum}. Local and remote have diverged despite being caught up.`,
+      `[sqlite-sync] De-sync detected at syncId ${remoteSyncId}: local state hash ${localStateHash} != remote ${remoteStateHash}. Local and remote have diverged despite being caught up.`,
     );
     if (!remoteState.deSynced) {
       patchRemoteState({ deSynced: true });

@@ -208,7 +208,7 @@ describe("SyncedDb state", () => {
             channels.responses.postMessage({
               notificationType: "new-event-chunk-applied",
               newSyncId: 1,
-              eventHlcSum: null,
+              stateHash: null,
             });
             respond(request.requestId, undefined);
             break;

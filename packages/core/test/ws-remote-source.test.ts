@@ -136,8 +136,21 @@ describe("createWsRemoteSource", () => {
     const { socket, onEventsAvailable } = connect();
     socket.open();
 
-    socket.receive({ type: "events-applied", newSyncId: 7, eventHlcSum: "sum" });
+    socket.receive({ type: "events-applied", newSyncId: 7, stateHash: "3:0123456789abcdef", eventHlcSum: null });
 
-    expect(onEventsAvailable).toHaveBeenCalledWith({ newSyncId: 7, remoteEventHlcSum: "sum" });
+    expect(onEventsAvailable).toHaveBeenCalledWith({ newSyncId: 7, remoteStateHash: "3:0123456789abcdef" });
+  });
+
+  it("reports no state hash for broadcasts from servers that predate it", () => {
+    const { socket, onEventsAvailable } = connect();
+    socket.open();
+
+    socket.receive({
+      type: "events-applied",
+      newSyncId: 7,
+      eventHlcSum: "0123456789abcdef0123456789abcdef",
+    } as unknown as SyncServerMessage);
+
+    expect(onEventsAvailable).toHaveBeenCalledWith({ newSyncId: 7, remoteStateHash: null });
   });
 });

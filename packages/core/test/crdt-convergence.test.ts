@@ -14,8 +14,8 @@ import {
   type PersistedCrdtEvent,
 } from "../src/sqlite-crdt/crdt-table-schema";
 import { CRDT_CHANGE_INTENTS_TABLE, makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
-import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../src/sqlite-db-wrapper";
+import { createKvStateHashStore, createSQLiteKvStore, STATE_HASH_KV_KEY } from "../src/sqlite-kv-store";
 
 const BASE_TABLE = "todo";
 const CRDT_TABLE = "_todo";
@@ -56,10 +56,12 @@ async function createReplica(
   initialTime: number,
   opts: {
     preloadedEvents?: PersistedCrdtEvent[];
-    trackEventHlcAccumulator?: boolean;
+    trackStateHash?: boolean;
     migrator?: ReturnType<typeof createMigrator>;
     schemaVersion?: { current: number };
     logger?: Logger;
+    /** An integer column with a default, declared in the sync schema too. */
+    extraColumn?: string;
   } = {},
 ) {
   const reactiveDb = await createSQLiteReactiveDb<{
@@ -79,9 +81,12 @@ async function createReplica(
       "title" TEXT NOT NULL,
       "completed" INTEGER NOT NULL,
       "tombstone" INTEGER NOT NULL DEFAULT 0
+      ${opts.extraColumn ? `, "${opts.extraColumn}" INTEGER NOT NULL DEFAULT 0` : ""}
     )
   `);
   applyMemoryDbSchema(db);
+  db.execute(`CREATE TABLE "kv" ("key" TEXT NOT NULL PRIMARY KEY, "value" TEXT NOT NULL) WITHOUT ROWID`);
+  const kvStore = createSQLiteKvStore({ db, metaTableName: "kv" });
   makeCrdtTable({
     db,
     baseTableName: BASE_TABLE,
@@ -134,13 +139,20 @@ async function createReplica(
     reactiveDb,
     hlcCounter: new HLCCounter(nodeId, () => currentTime),
     crdtTables: [{ baseTableName: BASE_TABLE, crdtTableName: CRDT_TABLE }],
-    syncDbSchema: todoSyncSchema,
+    syncDbSchema: opts.extraColumn
+      ? {
+          ...todoSyncSchema,
+          tables: {
+            [CRDT_TABLE]: t.table({
+              title: t.text(),
+              completed: t.boolean(),
+              [opts.extraColumn]: t.integer().default(0),
+            }),
+          },
+        }
+      : todoSyncSchema,
     initializeSchema: false,
-    eventHlcAccumulator: opts.trackEventHlcAccumulator
-      ? createStoredValue({
-          initialValue: "",
-        })
-      : undefined,
+    stateHash: opts.trackStateHash ? createKvStateHashStore(kvStore) : undefined,
   });
 
   const waitForProcessing = async () => {
@@ -255,9 +267,10 @@ async function createReplica(
     getPersistedEvents() {
       return db.execute<PersistedCrdtEvent>(`SELECT * FROM "persisted_crdt_events" ORDER BY "sync_id" ASC`).rows;
     },
-    getEventHlcAccumulator() {
-      return storage.getEventHlcAccumulator();
+    getStateHash() {
+      return storage.getStateHash();
     },
+    kvStore,
   };
 }
 
@@ -427,7 +440,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     const replicaA = await createReplica("node-a", 1_000, {
       migrator,
       schemaVersion,
-      trackEventHlcAccumulator: true,
+      trackStateHash: true,
       preloadedEvents: [
         {
           sync_id: 1,
@@ -450,7 +463,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     const replicaB = await createReplica("node-b", 1_000, {
       migrator,
       schemaVersion,
-      trackEventHlcAccumulator: true,
+      trackStateHash: true,
     });
 
     const droppedEvent = replicaA.getPersistedEvent(1);
@@ -465,50 +478,78 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(importedEvent?.status).toBe("applied");
     expect(importedEvent?.payload).toBe(CRDT_EVENT_NO_OP_PAYLOAD);
     expect(replicaB.getTodo("todo-1")).toBeNull();
-    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+    expect(replicaB.getStateHash()).toBe(replicaA.getStateHash());
   });
 
-  it("recomputes the event HLC accumulator from applied history when it was never computed", async () => {
-    const timestamps = [1_000, 1_001, 1_002].map((time) =>
-      serializeHLC(new HLCCounter("origin-node", () => time).getCurrentHLC()),
-    );
+  it("rebuilds the state hash from the update log when it is missing or from another schema version", async () => {
+    const replicaA = await createReplica("node-a", 1_000, { trackStateHash: true });
+    const replicaB = await createReplica("node-b", 2_000, { trackStateHash: true });
 
-    const makeEvents = (status: PersistedCrdtEvent["status"]): PersistedCrdtEvent[] =>
-      timestamps.map((timestamp, index) => ({
-        sync_id: index + 1,
-        schema_version: 0,
-        status,
-        type: "item-created",
-        timestamp,
-        origin: "remote",
-        source_node_id: "origin-node",
-        dataset: BASE_TABLE,
-        item_id: `todo-${index + 1}`,
-        payload: JSON.stringify({ id: `todo-${index + 1}`, title: `Todo ${index + 1}`, completed: false }),
-      }));
+    await replicaA.createTodo({ id: "todo-1", title: "First", completed: false, tombstone: false });
+    replicaA.kvStore.remove(STATE_HASH_KV_KEY);
+    await replicaA.createTodo({ id: "todo-2", title: "Second", completed: false, tombstone: false });
+    replicaA.kvStore.set(STATE_HASH_KV_KEY, "41:0123456789abcdef");
+    await replicaA.updateTodo("todo-1", { completed: true });
 
-    // Applies the events through the normal path, so the accumulator is built
-    // up event-by-event as each one is applied.
-    const incremental = await createReplica("node-a", 1_000, {
-      trackEventHlcAccumulator: true,
-      preloadedEvents: makeEvents("pending"),
+    await syncOneWay(replicaA, replicaB, 0);
+
+    expect(replicaA.getStateHash()).toMatch(/^0:[0-9a-f]{16}$/);
+    expect(replicaB.getStateHash()).toBe(replicaA.getStateHash());
+  });
+
+  it("hashes a column filled in by an add-column migration like one the create never stored", async () => {
+    const schemaVersion = { current: 1 };
+    const migrator = createMigrator({
+      migrations: createMigrations((steps) => ({
+        0: [],
+        1: [steps.addColumn({ table: BASE_TABLE, column: "priority", type: "integer", defaultValue: 0 })],
+      })),
+      schemaVersion,
     });
-
-    // Same events, but already marked applied with the accumulator never
-    // computed ("" sentinel) — mirrors a DB created before the accumulator
-    // existed. On construction it must be rebuilt from the applied history.
-    const recomputed = await createReplica("node-b", 1_000, {
-      trackEventHlcAccumulator: true,
-      preloadedEvents: makeEvents("applied"),
+    const replicaOptions = { migrator, schemaVersion, trackStateHash: true, extraColumn: "priority" };
+    const createdAt = serializeHLC(new HLCCounter("origin-node", () => 1_000).getCurrentHLC());
+    const createEvent = (eventSchemaVersion: number): RemoteEvent => ({
+      type: "item-created",
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      timestamp: createdAt,
+      schema_version: eventSchemaVersion,
+      payload: JSON.stringify({ id: "todo-1", title: "Todo", completed: false }),
     });
+    const getUpdateLog = (replica: Awaited<ReturnType<typeof createReplica>>) =>
+      JSON.parse(
+        replica.db.execute<{ payload: string }>(`SELECT "payload" FROM "crdt_update_log" WHERE "item_id" = 'todo-1'`)
+          .rows[0].payload,
+      );
 
-    expect(recomputed.getEventHlcAccumulator()).not.toBe("");
-    expect(recomputed.getEventHlcAccumulator()).toBe(incremental.getEventHlcAccumulator());
+    // Applied before the migration existed, so the create never stored the column.
+    const appliedBefore = await createReplica("node-a", 1_000, replicaOptions);
+    await appliedBefore.importEvents([createEvent(1)]);
+    // Replayed after the migration, which fills the column default into the create.
+    const replayedAfter = await createReplica("node-b", 1_000, replicaOptions);
+    await replayedAfter.importEvents([createEvent(0)]);
+
+    expect(getUpdateLog(appliedBefore)).not.toHaveProperty("priority");
+    expect(getUpdateLog(replayedAfter)).toHaveProperty("priority", createdAt);
+    expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
+
+    const priorityEdit: RemoteEvent = {
+      type: "item-updated",
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      timestamp: serializeHLC(new HLCCounter("origin-node", () => 2_000).getCurrentHLC()),
+      schema_version: 1,
+      payload: JSON.stringify({ priority: 5 }),
+    };
+    await appliedBefore.importEvents([priorityEdit]);
+    await replayedAfter.importEvents([priorityEdit]);
+
+    expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
   });
 
   it("marks duplicate event deliveries as deduped", async () => {
     const replicaA = await createReplica("node-a", 1_000);
-    const replicaB = await createReplica("node-b", 1_000, { trackEventHlcAccumulator: true });
+    const replicaB = await createReplica("node-b", 1_000, { trackStateHash: true });
 
     await replicaA.createTodo({
       id: "todo-1",
@@ -519,7 +560,7 @@ describe("CRDT convergence for parallel entity edits", () => {
 
     const { events } = replicaA.exportEvents(0);
     await replicaB.importEvents(events);
-    const accumulatorAfterFirstImport = replicaB.getEventHlcAccumulator();
+    const stateHashAfterFirstImport = replicaB.getStateHash();
 
     await replicaB.importEvents(events);
     const persistedEvents = replicaB.getPersistedEvents();
@@ -529,7 +570,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(acceptedEvents.map((event) => event.status)).toEqual(events.map(() => "applied"));
     expect(duplicateEvents.map((event) => event.status)).toEqual(events.map(() => "deduped"));
     expect(duplicateEvents.map((event) => event.timestamp)).toEqual(acceptedEvents.map((event) => event.timestamp));
-    expect(replicaB.getEventHlcAccumulator()).toBe(accumulatorAfterFirstImport);
+    expect(replicaB.getStateHash()).toBe(stateHashAfterFirstImport);
     expect(replicaB.getTodo("todo-1")).toEqual({
       id: "todo-1",
       title: "Initial title",
@@ -540,7 +581,7 @@ describe("CRDT convergence for parallel entity edits", () => {
 
   it("drops local events redelivered by a later push before assigning them a sync id", async () => {
     const client = await createReplica("node-a", 1_000);
-    const server = await createReplica("server", 1_000, { trackEventHlcAccumulator: true });
+    const server = await createReplica("server", 1_000, { trackStateHash: true });
 
     await client.createTodo({ id: "todo-1", title: "First", completed: false, tombstone: false });
     await client.createTodo({ id: "todo-2", title: "Second", completed: false, tombstone: false });
@@ -554,7 +595,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     // Each push is a separate message, so processing finishes before the next one is handled.
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(server.getPersistedEvents().map((event) => event.status)).toEqual(events.map(() => "applied"));
-    const accumulator = server.getEventHlcAccumulator();
+    const stateHash = server.getStateHash();
 
     const redelivered = server.storage.enqueueLocalEvents(events, client.nodeId);
     await redelivered.processed;
@@ -562,7 +603,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(first).toMatchObject({ beforeSyncId: 0, afterSyncId: events.length });
     expect(redelivered).toMatchObject({ beforeSyncId: events.length, afterSyncId: events.length });
     expect(server.getPersistedEvents().map((event) => event.status)).toEqual(events.map(() => "applied"));
-    expect(server.getEventHlcAccumulator()).toBe(accumulator);
+    expect(server.getStateHash()).toBe(stateHash);
     expect(server.getTodo("todo-2")?.title).toBe("Second");
   });
 
@@ -693,15 +734,15 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(Math.max(...dispatchedSyncIds)).toBe(2);
   });
 
-  it("materializes own writes eagerly but defers bookkeeping to commit", async () => {
-    const replica = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
+  it("materializes own writes and their state hash eagerly but defers dispatch to commit", async () => {
+    const replica = await createReplica("node-a", 1_000, { trackStateHash: true });
 
     const dispatchedSyncIds: number[] = [];
     replica.storage.addEventListener("events-applied", (event) => {
       dispatchedSyncIds.push(event.payload.syncId);
     });
 
-    const initialAccumulator = replica.getEventHlcAccumulator();
+    const initialStateHash = replica.getStateHash();
 
     replica.db.execute({
       sql: `
@@ -711,9 +752,9 @@ describe("CRDT convergence for parallel entity edits", () => {
       parameters: ["own-todo", "Own todo", 0, 0],
     });
 
-    // Synchronous window: the row is materialized inside the writing transaction,
-    // but the event is still pending and no bookkeeping (accumulator, dispatch)
-    // has run — that is deferred to the post-commit pipeline.
+    // Synchronous window: the row and its state hash are materialized inside the
+    // writing transaction, but the event is still pending and dispatch is deferred
+    // to the post-commit pipeline.
     expect(replica.getTodo("own-todo")).toEqual({
       id: "own-todo",
       title: "Own todo",
@@ -723,14 +764,14 @@ describe("CRDT convergence for parallel entity edits", () => {
     const pendingEvent = replica.getPersistedEvent(1);
     expect(pendingEvent.origin).toBe("own-applied");
     expect(pendingEvent.status).toBe("pending");
-    expect(replica.getEventHlcAccumulator()).toBe(initialAccumulator);
+    const materializedStateHash = replica.getStateHash();
+    expect(materializedStateHash).not.toBe(initialStateHash);
     expect(dispatchedSyncIds).toEqual([]);
 
     await replica.waitForProcessing();
 
-    // After the pipeline runs the event is finalized and folded into the accumulator.
     expect(replica.getPersistedEvent(1).status).toBe("applied");
-    expect(replica.getEventHlcAccumulator()).not.toBe(initialAccumulator);
+    expect(replica.getStateHash()).toBe(materializedStateHash);
     expect(dispatchedSyncIds).toEqual([1]);
   });
 
@@ -874,7 +915,7 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 
   it("does not leak materialization or bookkeeping when the writing transaction rolls back", async () => {
-    const replicaA = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
+    const replicaA = await createReplica("node-a", 1_000, { trackStateHash: true });
 
     const dispatchedSyncIds: number[] = [];
     replicaA.storage.addEventListener("events-applied", (event) => {
@@ -882,7 +923,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     });
 
     await replicaA.createTodo({ id: "committed-1", title: "First", completed: false, tombstone: false });
-    const accumulatorAfterFirst = replicaA.getEventHlcAccumulator();
+    const stateHashAfterFirst = replicaA.getStateHash();
     const dispatchedAfterFirst = [...dispatchedSyncIds];
 
     // An own write inside a transaction that aborts.
@@ -902,9 +943,9 @@ describe("CRDT convergence for parallel entity edits", () => {
     await replicaA.waitForProcessing();
 
     // Materialization reverted with the transaction, and nothing leaked: the
-    // accumulator is unchanged, no events-applied fired, and no row persisted.
+    // state hash is unchanged, no events-applied fired, and no row persisted.
     expect(replicaA.getTodo("rolled-back")).toBeNull();
-    expect(replicaA.getEventHlcAccumulator()).toBe(accumulatorAfterFirst);
+    expect(replicaA.getStateHash()).toBe(stateHashAfterFirst);
     expect(dispatchedSyncIds).toEqual(dispatchedAfterFirst);
     expect(replicaA.getPersistedEvents().some((event) => event.item_id === "rolled-back")).toBe(false);
 
@@ -912,11 +953,11 @@ describe("CRDT convergence for parallel entity edits", () => {
     await replicaA.createTodo({ id: "committed-2", title: "Second", completed: false, tombstone: false });
 
     // A replica that only ever saw the committed events ends up with the same
-    // accumulator, proving the rolled-back event was never folded in.
-    const replicaB = await createReplica("node-b", 5_000, { trackEventHlcAccumulator: true });
+    // state hash, proving the rolled-back write was never folded in.
+    const replicaB = await createReplica("node-b", 5_000, { trackStateHash: true });
     await syncOneWay(replicaA, replicaB, 0);
 
-    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+    expect(replicaB.getStateHash()).toBe(replicaA.getStateHash());
     expect(replicaB.getTodo("committed-1")?.title).toBe("First");
     expect(replicaB.getTodo("committed-2")?.title).toBe("Second");
     expect(replicaB.getTodo("rolled-back")).toBeNull();
@@ -1008,8 +1049,8 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 
   it("replaces a row's event payload history with no-ops and a full create snapshot", async () => {
-    const replicaA = await createReplica("node-a", 1_000, { trackEventHlcAccumulator: true });
-    const replicaB = await createReplica("node-b", 1_000, { trackEventHlcAccumulator: true });
+    const replicaA = await createReplica("node-a", 1_000, { trackStateHash: true });
+    const replicaB = await createReplica("node-b", 1_000, { trackStateHash: true });
 
     expect(
       replicaA.db
@@ -1084,7 +1125,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     });
 
     await syncOneWay(replicaA, replicaB, replicaBSyncId);
-    const replicaC = await createReplica("node-c", 1_000, { trackEventHlcAccumulator: true });
+    const replicaC = await createReplica("node-c", 1_000, { trackStateHash: true });
     await syncOneWay(replicaA, replicaC, 0);
 
     const expected = {
@@ -1096,8 +1137,8 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaA.getTodo("todo-1")).toEqual(expected);
     expect(replicaB.getTodo("todo-1")).toEqual(expected);
     expect(replicaC.getTodo("todo-1")).toEqual(expected);
-    expect(replicaB.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
-    expect(replicaC.getEventHlcAccumulator()).toBe(replicaA.getEventHlcAccumulator());
+    expect(replicaB.getStateHash()).toBe(replicaA.getStateHash());
+    expect(replicaC.getStateHash()).toBe(replicaA.getStateHash());
   });
 
   it("does not schema-validate a snapshot patch", async () => {
@@ -1193,8 +1234,8 @@ describe("CRDT convergence for parallel entity edits", () => {
   });
 
   it("keeps pending remote events newer than a snapshot", async () => {
-    const server = await createReplica("server", 1_000, { trackEventHlcAccumulator: true });
-    const client = await createReplica("client", 1_000, { trackEventHlcAccumulator: true });
+    const server = await createReplica("server", 1_000, { trackStateHash: true });
+    const client = await createReplica("client", 1_000, { trackStateHash: true });
     await client.createTodo({ id: "todo-1", title: "Initial", completed: false, tombstone: false });
     const clientSyncId = await syncOneWay(client, server, 0);
 
@@ -1207,7 +1248,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     await server.waitForProcessing();
     await syncOneWay(server, client, 0);
 
-    const freshReplica = await createReplica("fresh", 1_000, { trackEventHlcAccumulator: true });
+    const freshReplica = await createReplica("fresh", 1_000, { trackStateHash: true });
     await freshReplica.importEvents(
       server.getPersistedEvents().map(({ type, dataset, item_id, payload, timestamp, schema_version }) => ({
         type,
@@ -1223,8 +1264,8 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(server.getTodo("todo-1")).toEqual(expected);
     expect(client.getTodo("todo-1")).toEqual(expected);
     expect(freshReplica.getTodo("todo-1")).toEqual(expected);
-    expect(client.getEventHlcAccumulator()).toBe(server.getEventHlcAccumulator());
-    expect(freshReplica.getEventHlcAccumulator()).toBe(server.getEventHlcAccumulator());
+    expect(client.getStateHash()).toBe(server.getStateHash());
+    expect(freshReplica.getStateHash()).toBe(server.getStateHash());
 
     server.storage.applyOwnSnapshot({ dataset: BASE_TABLE, item_id: "todo-1", patch: { title: "Server edit" } });
     await server.waitForProcessing();
@@ -1481,7 +1522,7 @@ describe("CRDT convergence for parallel entity edits", () => {
     await syncOneWay(replicaA, replicaB, syncedFromA);
 
     expect(replicaB.getTodo("todo-1")?.title).toBe(`${trickyTitle} edited`);
-    expect(replicaA.getEventHlcAccumulator()).toBe(replicaB.getEventHlcAccumulator());
+    expect(replicaA.getStateHash()).toBe(replicaB.getStateHash());
   });
 
   it("keeps applying and writing after a remote event with the max HLC counter", async () => {

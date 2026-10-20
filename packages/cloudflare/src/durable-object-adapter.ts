@@ -45,6 +45,7 @@ import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "
 import { createMigrator, type SyncDbMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
+const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
 
 type AdapterDb = {
   crdtEvents: PersistedCrdtEvent;
@@ -154,10 +155,10 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
     migrator: migrator,
     db: crdtStorageDb,
     dbConfig,
-    eventHlcAccumulator: createStoredValue<string>({
-      initialValue: storage.kv.get("crdt.consistency.event_hlc_sum.v3") ?? "",
-      saveToStorage: (val) => storage.kv.put("crdt.consistency.event_hlc_sum.v3", val),
-    }),
+    stateHash: {
+      read: () => storage.kv.get<string>(STATE_HASH_KV_KEY) ?? null,
+      write: (value) => storage.kv.put(STATE_HASH_KV_KEY, value),
+    },
     onEventApplied: (event) => {
       eventTarget.dispatchEvent("event-applied", event as TypedPersistedCrdtEvent<Schema>);
     },
@@ -238,8 +239,9 @@ function createDurableObjectRemoteHandler({
         JSON.stringify({
           type: "events-applied",
           newSyncId: chunk.newSyncId,
-          eventHlcSum: chunk.eventHlcSum,
-        }),
+          stateHash: chunk.stateHash,
+          eventHlcSum: null,
+        } satisfies Extract<SyncServerMessage, { type: "events-applied" }>),
       );
     },
   });

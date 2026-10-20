@@ -9,6 +9,7 @@ import {
   type CrdtUpdateLogPayload,
   isNoOpCrdtEventPayload,
 } from "./crdt-table-schema";
+import type { StateHashAccumulator } from "./state-hash";
 
 export type PendingCrdtEvent = {
   type: CrdtEventType;
@@ -21,11 +22,14 @@ export type PendingCrdtEvent = {
 export const createSQLiteCrdtApplyFunction = ({
   db,
   dbConfig,
+  getStateHash,
 }: {
   db: InternalSQLiteWrapper<any>;
   dbConfig: SystemDbConfig;
+  getStateHash?: () => StateHashAccumulator | null;
 }) => {
   const applyCrdtEvent = createCrdtApplyFunction({
+    getStateHash,
     getCrdtUpdateLog(opts) {
       const [metaRow] = db.executePrepared(
         "get-item-crdt-meta",
@@ -113,6 +117,7 @@ export const createSQLiteCrdtApplyFunction = ({
 };
 
 type CreateCrdtApplyOpts = {
+  getStateHash?: () => StateHashAccumulator | null;
   getCrdtUpdateLog: (opts: { itemId: string; dataset: string }) => CrdtUpdateLogPayload | null;
   insertItem: (opts: { dataset: string; payload: Record<string, unknown> }) => void;
   insertCrdtUpdateLog: (opts: { dataset: string; itemId: string; payload: string }) => void;
@@ -121,6 +126,7 @@ type CreateCrdtApplyOpts = {
 };
 
 export function createCrdtApplyFunction({
+  getStateHash,
   getCrdtUpdateLog,
   insertItem,
   insertCrdtUpdateLog,
@@ -146,6 +152,7 @@ export function createCrdtApplyFunction({
       itemId: event.item_id,
       payload: JSON.stringify(newUpdateLog),
     });
+    getStateHash?.()?.addItem(event.dataset, event.item_id, newUpdateLog);
   };
 
   type ItemUpdatedOpts = {
@@ -165,7 +172,7 @@ export function createCrdtApplyFunction({
     }
 
     const updatePayload = {} as Record<string, unknown>;
-    let hasUpdates = false;
+    const replacedCells: [column: string, previousHlc: string | undefined][] = [];
 
     for (const [key, value] of Object.entries(eventPayload)) {
       if (key === "id") {
@@ -177,12 +184,12 @@ export function createCrdtApplyFunction({
 
       if (!lastUpdateTimestamp || !currentUpdateTimestamp || currentUpdateTimestamp > lastUpdateTimestamp) {
         updatePayload[key] = value;
+        replacedCells.push([key, lastUpdateTimestamp]);
         meta[key] = currentUpdateTimestamp;
-        hasUpdates = true;
       }
     }
 
-    if (!hasUpdates) {
+    if (replacedCells.length === 0) {
       return;
     }
 
@@ -196,6 +203,12 @@ export function createCrdtApplyFunction({
       itemId: event.item_id,
       payload: JSON.stringify(meta),
     });
+    const stateHash = getStateHash?.();
+    if (stateHash) {
+      for (const [column, previousHlc] of replacedCells) {
+        stateHash.replaceCell(event.dataset, event.item_id, meta, column, previousHlc);
+      }
+    }
   };
 
   return (event: PendingCrdtEvent) => {

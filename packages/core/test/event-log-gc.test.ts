@@ -37,7 +37,6 @@ describe("worker event log GC", () => {
               db: reactiveDb.db,
               dbConfig: memoryDbConfig,
               pushSyncId: createStoredValue({ initialValue: -1 }),
-              eventHlcAccumulator: createStoredValue({ initialValue: "00000000000000000000000000000000" }),
             });
           },
         });
@@ -57,28 +56,24 @@ describe("worker event log GC", () => {
   it("keeps the latest 100 applied or deduped events", () => {
     insertEvents({ from: 1, to: 150, origin: "remote", status: "applied" });
 
-    const result = runWorkerEventLogGc({
+    runWorkerEventLogGc({
       db: reactiveDb.db,
       dbConfig: memoryDbConfig,
       pushSyncId: createStoredValue({ initialValue: -1 }),
-      eventHlcAccumulator: createStoredValue({ initialValue: "00000000000000000000000000000000" }),
     });
 
-    expect(result).toEqual({ skipped: false });
     expect(getEventStats()).toEqual({ count: 100, minSyncId: 51, maxSyncId: 150 });
   });
 
   it("does not delete local events that have not been pushed", () => {
     insertEvents({ from: 1, to: 160, origin: "local", status: "applied" });
 
-    const result = runWorkerEventLogGc({
+    runWorkerEventLogGc({
       db: reactiveDb.db,
       dbConfig: memoryDbConfig,
       pushSyncId: createStoredValue({ initialValue: 30 }),
-      eventHlcAccumulator: createStoredValue({ initialValue: "00000000000000000000000000000000" }),
     });
 
-    expect(result).toEqual({ skipped: false });
     expect(getEventStats()).toEqual({ count: 130, minSyncId: 31, maxSyncId: 160 });
   });
 
@@ -87,31 +82,15 @@ describe("worker event log GC", () => {
     insertEvents({ from: 2, to: 2, origin: "remote", status: "failed" });
     insertEvents({ from: 3, to: 152, origin: "remote", status: "applied" });
 
-    const result = runWorkerEventLogGc({
+    runWorkerEventLogGc({
       db: reactiveDb.db,
       dbConfig: memoryDbConfig,
       pushSyncId: createStoredValue({ initialValue: -1 }),
-      eventHlcAccumulator: createStoredValue({ initialValue: "00000000000000000000000000000000" }),
     });
 
-    expect(result).toEqual({ skipped: false });
     expect(selectSyncIdsByStatus("pending")).toEqual([1]);
     expect(selectSyncIdsByStatus("failed")).toEqual([2]);
     expect(getEventStats()).toEqual({ count: 102, minSyncId: 1, maxSyncId: 152 });
-  });
-
-  it("skips GC until the HLC checksum has been computed from full history", () => {
-    insertEvents({ from: 1, to: 150, origin: "remote", status: "applied" });
-
-    const result = runWorkerEventLogGc({
-      db: reactiveDb.db,
-      dbConfig: memoryDbConfig,
-      pushSyncId: createStoredValue({ initialValue: -1 }),
-      eventHlcAccumulator: createStoredValue({ initialValue: "" }),
-    });
-
-    expect(result).toEqual({ skipped: true });
-    expect(getEventStats()).toEqual({ count: 150, minSyncId: 1, maxSyncId: 150 });
   });
 
   function insertEvents({

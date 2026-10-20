@@ -112,7 +112,7 @@ function createFakeServer() {
           events.push({ ...event, sync_id: events.length + 1, source_node_id: nodeId });
         }
         for (const listener of listeners) {
-          listener({ newSyncId: events.length, remoteEventHlcSum: null });
+          listener({ newSyncId: events.length, remoteStateHash: null });
         }
         return { ok: true, beforeSyncId, afterSyncId: events.length };
       },

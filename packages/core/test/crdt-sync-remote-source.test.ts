@@ -22,7 +22,7 @@ const createStorageMock = (): CrdtStorage =>
     enqueueRemoteEvents: () => ({ beforeSyncId: 0, afterSyncId: 0, processed: Promise.resolve() }),
     applyOwnEvents: () => {},
     checkIsQuiescent: () => true,
-    getEventHlcAccumulator: () => null,
+    getStateHash: () => null,
     addEventListener: () => ({ unsubscribe: () => {} }),
     removeEventListener: () => {},
   }) as unknown as CrdtStorage;
@@ -757,7 +757,7 @@ describe("createCrdtSyncRemoteSource", () => {
 
       for (let i = 0; i < 4; i++) {
         await vi.advanceTimersByTimeAsync(20_000);
-        eventsAvailable({ newSyncId: 0, remoteEventHlcSum: null });
+        eventsAvailable({ newSyncId: 0, remoteStateHash: null });
       }
 
       expect(source.ping).not.toHaveBeenCalled();
@@ -809,6 +809,44 @@ describe("createCrdtSyncRemoteSource", () => {
       await vi.advanceTimersByTimeAsync(60_000);
 
       expect(source.ping).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("state hash comparison", () => {
+    const checkCaughtUp = async (localStateHash: string | null, remoteStateHash: string | null) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      let eventsAvailable: (event: EventsAvailable) => void = () => {};
+      const remoteSource = setup({
+        storage: { ...createStorageMock(), getStateHash: () => localStateHash } as unknown as CrdtStorage,
+        remoteFactory: ({ onEventsAvailable }) => {
+          eventsAvailable = onEventsAvailable;
+          return createSource({});
+        },
+      });
+      const reasons: string[] = [];
+      remoteSource.addEventListener("de-sync-detected", (event) => reasons.push(event.payload.reason));
+      await remoteSource.goOnline();
+
+      eventsAvailable({ newSyncId: 0, remoteStateHash });
+
+      return { reasons, deSynced: remoteSource.getState().deSynced };
+    };
+
+    it("reports a de-sync when caught up with a different hash for the same schema version", async () => {
+      expect(await checkCaughtUp("3:0000000000000001", "3:0000000000000002")).toEqual({
+        reasons: ["CHECKSUM_MISMATCH"],
+        deSynced: true,
+      });
+    });
+
+    it.each([
+      ["matching hashes", "3:0000000000000001", "3:0000000000000001"],
+      ["hashes for different schema versions", "3:0000000000000001", "4:0000000000000002"],
+      ["a remote without a state hash", "3:0000000000000001", null],
+      ["a malformed remote hash", "3:0000000000000001", "0123456789abcdef0123456789abcdef"],
+      ["a local storage without a state hash", null, "3:0000000000000002"],
+    ])("does not report a de-sync for %s", async (_, localStateHash, remoteStateHash) => {
+      expect(await checkCaughtUp(localStateHash, remoteStateHash)).toEqual({ reasons: [], deSynced: false });
     });
   });
 
@@ -1045,7 +1083,7 @@ describe("createCrdtSyncRemoteSource", () => {
                 }
                 return { beforeSyncId: 0, afterSyncId: 0, processed: Promise.resolve() };
               },
-              getEventHlcAccumulator: () => "local-sum",
+              getStateHash: () => "1:0000000000000001",
             } as unknown as CrdtStorage;
 
             const remoteSource = createCrdtSyncRemoteSource({
@@ -1147,7 +1185,7 @@ describe("createCrdtSyncRemoteSource", () => {
                 const wasLive = isLive(id);
                 callbacks[id]?.({
                   newSyncId: action.caughtUp ? pullSyncId.current : pullSyncId.current + 1,
-                  remoteEventHlcSum: "remote-sum",
+                  remoteStateHash: "1:0000000000000002",
                 });
                 if (!wasLive && deSyncs !== deSyncsBefore) {
                   violations.push(`de-sync detected from closed connection ${id}`);
