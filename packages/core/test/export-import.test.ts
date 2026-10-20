@@ -286,7 +286,7 @@ describe("export/import", () => {
 
     const syncSchema = {
       tablesConfig: [{ baseTableName: BASE, crdtTableName: CRDT }],
-      tables: { [CRDT]: t.table({ title: t.text(), priority: t.integer() }) },
+      tables: { [CRDT]: t.table({ title: t.text(), priority: t.integer().default(0) }) },
     };
 
     const migrator = createMigrator({

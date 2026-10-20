@@ -135,18 +135,9 @@ const migrationSteps = {
     defaultValue: number | boolean | string | null;
     build?: ColumnDefinitionBuilderCallback;
   }): MigrationStep => ({
+    // Older creates are not given the default: the column default fills it on insert, and a
+    // replayed create must not write a cell that replicas which applied it earlier never had.
     sql: (db) => db.schema.alterTable(table).addColumn(column, type, (x) => build(x).defaultTo(defaultValue)),
-    eventTransformer: {
-      [table]: (event) => {
-        if (event.type !== "item-created") {
-          return event;
-        }
-
-        event.payload[column] = defaultValue;
-
-        return event;
-      },
-    },
     updateLogMutations: [{ type: "add-column", table, column }],
   }),
 

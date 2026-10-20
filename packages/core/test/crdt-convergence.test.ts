@@ -1,10 +1,16 @@
+import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 import { HLCCounter, serializeHLC } from "../src/hlc";
 import type { Logger } from "../src/logger";
 import { createMemoryDb } from "../src/memory-db/memory-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { createMigrations, createMigrator } from "../src/migrations/migrator";
-import { applyMemoryDbSchema } from "../src/migrations/system-schema";
+import {
+  applyMemoryDbSchema,
+  baseSystemMigrations,
+  memoryDbConfig,
+  runSystemMigrations,
+} from "../src/migrations/system-schema";
 import { t } from "../src/schema/table-builder";
 import { CrdtEventValidationError } from "../src/schema/validate-crdt-event";
 import { createCrdtStorageMutator } from "../src/sqlite-crdt/crdt-storage-mutator";
@@ -14,6 +20,7 @@ import {
   type PersistedCrdtEvent,
 } from "../src/sqlite-crdt/crdt-table-schema";
 import { CRDT_CHANGE_INTENTS_TABLE, makeCrdtTable } from "../src/sqlite-crdt/make-crdt-table";
+import { createStoredValue } from "../src/sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../src/sqlite-db-wrapper";
 import { createKvStateHashStore, createSQLiteKvStore, STATE_HASH_KV_KEY } from "../src/sqlite-kv-store";
 
@@ -62,6 +69,8 @@ async function createReplica(
     logger?: Logger;
     /** An integer column with a default, declared in the sync schema too. */
     extraColumn?: string;
+    /** Leaves the extra column out of the table, for a pending migration to add. */
+    extraColumnAddedLater?: boolean;
   } = {},
 ) {
   const reactiveDb = await createSQLiteReactiveDb<{
@@ -81,7 +90,7 @@ async function createReplica(
       "title" TEXT NOT NULL,
       "completed" INTEGER NOT NULL,
       "tombstone" INTEGER NOT NULL DEFAULT 0
-      ${opts.extraColumn ? `, "${opts.extraColumn}" INTEGER NOT NULL DEFAULT 0` : ""}
+      ${opts.extraColumn && !opts.extraColumnAddedLater ? `, "${opts.extraColumn}" INTEGER NOT NULL DEFAULT 0` : ""}
     )
   `);
   applyMemoryDbSchema(db);
@@ -497,54 +506,354 @@ describe("CRDT convergence for parallel entity edits", () => {
     expect(replicaB.getStateHash()).toBe(replicaA.getStateHash());
   });
 
-  it("hashes a column filled in by an add-column migration like one the create never stored", async () => {
-    const schemaVersion = { current: 1 };
-    const migrator = createMigrator({
-      migrations: createMigrations((steps) => ({
-        0: [],
-        1: [steps.addColumn({ table: BASE_TABLE, column: "priority", type: "integer", defaultValue: 0 })],
-      })),
-      schemaVersion,
-    });
-    const replicaOptions = { migrator, schemaVersion, trackStateHash: true, extraColumn: "priority" };
-    const createdAt = serializeHLC(new HLCCounter("origin-node", () => 1_000).getCurrentHLC());
-    const createEvent = (eventSchemaVersion: number): RemoteEvent => ({
+  describe("columns added by a migration", () => {
+    const addPriority = createMigrations((steps) => ({
+      0: [],
+      1: [steps.addColumn({ table: BASE_TABLE, column: "priority", type: "integer", defaultValue: 0 })],
+    }));
+    const createMigratedReplica = (nodeId: string) => {
+      const schemaVersion = { current: 1 };
+      const migrator = createMigrator({ migrations: addPriority, schemaVersion });
+      return createReplica(nodeId, 1_000, { migrator, schemaVersion, trackStateHash: true, extraColumn: "priority" });
+    };
+    // Starts on a build without the migration, and switches to one with it on `upgrade`.
+    const createUpgradableReplica = async (nodeId: string) => {
+      const schemaVersion = { current: 0 };
+      const oldBuild = createMigrator({ migrations: createMigrations(() => ({ 0: [] })), schemaVersion });
+      const newBuild = createMigrator({
+        migrations: addPriority,
+        schemaVersion,
+        updateLogTableName: memoryDbConfig.updateLogTable.fullIdentifier,
+      });
+      let build = oldBuild;
+      const migrator = new Proxy(oldBuild, { get: (_, key) => Reflect.get(build, key) });
+      const replica = await createReplica(nodeId, 1_000, {
+        migrator,
+        schemaVersion,
+        trackStateHash: true,
+        extraColumn: "priority",
+        extraColumnAddedLater: true,
+      });
+      return {
+        ...replica,
+        upgrade() {
+          build = newBuild;
+          newBuild.migrateDbToLatest({
+            startTransaction: (callback) =>
+              replica.db.executeTransaction((tx) =>
+                callback({ execute: (sql, parameters, meta) => tx.execute({ sql, parameters }, meta) }),
+              ),
+          });
+        },
+      };
+    };
+    type Replica = Awaited<ReturnType<typeof createReplica>>;
+    const hlcAt = (time: number) => serializeHLC(new HLCCounter("origin-node", () => time).getCurrentHLC());
+    // Schema version 1 without priority stands for a replica that applied the create before
+    // the migration existed. Version 0 is migrated on apply.
+    const createAt = (time: number, schemaVersion = 1, payload?: Record<string, unknown> | string): RemoteEvent => ({
       type: "item-created",
       dataset: BASE_TABLE,
       item_id: "todo-1",
-      timestamp: createdAt,
-      schema_version: eventSchemaVersion,
-      payload: JSON.stringify({ id: "todo-1", title: "Todo", completed: false }),
+      timestamp: hlcAt(time),
+      schema_version: schemaVersion,
+      payload:
+        typeof payload === "string"
+          ? payload
+          : JSON.stringify({ id: "todo-1", title: `Todo ${time}`, completed: false, ...payload }),
     });
-    const getUpdateLog = (replica: Awaited<ReturnType<typeof createReplica>>) =>
+    // What older builds stored after migrating a create: the column default filled in.
+    const filledCreateAt = (time: number) => createAt(time, 1, { priority: 0 });
+    const priorityEditAt = (time: number): RemoteEvent => ({
+      type: "item-updated",
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      timestamp: hlcAt(time),
+      schema_version: 1,
+      payload: JSON.stringify({ priority: 7 }),
+    });
+    const getPriority = (replica: Replica) =>
+      replica.db.execute<{ priority: number }>(`SELECT "priority" FROM "${BASE_TABLE}" WHERE "id" = 'todo-1'`).rows[0]
+        .priority;
+    const getUpdateLog = (replica: Replica) =>
       JSON.parse(
         replica.db.execute<{ payload: string }>(`SELECT "payload" FROM "crdt_update_log" WHERE "item_id" = 'todo-1'`)
           .rows[0].payload,
       );
-
-    // Applied before the migration existed, so the create never stored the column.
-    const appliedBefore = await createReplica("node-a", 1_000, replicaOptions);
-    await appliedBefore.importEvents([createEvent(1)]);
-    // Replayed after the migration, which fills the column default into the create.
-    const replayedAfter = await createReplica("node-b", 1_000, replicaOptions);
-    await replayedAfter.importEvents([createEvent(0)]);
-
-    expect(getUpdateLog(appliedBefore)).not.toHaveProperty("priority");
-    expect(getUpdateLog(replayedAfter)).toHaveProperty("priority", createdAt);
-    expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
-
-    const priorityEdit: RemoteEvent = {
-      type: "item-updated",
-      dataset: BASE_TABLE,
-      item_id: "todo-1",
-      timestamp: serializeHLC(new HLCCounter("origin-node", () => 2_000).getCurrentHLC()),
-      schema_version: 1,
-      payload: JSON.stringify({ priority: 5 }),
+    // Rebuilds the state hash on the next applied event.
+    const forgetStateHash = (replica: Replica) => replica.kvStore.remove(STATE_HASH_KV_KEY);
+    const applyUnrelatedEdit = async (replicas: Replica[]) => {
+      for (const replica of replicas) {
+        await replica.importEvents([{ ...createAt(9_000), item_id: "todo-2" }]);
+      }
     };
-    await appliedBefore.importEvents([priorityEdit]);
-    await replayedAfter.importEvents([priorityEdit]);
+    // Older builds kept the first create under `id`.
+    const keepFirstCreate = (replica: Replica) =>
+      replica.db.execute({
+        sql: `UPDATE "crdt_update_log" SET "payload" = json_set("payload", '$.id', ?) WHERE "item_id" = 'todo-1'`,
+        parameters: [hlcAt(1_000)],
+      });
+    // Runs the system migrations added since those builds, as a node does on its first start after upgrading.
+    const upgradeLegacyBuild = (replica: Replica) =>
+      runSystemMigrations({
+        migrations: baseSystemMigrations,
+        version: createStoredValue({ initialValue: 4 }),
+        dbConfig: memoryDbConfig,
+        execute: (sql) => replica.db.execute(sql),
+        transaction: (callback) => replica.db.executeTransaction(callback),
+      });
 
-    expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
+    it("does not write the column when migrating a create from before it existed", async () => {
+      const appliedBefore = await createMigratedReplica("node-a");
+      await appliedBefore.importEvents([createAt(1_000)]);
+      const replayedAfter = await createMigratedReplica("node-b");
+      await replayedAfter.importEvents([createAt(1_000, 0)]);
+
+      expect(getUpdateLog(replayedAfter)).toEqual(getUpdateLog(appliedBefore));
+      expect(getUpdateLog(replayedAfter)).not.toHaveProperty("priority");
+      expect(replayedAfter.getTodo("todo-1")).toEqual(appliedBefore.getTodo("todo-1"));
+      expect(getPriority(replayedAfter)).toBe(0);
+      expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
+    });
+
+    it.each([
+      ["full history", createAt(1_000, 0)],
+      ["older history replaced by no-ops", createAt(1_000, 0, CRDT_EVENT_NO_OP_PAYLOAD)],
+    ])("matches a replaying replica for an item re-created before the migration (%s)", async (_, replayedFirstCreate) => {
+      const appliedBefore = await createMigratedReplica("node-a");
+      await appliedBefore.importEvents([createAt(1_000), createAt(5_000)]);
+      const replayedAfter = await createMigratedReplica("node-b");
+      await replayedAfter.importEvents([replayedFirstCreate, createAt(5_000, 0)]);
+
+      expect(replayedAfter.getTodo("todo-1")).toEqual(appliedBefore.getTodo("todo-1"));
+      expect(replayedAfter.getStateHash()).toBe(appliedBefore.getStateHash());
+    });
+
+    it("converges on an edit older than a re-create that leaves the column out, in either order", async () => {
+      const editFirst = await createMigratedReplica("node-a");
+      await editFirst.importEvents([createAt(1_000), priorityEditAt(3_000), createAt(5_000)]);
+      const recreateFirst = await createMigratedReplica("node-b");
+      await recreateFirst.importEvents([createAt(1_000), createAt(5_000), priorityEditAt(3_000)]);
+
+      expect(getPriority(editFirst)).toBe(7);
+      expect(getPriority(recreateFirst)).toBe(7);
+      expect(recreateFirst.getStateHash()).toBe(editFirst.getStateHash());
+    });
+
+    it("restamps update logs that still hold the first create from the event log", async () => {
+      const legacy = await createMigratedReplica("node-a");
+      await legacy.importEvents([createAt(1_000), createAt(5_000)]);
+      keepFirstCreate(legacy);
+      upgradeLegacyBuild(legacy);
+      forgetStateHash(legacy);
+      const replayedAfter = await createMigratedReplica("node-b");
+      await replayedAfter.importEvents([createAt(1_000, 0), createAt(5_000, 0)]);
+
+      await applyUnrelatedEdit([legacy, replayedAfter]);
+
+      expect(getUpdateLog(legacy).id).toBe(hlcAt(5_000));
+      expect(replayedAfter.getStateHash()).toBe(legacy.getStateHash());
+    });
+
+    it("converges on the same rows and state hash for any delivery order and migration timing", async () => {
+      const columns = ["title", "completed", "priority"] as const;
+      const valueAt = (column: (typeof columns)[number], time: number) =>
+        column === "title" ? `T${time}` : column === "completed" ? time % 2 === 0 : time % 10;
+      const eventArbitrary = fc.record({
+        type: fc.constantFrom<RemoteEvent["type"]>("item-created", "item-updated", "item-deleted"),
+        itemId: fc.constantFrom("todo-1", "todo-2"),
+        updatedColumns: fc.subarray([...columns], { minLength: 1 }),
+        createWritesPriority: fc.boolean(),
+        // Written by a build without the migration. Only possible for events without priority.
+        writtenBeforeMigration: fc.boolean(),
+      });
+      const deliveryArbitrary = fc.record({
+        sortKeys: fc.array(fc.double({ noNaN: true }), { minLength: 8, maxLength: 8 }),
+        // How many events the replica applies before it upgrades. It has to upgrade before
+        // the first event written after the migration.
+        upgradeAfter: fc.integer({ min: 0, max: 8 }),
+      });
+
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(eventArbitrary, { minLength: 1, maxLength: 8 }),
+          fc.uniqueArray(fc.integer({ min: 1_000, max: 100_000 }), { minLength: 8, maxLength: 8 }),
+          fc.array(deliveryArbitrary, { minLength: 3, maxLength: 3 }),
+          async (generated, times, deliveries) => {
+            const createdItems = new Set(
+              generated.filter((event) => event.type === "item-created").map((e) => e.itemId),
+            );
+            const events = generated
+              .filter((event) => createdItems.has(event.itemId))
+              .map((event, index) => {
+                const time = times[index];
+                const payload =
+                  event.type === "item-created"
+                    ? {
+                        id: event.itemId,
+                        title: valueAt("title", time),
+                        completed: valueAt("completed", time),
+                        ...(event.createWritesPriority ? { priority: valueAt("priority", time) } : {}),
+                      }
+                    : event.type === "item-updated"
+                      ? Object.fromEntries(event.updatedColumns.map((column) => [column, valueAt(column, time)]))
+                      : {};
+                const schemaVersion = event.writtenBeforeMigration && !("priority" in payload) ? 0 : 1;
+                return { index, type: event.type, itemId: event.itemId, time, payload, schemaVersion };
+              });
+            fc.pre(events.length > 0);
+
+            const replicas: Replica[] = [];
+            for (const [replicaIndex, delivery] of deliveries.entries()) {
+              const sorted = [...events].sort((a, b) => delivery.sortKeys[a.index] - delivery.sortKeys[b.index]);
+              // An item's events can only be applied once a create for it has been.
+              const ordered: typeof events = [];
+              const waiting = new Map<string, typeof events>();
+              for (const event of sorted) {
+                if (event.type === "item-created" && !waiting.has(`created:${event.itemId}`)) {
+                  waiting.set(`created:${event.itemId}`, []);
+                  ordered.push(event, ...(waiting.get(event.itemId) ?? []));
+                  waiting.delete(event.itemId);
+                } else if (waiting.has(`created:${event.itemId}`)) {
+                  ordered.push(event);
+                } else {
+                  waiting.set(event.itemId, [...(waiting.get(event.itemId) ?? []), event]);
+                }
+              }
+
+              const toRemoteEvent = (event: (typeof events)[number]): RemoteEvent => ({
+                type: event.type,
+                dataset: BASE_TABLE,
+                item_id: event.itemId,
+                timestamp: hlcAt(event.time),
+                schema_version: event.schemaVersion,
+                payload: JSON.stringify(event.payload),
+              });
+              const firstWrittenAfter = ordered.findIndex((event) => event.schemaVersion === 1);
+              const upgradeAt = Math.min(
+                delivery.upgradeAfter,
+                firstWrittenAfter === -1 ? ordered.length : firstWrittenAfter,
+              );
+
+              const replica = await createUpgradableReplica(`node-${replicaIndex}`);
+              await replica.importEvents(ordered.slice(0, upgradeAt).map(toRemoteEvent));
+              replica.upgrade();
+              await replica.importEvents(ordered.slice(upgradeAt).map(toRemoteEvent));
+              replicas.push(replica);
+            }
+
+            const getRows = (replica: Replica) =>
+              replica.db.execute(`SELECT * FROM "${BASE_TABLE}" ORDER BY "id"`).rows;
+            for (const replica of replicas.slice(1)) {
+              expect(getRows(replica)).toEqual(getRows(replicas[0]));
+            }
+
+            // Replicas that upgraded after their last event rebuild the hash on the next one.
+            await applyUnrelatedEdit(replicas);
+            for (const replica of replicas.slice(1)) {
+              expect(replica.getStateHash()).toBe(replicas[0].getStateHash());
+            }
+
+            forgetStateHash(replicas[0]);
+            await applyUnrelatedEdit(replicas);
+            for (const replica of replicas.slice(1)) {
+              expect(replica.getStateHash()).toBe(replicas[0].getStateHash());
+            }
+          },
+        ),
+        { numRuns: 150 },
+      );
+    }, 120_000);
+
+    // Older builds filled the column default into migrated creates. A client that replayed
+    // history after the migration, or a server that migrated a create pushed during the
+    // rollout, holds the cell, while replicas that applied the create before do not.
+    it.each<{
+      name: string;
+      server: RemoteEvent[];
+      client: RemoteEvent[];
+      // Built by an older build, which kept the item's first create under `id`.
+      legacyServer?: boolean;
+      legacyClient?: boolean;
+      clientEventLogCollected?: boolean;
+      hashesMatch: boolean;
+    }>([
+      {
+        name: "a client that filled the column in vs the server",
+        server: [createAt(1_000)],
+        client: [filledCreateAt(1_000)],
+        hashesMatch: true,
+      },
+      {
+        name: "a re-created item filled in on the client, with the first create under id on both",
+        server: [createAt(1_000), createAt(5_000)],
+        client: [filledCreateAt(1_000), filledCreateAt(5_000)],
+        legacyServer: true,
+        legacyClient: true,
+        hashesMatch: true,
+      },
+      {
+        name: "a create pushed during the rollout, filled in by the server",
+        server: [filledCreateAt(1_000)],
+        client: [createAt(1_000)],
+        hashesMatch: true,
+      },
+      {
+        name: "a fresh replica vs a server with a re-created item's first create under id",
+        server: [createAt(1_000), createAt(5_000)],
+        client: [createAt(1_000, 0), createAt(5_000, 0)],
+        legacyServer: true,
+        hashesMatch: true,
+      },
+      {
+        name: "a filled-in item re-created by a create that leaves the column out",
+        server: [createAt(1_000), createAt(5_000)],
+        client: [filledCreateAt(1_000), createAt(5_000)],
+        hashesMatch: false,
+      },
+      {
+        name: "a re-created item on a client whose event log no longer has the latest create",
+        server: [createAt(1_000), createAt(5_000)],
+        client: [createAt(1_000), createAt(5_000)],
+        legacyServer: true,
+        legacyClient: true,
+        clientEventLogCollected: true,
+        hashesMatch: false,
+      },
+    ])("legacy state: $name", async ({
+      server,
+      client,
+      legacyServer,
+      legacyClient,
+      clientEventLogCollected,
+      hashesMatch,
+    }) => {
+      const serverReplica = await createMigratedReplica("server");
+      await serverReplica.importEvents(server);
+      const clientReplica = await createMigratedReplica("client");
+      await clientReplica.importEvents(client);
+      if (legacyServer) {
+        keepFirstCreate(serverReplica);
+      }
+      if (legacyClient) {
+        keepFirstCreate(clientReplica);
+      }
+      if (clientEventLogCollected) {
+        clientReplica.db.execute({
+          sql: `DELETE FROM "persisted_crdt_events" WHERE "timestamp" = ?`,
+          parameters: [hlcAt(5_000)],
+        });
+      }
+      for (const replica of [serverReplica, clientReplica]) {
+        upgradeLegacyBuild(replica);
+        forgetStateHash(replica);
+      }
+
+      await applyUnrelatedEdit([serverReplica, clientReplica]);
+
+      expect(clientReplica.getTodo("todo-1")).toEqual(serverReplica.getTodo("todo-1"));
+      expect(clientReplica.getStateHash() === serverReplica.getStateHash()).toBe(hashesMatch);
+    });
   });
 
   it("marks duplicate event deliveries as deduped", async () => {

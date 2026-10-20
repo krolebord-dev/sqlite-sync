@@ -6,7 +6,7 @@ import {
 import type { StoredValue } from "../sqlite-crdt/stored-value";
 import type { SQLiteDbWrapper } from "../sqlite-db-wrapper";
 import { createKvStoreTableQuery, createSQLiteKvStore, type KvStoreItem } from "../sqlite-kv-store";
-import { type ParsedTableName, parseTableName } from "../utils";
+import { type ParsedTableName, parseTableName, quoteId } from "../utils";
 
 export type SystemDbConfig = {
   eventsTable: ParsedTableName;
@@ -125,6 +125,24 @@ export const baseSystemMigrations: SystemMigration[] = [
       ctx.execute(
         `CREATE INDEX IF NOT EXISTS ${ctx.eventsTable.schema}.${indexName} ON ${ctx.eventsTable.table} ("dataset", "item_id") WHERE ${nonNoOpEventPredicate}`,
       );
+    },
+  },
+  {
+    // Older builds kept an item's first create under `id` in its update log. The state hash
+    // reads missing cells as written by the latest create, so lift `id` to the latest one
+    // the event log still has. Applying a create that is no longer in the log fixes the rest.
+    version: 5,
+    up: (ctx: SystemMigrationContext) => {
+      ctx.execute(`UPDATE ${quoteId(ctx.updateLogTable.fullIdentifier)} AS "log"
+SET "payload" = json_set("log"."payload", '$.id', "latest"."timestamp")
+FROM (
+  SELECT "dataset", "item_id", max("timestamp") AS "timestamp"
+  FROM ${quoteId(ctx.eventsTable.fullIdentifier)}
+  WHERE "type" = 'item-created' AND "status" = 'applied' AND ${nonNoOpEventPredicate}
+  GROUP BY "dataset", "item_id"
+) AS "latest"
+WHERE "latest"."dataset" = "log"."dataset" AND "latest"."item_id" = "log"."item_id"
+  AND "latest"."timestamp" > coalesce(json_extract("log"."payload", '$.id'), '')`);
     },
   },
 ];

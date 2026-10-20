@@ -173,6 +173,7 @@ export function createCrdtApplyFunction({
 
     const updatePayload = {} as Record<string, unknown>;
     const replacedCells: [column: string, previousHlc: string | undefined][] = [];
+    const previousCreateHlc = meta.id;
 
     for (const [key, value] of Object.entries(eventPayload)) {
       if (key === "id") {
@@ -189,26 +190,28 @@ export function createCrdtApplyFunction({
       }
     }
 
-    if (replacedCells.length === 0) {
+    const isLatestCreate = event.type === "item-created" && (!previousCreateHlc || event.timestamp > previousCreateHlc);
+    if (isLatestCreate) {
+      meta.id = event.timestamp;
+    }
+
+    if (replacedCells.length === 0 && !isLatestCreate) {
       return;
     }
 
-    updateItem({
-      dataset: event.dataset,
-      itemId: event.item_id,
-      payload: updatePayload,
-    });
+    if (replacedCells.length > 0) {
+      updateItem({
+        dataset: event.dataset,
+        itemId: event.item_id,
+        payload: updatePayload,
+      });
+    }
     updateCrdtUpdateLog({
       dataset: event.dataset,
       itemId: event.item_id,
       payload: JSON.stringify(meta),
     });
-    const stateHash = getStateHash?.();
-    if (stateHash) {
-      for (const [column, previousHlc] of replacedCells) {
-        stateHash.replaceCell(event.dataset, event.item_id, meta, column, previousHlc);
-      }
-    }
+    getStateHash?.()?.updateItem(event.dataset, event.item_id, meta, previousCreateHlc, replacedCells);
   };
 
   return (event: PendingCrdtEvent) => {

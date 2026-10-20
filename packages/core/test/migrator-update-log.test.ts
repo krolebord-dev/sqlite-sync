@@ -117,7 +117,7 @@ describe("migrator update log", () => {
         JSON.stringify({
           id: "000000000000100:00000:node-a",
           title: "000000000000100:00000:node-a",
-          priority: "000000000000100:00000:node-a",
+          priority: "000000000000300:00000:node-a",
           tombstone: "000000000000100:00000:node-a",
         }),
       ],
@@ -154,7 +154,7 @@ describe("migrator update log", () => {
       dataset: "todo",
       item_id: "item-1",
       payload: JSON.stringify({ priority: 5 }),
-      timestamp: "000000000000050:00000:node-b",
+      timestamp: "000000000000200:00000:node-b",
     });
     expect(event).not.toBeNull();
     if (event === null) {
@@ -191,7 +191,7 @@ describe("migrator update log", () => {
         "item-1",
         JSON.stringify({
           id: "000000000000100:00000:node-a",
-          name: "000000000000100:00000:node-a",
+          name: "000000000000300:00000:node-a",
           tombstone: "000000000000100:00000:node-a",
         }),
       ],
@@ -228,7 +228,7 @@ describe("migrator update log", () => {
       dataset: "todo",
       item_id: "item-1",
       payload: JSON.stringify({ name: "written" }),
-      timestamp: "000000000000050:00000:node-b",
+      timestamp: "000000000000200:00000:node-b",
     });
     expect(event).not.toBeNull();
     if (event === null) {

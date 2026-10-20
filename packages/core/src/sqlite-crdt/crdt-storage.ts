@@ -17,13 +17,7 @@ import {
   type NewCrdtEvent,
   type PersistedCrdtEvent,
 } from "./crdt-table-schema";
-import {
-  createStateHashAccumulator,
-  formatStateHash,
-  parseStateHash,
-  type StateHashAccumulator,
-  type StateHashStore,
-} from "./state-hash";
+import { createStateHashTracker, type StateHashStore } from "./state-hash";
 
 type LocalCrdtEvent = {
   type: CrdtEventType;
@@ -617,81 +611,20 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     return unpushed.events.length === 0;
   };
 
-  const stateHashStore = storage.stateHash ?? null;
-  const stateHashColumnsByDataset = new Map(
-    (storage.schema?.tablesConfig ?? []).flatMap((config) => {
-      const table = storage.schema.tables[config.crdtTableName];
-      return table ? [[config.baseTableName, Object.keys(table.columns).filter((column) => column !== "id")]] : [];
-    }),
-  );
-  const getStateHashColumns = (dataset: string) => stateHashColumnsByDataset.get(dataset) ?? null;
-  let activeStateHash: StateHashAccumulator | null = null;
-
-  const rebuildStateHash = () => {
-    const accumulator = createStateHashAccumulator({ sum: 0n, getColumns: getStateHashColumns });
-    const batchSize = 1000;
-    let after: [string, string] = ["", ""];
-    for (;;) {
-      const rows = db.executePreparedRaw<[string, string, number], CrdtUpdateLogItem>({
-        key: "get-update-log-batch",
-        sql: `select "dataset", "item_id", "payload" from ${quoteId(storage.dbConfig.updateLogTable.fullIdentifier)}
-where ("item_id", "dataset") > (?, ?)
-order by "item_id", "dataset"
-limit ?`,
-        params: [...after, batchSize],
-        meta: { loggerLevel: "system" },
-      });
-
-      for (const row of rows) {
-        accumulator.addItem(row.dataset, row.item_id, JSON.parse(row.payload));
-      }
-
-      const lastRow = rows[rows.length - 1];
-      if (!lastRow || rows.length < batchSize) {
-        break;
-      }
-      after = [lastRow.item_id, lastRow.dataset];
-    }
-    return accumulator.sum;
-  };
-
-  // Hashes computed for another schema version cover a different set of columns,
-  // and migrations rewrite the update log directly, so those are rebuilt.
-  const readStateHashSum = (store: StateHashStore) => {
-    const stored = parseStateHash(store.read());
-    if (stored && stored.schemaVersion === storage.migrator.currentSchemaVersion) {
-      return stored.sum;
-    }
-    const sum = rebuildStateHash();
-    store.write(formatStateHash(storage.migrator.currentSchemaVersion, sum));
-    return sum;
-  };
-
-  // Must run inside the transaction that applies the events, so a rollback reverts the hash too.
-  const withStateHash = <T>(callback: () => T): T => {
-    if (!stateHashStore || activeStateHash) {
-      return callback();
-    }
-    const initialSum = readStateHashSum(stateHashStore);
-    const accumulator = createStateHashAccumulator({ sum: initialSum, getColumns: getStateHashColumns });
-    activeStateHash = accumulator;
-    try {
-      const result = callback();
-      if (accumulator.sum !== initialSum) {
-        stateHashStore.write(formatStateHash(storage.migrator.currentSchemaVersion, accumulator.sum));
-      }
-      return result;
-    } finally {
-      activeStateHash = null;
-    }
-  };
-
-  const getStateHash = () => stateHashStore?.read() ?? null;
+  const stateHash = createStateHashTracker({
+    db,
+    updateLogTable: storage.dbConfig.updateLogTable.fullIdentifier,
+    schema: storage.schema,
+    getSchemaVersion: () => storage.migrator.currentSchemaVersion,
+    store: storage.stateHash ?? null,
+  });
+  const withStateHash = stateHash.track;
+  const getStateHash = stateHash.read;
 
   const applyCrdtEventWithoutStateHash = createSQLiteCrdtApplyFunction({
     db,
     dbConfig: storage.dbConfig,
-    getStateHash: () => activeStateHash,
+    getStateHash: () => stateHash.active,
   });
   const applyCrdtEvent = (event: Parameters<typeof applyCrdtEventWithoutStateHash>[0]) =>
     withStateHash(() => applyCrdtEventWithoutStateHash(event));
@@ -920,10 +853,8 @@ limit ?`,
     }
   });
 
-  if (stateHashStore) {
-    db.executeTransaction(() => {
-      readStateHashSum(stateHashStore);
-    });
+  if (storage.stateHash) {
+    db.executeTransaction(stateHash.initialize);
   }
 
   void processEnqueuedEvents();

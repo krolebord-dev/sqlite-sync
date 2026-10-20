@@ -26,7 +26,12 @@ export function createMigrator(
   });
 
   return {
-    ...baseMigrator,
+    latestSchemaVersion: baseMigrator.latestSchemaVersion,
+    get currentSchemaVersion() {
+      return baseMigrator.currentSchemaVersion;
+    },
+    migrateEvent: baseMigrator.migrateEvent,
+    migrateEvents: baseMigrator.migrateEvents,
     migrateDbToLatest: () => {
       baseMigrator.migrateDbToLatest({
         startTransaction: (callback) => {

@@ -41,7 +41,7 @@ export class ColumnBuilder<Value, HasDefault extends boolean = false> {
     return new ColumnBuilder({ ...this.meta, nullable: true });
   }
 
-  /** Declare a column default. The value is used both in DDL and when migrating older events. */
+  /** Declare a column default. Creates may omit the column; it must match the migrated DDL default. */
   default(value: Value): ColumnBuilder<Value, true> {
     return new ColumnBuilder({ ...this.meta, hasDefault: true, defaultValue: value });
   }

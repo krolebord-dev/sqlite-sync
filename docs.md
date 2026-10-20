@@ -140,7 +140,7 @@ The base table name uses an underscore prefix by convention (e.g., `_todo`). The
 
 Clients on different schema versions keep syncing: each migration step also transforms CRDT events written at older versions as they are applied.
 
-- `addColumn` — an `item-created` event from an older client gets the new column's default (`priority: 0` above).
+- `addColumn` — events are left as they are. A row created by an older client gets the new column's default from the column's DDL default (`priority: 0` above). Because older creates leave the column out, the schema must declare the same `.default(...)`, or the server rejects them; [`verifySyncSchema`](#verifying-migrations-against-the-schema) reports a mismatch.
 - `renameTable` / `renameColumn` — event datasets and payload keys are rewritten to the new names.
 - `dropColumn` — the key is stripped from payloads. An `item-updated` event that only changed that column is dropped.
 - `dropTable` — events for the table are dropped.
