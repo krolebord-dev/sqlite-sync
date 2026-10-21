@@ -29,6 +29,7 @@ import {
   createSystemDbConfig,
   drainCrdtChangeIntents,
   runSystemMigrations,
+  STATE_HASH_KV_KEY,
 } from "@sqlite-sync/core/internal";
 import {
   admitClientPush,
@@ -45,7 +46,6 @@ import { createCrdtStorageDb, createKyselyExecutor, type KyselyExecutor } from "
 import { createMigrator, type SyncDbMigrator } from "./migrator";
 
 const updateLogTableName = "__crdt_update_log";
-const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
 
 type AdapterDb = {
   crdtEvents: PersistedCrdtEvent;
@@ -132,7 +132,7 @@ async function createDurableObjectCrdtStorage<Schema extends SyncDbSchema>({
       saveToStorage: (val) => storage.kv.put("internal-schema-version", val),
     }),
     dbConfig,
-    execute: (sql) => sqlExecutor.execute({ sql, parameters: [] }),
+    execute: (sql, parameters = []) => sqlExecutor.execute({ sql, parameters }),
     transaction: (callback) => sqlExecutor.transaction(callback),
   });
 

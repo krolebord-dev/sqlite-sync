@@ -86,7 +86,7 @@ export function createSQLiteKvStore({ db, metaTableName }: { db: InternalSQLiteW
 
 export type KvStore = ReturnType<typeof createSQLiteKvStore>;
 
-export const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
+export const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v2";
 
 export function createKvStateHashStore(kvStore: Pick<KvStore, "get" | "set">): StateHashStore {
   return {

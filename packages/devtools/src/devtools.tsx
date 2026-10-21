@@ -1,4 +1,5 @@
 import type { ColumnMeta, SharedLiveQuerySnapshot, SyncedDbExport } from "@sqlite-sync/core";
+import { STATE_HASH_KV_KEY } from "@sqlite-sync/core/internal";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -570,7 +571,6 @@ export function SQLiteSyncDevtools({
   );
 }
 
-const STATE_HASH_KV_KEY = "crdt.consistency.state_hash.v1";
 const STATE_HASH_QUERY = `SELECT value FROM "worker"."kv" WHERE key = '${STATE_HASH_KV_KEY}'`;
 const EVENT_STATUS_COUNTS_QUERY = `SELECT status, COUNT(*) AS count FROM "worker"."crdt_events" GROUP BY status`;
 const MEMORY_DB_SIZE_QUERY =

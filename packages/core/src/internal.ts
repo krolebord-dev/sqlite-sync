@@ -13,3 +13,4 @@ export {
   drainCrdtChangeIntents,
 } from "./sqlite-crdt/make-crdt-table";
 export { compileKyselyStatement, type InternalSQLiteWrapper, type KyselyStatementFactory } from "./sqlite-db-wrapper";
+export { STATE_HASH_KV_KEY } from "./sqlite-kv-store";

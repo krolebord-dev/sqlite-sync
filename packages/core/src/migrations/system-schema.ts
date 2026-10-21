@@ -60,8 +60,10 @@ export const memoryDbConfig = createSystemDbConfig({
   updateLogTableName: "crdt_update_log",
 });
 
+export type SystemMigrationExecute = (sql: string, parameters?: readonly unknown[]) => { rows: unknown[] };
+
 export type SystemMigrationContext = SystemDbConfig & {
-  execute: (sql: string) => void;
+  execute: SystemMigrationExecute;
 };
 
 export type SystemMigration = {
@@ -145,13 +147,38 @@ WHERE "latest"."dataset" = "log"."dataset" AND "latest"."item_id" = "log"."item_
   AND "latest"."timestamp" > coalesce(json_extract("log"."payload", '$.id'), '')`);
     },
   },
+  {
+    // Older builds left `tombstone` alone when re-applying a create, so it kept the HLC (and
+    // value) of an earlier create or delete. Creates now clear it at their own HLC, so restamp
+    // it with the latest create and undelete the row, as a replica replaying history would.
+    version: 6,
+    up: (ctx: SystemMigrationContext) => {
+      const updateLog = quoteId(ctx.updateLogTable.fullIdentifier);
+      const isStale = `json_extract("payload", '$.tombstone') < json_extract("payload", '$.id')`;
+      const { rows } = ctx.execute(
+        `SELECT DISTINCT "log"."dataset" AS "dataset" FROM ${updateLog} AS "log"
+JOIN "sqlite_master" AS "master" ON "master"."type" = 'table' AND "master"."name" = "log"."dataset"
+WHERE ${isStale}`,
+      );
+      for (const { dataset } of rows as { dataset: string }[]) {
+        ctx.execute(
+          `UPDATE ${quoteId(dataset)} SET "tombstone" = 0
+WHERE "tombstone" <> 0 AND "id" IN (SELECT "item_id" FROM ${updateLog} WHERE "dataset" = ? AND ${isStale})`,
+          [dataset],
+        );
+      }
+      ctx.execute(
+        `UPDATE ${updateLog} SET "payload" = json_set("payload", '$.tombstone', json_extract("payload", '$.id')) WHERE ${isStale}`,
+      );
+    },
+  },
 ];
 
 export function runSystemMigrations(opts: {
   version: StoredValue<number>;
   migrations: SystemMigration[];
   dbConfig: SystemDbConfig;
-  execute: (sql: string) => void;
+  execute: SystemMigrationExecute;
   transaction: (callback: () => void) => void;
 }): void {
   const ctx: SystemMigrationContext = {
@@ -189,7 +216,7 @@ function applySystemDbSchema(
     migrations: baseSystemMigrations,
     version: kvStore.createNumberStoredValue("internal-schema-version", -1),
     dbConfig,
-    execute: (sql) => db.execute(sql, { loggerLevel: "system" }),
+    execute: (sql, parameters = []) => db.execute({ sql, parameters }, { loggerLevel: "system" }),
     transaction: (callback) => db.executeTransaction(callback),
   });
 

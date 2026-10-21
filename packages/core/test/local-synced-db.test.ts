@@ -274,6 +274,26 @@ describe.each<HookMode>(["synchronous", "asynchronous"])("createLocalSyncedDb wi
     await reopened.dispose();
   });
 
+  it("returns the same state snapshot until the sync state changes", async () => {
+    const server = createFakeServer();
+    const db = await createDb(createFileSystem(mode), "a", { server });
+    const initial = db.state.getState();
+    // useSyncExternalStore re-renders forever if getState() returns a new object on every call.
+    expect(db.state.getState()).toBe(initial);
+
+    const onChange = vi.fn();
+    const unsubscribe = db.state.subscribe(onChange);
+    await vi.waitFor(() => expect(db.state.getState().remoteState).toBe("online"));
+
+    const online = db.state.getState();
+    expect(online).not.toBe(initial);
+    expect(db.state.getState()).toBe(online);
+    expect(onChange).toHaveBeenCalled();
+
+    unsubscribe();
+    await db.dispose();
+  });
+
   it("rolls back a failed transaction without emitting events", async () => {
     const fs = createFileSystem(mode);
     const server = createFakeServer();

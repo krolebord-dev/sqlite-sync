@@ -599,7 +599,7 @@ describe("CRDT convergence for parallel entity edits", () => {
         migrations: baseSystemMigrations,
         version: createStoredValue({ initialValue: 4 }),
         dbConfig: memoryDbConfig,
-        execute: (sql) => replica.db.execute(sql),
+        execute: (sql, parameters = []) => replica.db.execute({ sql, parameters }),
         transaction: (callback) => replica.db.executeTransaction(callback),
       });
 
@@ -652,6 +652,43 @@ describe("CRDT convergence for parallel entity edits", () => {
       await applyUnrelatedEdit([legacy, replayedAfter]);
 
       expect(getUpdateLog(legacy).id).toBe(hlcAt(5_000));
+      expect(replayedAfter.getStateHash()).toBe(legacy.getStateHash());
+    });
+
+    const deleteAt = (time: number): RemoteEvent => ({
+      type: "item-deleted",
+      dataset: BASE_TABLE,
+      item_id: "todo-1",
+      timestamp: hlcAt(time),
+      schema_version: 1,
+      payload: "{}",
+    });
+
+    it.each([
+      ["re-created", [createAt(1_000), createAt(5_000)], 1_000, 0],
+      ["deleted and re-created", [createAt(1_000), deleteAt(3_000), createAt(5_000)], 3_000, 1],
+    ])("restamps tombstones that re-creates did not clear before the upgrade (%s)", async (_, events, legacyTime, legacyTombstone) => {
+      const legacy = await createMigratedReplica("node-a");
+      await legacy.importEvents(events);
+      // Older builds left the tombstone as the earlier create or delete wrote it.
+      legacy.db.execute({
+        sql: `UPDATE "crdt_update_log" SET "payload" = json_set("payload", '$.tombstone', ?) WHERE "item_id" = 'todo-1'`,
+        parameters: [hlcAt(legacyTime)],
+      });
+      legacy.db.execute({
+        sql: `UPDATE "${BASE_TABLE}" SET "tombstone" = ? WHERE "id" = 'todo-1'`,
+        parameters: [legacyTombstone],
+      });
+      const replayedAfter = await createMigratedReplica("node-b");
+      await replayedAfter.importEvents(events);
+      expect(getUpdateLog(legacy)).not.toEqual(getUpdateLog(replayedAfter));
+
+      upgradeLegacyBuild(legacy);
+      forgetStateHash(legacy);
+      await applyUnrelatedEdit([legacy, replayedAfter]);
+
+      expect(getUpdateLog(legacy)).toEqual(getUpdateLog(replayedAfter));
+      expect(legacy.getTodo("todo-1")).toEqual(replayedAfter.getTodo("todo-1"));
       expect(replayedAfter.getStateHash()).toBe(legacy.getStateHash());
     });
 
