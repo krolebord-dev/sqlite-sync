@@ -40,11 +40,10 @@ export type SyncedDbOptions<Database> = {
 export type SyncedDb<Database> = LocalSyncedDb<Database>;
 
 export async function createSyncedDb<Database>(options: SyncedDbOptions<Database>): Promise<SyncedDb<Database>> {
-  const openOptions = {
-    name: `${options.dbId}.sqlite`,
-    location: options.location,
-    encryptionKey: options.encryptionKey,
-  };
+  // op-sqlite reads every present option key as a string, so unset ones must be left out.
+  const openOptions: OpenOptions = { name: `${options.dbId}.sqlite` };
+  if (options.location !== undefined) openOptions.location = options.location;
+  if (options.encryptionKey !== undefined) openOptions.encryptionKey = options.encryptionKey;
   let removeAppStateListener: (() => void) | undefined;
 
   const syncedDb = await createLocalSyncedDb<Database>({

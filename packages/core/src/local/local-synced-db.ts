@@ -186,10 +186,13 @@ export async function createLocalSyncedDb<Database>(
       migrator,
       remoteFactory: options.createRemoteSource,
     });
+
+    let stateSnapshot = remoteSource.getState();
     remoteSource.addEventListener("state-changed", () => {
+      stateSnapshot = remoteSource.getState();
       notify({
         notificationType: "state-changed",
-        state: remoteSource.getState(),
+        state: stateSnapshot,
         storageGeneration: storageGeneration.current,
       });
     });
@@ -237,7 +240,7 @@ export async function createLocalSyncedDb<Database>(
     const syncedDb: LocalSyncedDb<Database> = {
       db: createSyncedDbDatabase(reactiveDb),
       state: {
-        getState: () => remoteSource.getState(),
+        getState: () => stateSnapshot,
         subscribe: (onChange: () => void) => {
           const { unsubscribe } = eventTarget.addEventListener("state-changed", onChange);
           return unsubscribe;

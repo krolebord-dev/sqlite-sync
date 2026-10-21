@@ -19,10 +19,19 @@ export function createFakeOpSqlite() {
   const files = new Map<string, Uint8Array<ArrayBufferLike>>();
   const deleted: string[] = [];
 
-  const open = ({ name, location }: { name: string; location?: string }) => {
+  const open = (options: { name: string; location?: string; encryptionKey?: string }) => {
     if (!sqlite3) {
       throw new Error("Call loadFakeOpSqlite() first");
     }
+    // The native open reads any present option key as a string, so a key set to undefined throws.
+    for (const key of ["location", "encryptionKey"] as const) {
+      if (key in options && typeof options[key] !== "string") {
+        throw new Error(
+          `Value is ${options[key] === undefined ? "undefined" : typeof options[key]}, expected a String`,
+        );
+      }
+    }
+    const { name, location } = options;
     const { capi, oo1, wasm } = sqlite3;
     const db = new oo1.DB({ filename: ":memory:" });
     const path = location === ":memory:" ? null : `${location ?? "default"}/${name}`;
