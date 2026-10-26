@@ -163,7 +163,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
 
   const crdtStorage = createCrdtStorage({
     nodeId: config.clientId,
-    initialLocalSyncId: getMaxSyncId(db, "none"),
+    initialLocalSyncId: Math.max(getMaxSyncId(db, "none"), pushSyncId.current),
     migrator,
     hlc: new HLCCounter(config.clientId, () => Date.now()),
     db,

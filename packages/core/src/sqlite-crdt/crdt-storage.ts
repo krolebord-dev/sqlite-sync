@@ -155,6 +155,19 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     storage.hlc.restoreHLC(deserializeHLC(persistedClock.timestamp));
   }
 
+  const readPersistedSyncId = (executor: Pick<InternalSQLiteWrapper<InternalDbSchema>, "executePreparedRaw">) => {
+    const [row] = executor.executePreparedRaw<[], { sync_id: number | null }>({
+      key: "get-max-persisted-sync-id",
+      sql: `select max("sync_id") as "sync_id" from ${quotedEventsTable}`,
+      meta: { loggerLevel: "system" },
+    });
+    return Math.max(storage.initialLocalSyncId, row?.sync_id ?? 0);
+  };
+
+  const refreshLocalSyncId = () => {
+    localSyncId = readPersistedSyncId(db);
+  };
+
   const getInitialSequentialSyncId = () => {
     const [firstPendingEvent] = db.executePrepared(
       "get-first-pending-event",
@@ -270,12 +283,16 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
     sourceNodeId: string,
     events: EnqueuedCrdtEvent[],
   ): EnqueueEventsResult => {
-    const beforeSyncId = localSyncId;
     if (events.length === 0) {
-      return { beforeSyncId, afterSyncId: beforeSyncId, processed: Promise.resolve() };
+      refreshLocalSyncId();
+      return { beforeSyncId: localSyncId, afterSyncId: localSyncId, processed: Promise.resolve() };
     }
 
+    let beforeSyncId = 0;
+    let syncId = 0;
     db.executeTransaction((tx) => {
+      beforeSyncId = readPersistedSyncId(tx);
+      syncId = beforeSyncId;
       const persistedEvents = events.map(
         (event): PersistedCrdtEvent => ({
           schema_version: event.schema_version ?? storage.migrator.currentSchemaVersion,
@@ -286,14 +303,15 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           origin: origin,
           source_node_id: sourceNodeId,
           payload: event.payload,
-          sync_id: ++localSyncId,
+          sync_id: ++syncId,
           status: "pending",
         }),
       );
       persistEvents(tx, persistedEvents);
     });
+    localSyncId = syncId;
 
-    return { beforeSyncId, afterSyncId: localSyncId, processed: processEnqueuedEvents() };
+    return { beforeSyncId, afterSyncId: syncId, processed: processEnqueuedEvents() };
   };
 
   const enqueueLocalEvents = (events: LocalCrdtEvent[], sourceNodeId: string): EnqueueEventsResult => {
@@ -364,7 +382,9 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
       throw new CrdtEventValidationError(errors);
     }
 
+    let syncId = 0;
     db.executeTransaction((tx) => {
+      syncId = readPersistedSyncId(tx);
       const persistedEvents = validatedEvents.map(
         (event): PersistedCrdtEvent => ({
           schema_version: storage.migrator.currentSchemaVersion,
@@ -375,7 +395,7 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
           origin: "own-applied",
           source_node_id: storage.nodeId,
           payload: JSON.stringify(event.payload),
-          sync_id: ++localSyncId,
+          sync_id: ++syncId,
           status: "pending",
         }),
       );
@@ -386,13 +406,15 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
         }
       });
     });
+    localSyncId = syncId;
 
     void processEnqueuedEvents();
   };
 
   const applyOwnSnapshot = (snapshot: OwnCrdtSnapshot) => {
-    const syncId = localSyncId + 1;
+    let syncId = 0;
     db.executeTransaction((tx) => {
+      syncId = readPersistedSyncId(tx) + 1;
       const [currentRow] = tx.executePreparedRaw<[string], Record<string, unknown>>({
         key: `get-crdt-snapshot-row-${snapshot.dataset}`,
         sql: `select * from ${quoteId(snapshot.dataset)} where "id" = ? limit 1`,
@@ -463,7 +485,7 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
       origin: "own-applied",
       source_node_id: storage.nodeId,
       payload: event.payload,
-      sync_id: ++localSyncId,
+      sync_id: readPersistedSyncId(tx) + 1,
       status: "pending",
     };
 
@@ -791,6 +813,7 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     let hasMore = true;
     while (hasMore) {
       await Promise.resolve();
+      refreshLocalSyncId();
 
       const batchSize = 100;
 

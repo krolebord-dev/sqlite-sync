@@ -313,4 +313,52 @@ describe.each<HookMode>(["synchronous", "asynchronous"])("createLocalSyncedDb wi
 
     await db.dispose();
   });
+
+  it("pushes writes made after restarting past a rolled-back write", async () => {
+    const fs = createFileSystem(mode);
+    const server = createFakeServer();
+    const first = await createDb(fs, "a", { server });
+    await first.state.goOffline();
+
+    addTodo(first, "1", "Before rollback");
+    expect(() =>
+      first.db.executeTransaction((tx) => {
+        tx.execute({ sql: `INSERT INTO "todo" ("id", "title") VALUES (?, ?)`, parameters: ["2", "Rolled back"] });
+        throw new Error("abort");
+      }),
+    ).toThrow("abort");
+    // A commit without CRDT writes runs a processing pass with nothing pending.
+    first.db.execute(`CREATE TABLE "plain" ("x")`);
+    first.db.execute(`INSERT INTO "plain" VALUES (1)`);
+    await vi.waitFor(() => expect(countEvents(first, "applied")).toBe(1));
+
+    await first.state.goOnline();
+    await vi.waitFor(() => expect(server.events).toHaveLength(1));
+    await first.dispose();
+
+    const second = await createDb(fs, "a", { server });
+    addTodo(second, "3", "After restart");
+
+    await vi.waitFor(() => expect(server.events.map((event) => event.item_id)).toEqual(["1", "3"]));
+    await second.dispose();
+  });
+
+  it("pushes new writes when the stored push cursor is past the last event", async () => {
+    const fs = createFileSystem(mode);
+    const server = createFakeServer();
+    const first = await createDb(fs, "a", { server });
+    addTodo(first, "1", "Pushed");
+    await vi.waitFor(() => expect(server.events).toHaveLength(1));
+    await first.dispose();
+
+    const offline = await createDb(fs, "a");
+    offline.db.execute(`UPDATE "sync_kv" SET "value" = '3' WHERE "key" = 'push-sync-id'`);
+    await offline.dispose();
+
+    const second = await createDb(fs, "a", { server });
+    addTodo(second, "2", "After restart");
+
+    await vi.waitFor(() => expect(server.events.map((event) => event.item_id)).toEqual(["1", "2"]));
+    await second.dispose();
+  });
 });

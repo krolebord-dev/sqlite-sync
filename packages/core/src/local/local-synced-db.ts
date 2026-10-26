@@ -149,7 +149,7 @@ export async function createLocalSyncedDb<Database>(
     const nodeId = generateId();
     const crdtStorage = createCrdtStorage({
       nodeId,
-      initialLocalSyncId: getMaxSyncId(db),
+      initialLocalSyncId: Math.max(getMaxSyncId(db), pushSyncId.current),
       migrator,
       hlc: new HLCCounter(nodeId, () => Date.now()),
       db,
