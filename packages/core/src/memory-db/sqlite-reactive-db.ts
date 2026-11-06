@@ -453,28 +453,30 @@ export class SQLiteReactiveDb<Database> {
   }
 }
 
+// Leading + trailing throttle: a call after an idle window runs immediately, and calls
+// within the window collapse into one trailing call that opens the next window.
 function createDebouncedCallback<TArgs extends unknown[]>(callback: (...args: TArgs) => void, delay: number) {
   let timeout: unknown | null = null;
-  let shouldCallWithoutDelay = true;
+  let pendingArgs: TArgs | null = null;
+
+  const run = (args: TArgs) => {
+    timeout = setTimeout(() => {
+      timeout = null;
+      if (pendingArgs) {
+        const args = pendingArgs;
+        pendingArgs = null;
+        run(args);
+      }
+    }, delay);
+    callback(...args);
+  };
 
   return (...args: TArgs) => {
-    if (shouldCallWithoutDelay) {
-      callback(...args);
-      shouldCallWithoutDelay = false;
+    if (timeout) {
+      pendingArgs = args;
       return;
     }
-
-    const effect = () => {
-      timeout = null;
-      shouldCallWithoutDelay = true;
-      return callback(...args);
-    };
-
-    if (timeout) {
-      clearTimeout(timeout as any);
-    }
-
-    timeout = setTimeout(effect, delay);
+    run(args);
   };
 }
 
