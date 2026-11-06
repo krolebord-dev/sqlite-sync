@@ -449,6 +449,8 @@ createRoot(document.getElementById("root")!).render(
 
 Identical `useDbQuery` calls within the same `DbProvider` reuse the same live query when both the SQL string and parameter values match. Each component still receives its own `mapData` result, but the underlying live subscription is shared.
 
+**Results are structurally shared.** When a live query re-runs, every row whose column values are unchanged keeps the same object as before, so `React.memo` and React Compiler memoization on row components keep working. Rows are matched by position, then by an `id` column if the query selects one; a row is only reused if all its values are equal (blobs are compared by bytes). If the whole result is unchanged, the query returns the same array and does not notify subscribers at all, so writes to a table that don't affect a query's result don't re-render it. Treat rows, result arrays and blobs as **immutable**: a mutated row would be kept as is by later refreshes.
+
 **Kysely query builder (recommended):**
 
 ```tsx

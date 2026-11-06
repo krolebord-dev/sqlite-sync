@@ -3,7 +3,7 @@ import { BoundMap } from "./bound-map";
 import { dummyKysely } from "./dummy-kysely";
 import { type DatabaseIntrospection, introspectDb } from "./introspection";
 import { type Logger, startPerformanceLogger } from "./logger";
-import type { SqliteDriver, SqliteDriverStatement, SqliteDriverValue } from "./sqlite-driver";
+import type { SqliteDriver, SqliteDriverRows, SqliteDriverStatement, SqliteDriverValue } from "./sqlite-driver";
 
 export type ExecuteParams = {
   sql: string;
@@ -16,6 +16,8 @@ export type ExecuteResult<T> = {
 
 export type PreparedStatement<TParams extends unknown[], TResult> = {
   execute: (parameters: TParams) => TResult[];
+  /** Runs the statement and returns the driver result as is, without building row objects. */
+  executeRaw: (parameters: TParams) => SqliteDriverRows;
   finalize: () => void;
   isFinalized: boolean;
 };
@@ -123,7 +125,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
         totalChangesBefore = driver.totalChanges();
       }
 
-      const rows = toRowObjects<T>(statement.run(bind ?? []), () => Object.create(null));
+      const rows = toRowObjects<T>(statement.run(bind ?? []), () => ({}));
       statement.finalize();
       perf.logEnd(`${this.loggerPrefix ?? ""}:query`, sql, loggerLevel);
 
@@ -263,18 +265,20 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
     let isFinalized = false;
 
-    const execute = (params: TParams) => {
+    const executeRaw = (params: TParams) => {
       if (isFinalized) {
         throw new Error("Statement is finalized");
       }
 
       const perf = startPerformanceLogger(this.logger, opts?.loggerLevel);
       try {
-        return toRowObjects<TResult>(stmt.run(params), () => ({}));
+        return stmt.run(params);
       } finally {
         perf.logEnd(`${this.loggerPrefix ?? ""}:prepare-execute`, sql, opts?.loggerLevel);
       }
     };
+
+    const execute = (params: TParams) => toRowObjects<TResult>(executeRaw(params), () => ({}));
 
     const finalize = () => {
       isFinalized = true;
@@ -283,6 +287,7 @@ export class SQLiteDbWrapper<TDatabase = unknown> {
 
     const preparedStatement: PreparedStatement<TParams, TResult> = {
       execute,
+      executeRaw,
       finalize,
       get isFinalized() {
         return isFinalized;

@@ -6,7 +6,11 @@ export type SqliteDriverRows = {
 };
 
 export type SqliteDriverStatement = {
-  /** Binds, steps to completion and resets the statement. Must run synchronously. */
+  /**
+   * Binds, steps to completion and resets the statement. Must run synchronously.
+   * Must return new `rows` arrays on every call and never modify them afterwards: live
+   * queries keep the previous result to reuse unchanged rows.
+   */
   run: (parameters: readonly unknown[]) => SqliteDriverRows;
   finalize: () => void;
   /**

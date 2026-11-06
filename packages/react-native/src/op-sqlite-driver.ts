@@ -19,7 +19,7 @@ export function createOpSqliteDriver(db: DB): SqliteDriver {
     const result = db.executeRawSync(sql, parameters.map(toScalar));
     return {
       columns: result.columnNames ?? [],
-      rows: result.rawRows.map((row) => row.map(fromScalar)),
+      rows: toDriverRows(result.rawRows),
     };
   };
 
@@ -61,12 +61,23 @@ function toScalar(value: unknown): Scalar {
   }
 }
 
-function fromScalar(value: Scalar): SqliteDriverValue {
-  if (value instanceof ArrayBuffer) {
-    return new Uint8Array(value);
+/**
+ * Converts op-sqlite values in place: op-sqlite builds fresh row arrays on every call, and nearly
+ * every value (string, number, null) needs no conversion, so copying each row would only allocate.
+ */
+function toDriverRows(rawRows: Scalar[][]): SqliteDriverValue[][] {
+  for (let r = 0; r < rawRows.length; r++) {
+    const row = rawRows[r] as unknown[];
+    for (let c = 0; c < row.length; c++) {
+      const value = row[c];
+      if (typeof value === "object") {
+        if (value instanceof ArrayBuffer) {
+          row[c] = new Uint8Array(value);
+        }
+      } else if (typeof value === "boolean") {
+        row[c] = value ? 1 : 0;
+      }
+    }
   }
-  if (typeof value === "boolean") {
-    return value ? 1 : 0;
-  }
-  return value as SqliteDriverValue;
+  return rawRows as SqliteDriverValue[][];
 }

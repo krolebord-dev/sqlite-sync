@@ -1,8 +1,9 @@
 import { BoundMap } from "../bound-map";
 import { type Logger, startPerformanceLogger } from "../logger";
 import { type PreparedStatement, SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import type { SqliteDriver } from "../sqlite-driver";
+import type { SqliteDriver, SqliteDriverRows } from "../sqlite-driver";
 import { createTypedEventTarget, type TypedEvent } from "../utils";
+import { reconcileRows } from "./reconcile-rows";
 
 type TableName<Database> = keyof Database extends string ? keyof Database : never;
 
@@ -109,14 +110,16 @@ export class SQLiteReactiveDb<Database> {
         this.liveQueryStatements.set(query.sql, statement);
       }
       rowsVersion = this.mutationVersion;
-      return statement.execute(parameters as any) as TResult[];
+      return statement.executeRaw(parameters as any);
     };
 
+    let raw: SqliteDriverRows | null = null;
     let rows: TResult[] | null = null;
 
     const getRows = () => {
       if (!rows) {
-        rows = fetchRows(query.parameters);
+        raw = fetchRows(query.parameters);
+        rows = reconcileRows<TResult>(null, raw);
       }
       return rows;
     };
@@ -128,7 +131,14 @@ export class SQLiteReactiveDb<Database> {
       if (parameters) {
         lastParameters = parameters;
       }
-      rows = fetchRows(lastParameters);
+      const nextRaw = fetchRows(lastParameters);
+      const nextRows = reconcileRows<TResult>(raw && rows ? { raw, rows } : null, nextRaw);
+      raw = nextRaw;
+      // Unchanged result: keep the same array and don't notify, so subscribers skip the render.
+      if (nextRows === rows) {
+        return;
+      }
+      rows = nextRows;
       subscriber?.();
     };
 
