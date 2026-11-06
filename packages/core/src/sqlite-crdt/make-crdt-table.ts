@@ -205,12 +205,12 @@ export function registerCrdtIntentDrainer({
   // A rolled-back drain leaves `eventApplied` set on purpose: with asynchronous hooks the
   // rollback can be delivered after a later transaction drained again, and clearing the flag
   // then would strand that transaction's events. Processing with nothing pending is a no-op.
-  reactiveDb.addEventListener("transaction-committed", () => {
+  reactiveDb.afterCommit = () => {
     if (eventApplied) {
       eventApplied = false;
       void storage.internal.processEnqueuedEvents();
     }
-  });
+  };
 }
 
 export function drainCrdtChangeIntents({

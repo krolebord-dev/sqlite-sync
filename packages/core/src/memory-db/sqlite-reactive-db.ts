@@ -14,8 +14,6 @@ export type SQLiteReactiveDbOptions = {
 };
 
 type EventsMap = {
-  "transaction-committed": undefined;
-  "transaction-rolled-back": undefined;
   "any-table-changed": undefined;
 } & Record<`table:${string}`, void>;
 
@@ -55,6 +53,8 @@ export class SQLiteReactiveDb<Database> {
   private isDisposed = false;
   private mutationVersion = 0;
   private tableMutationVersions = new Map<string, number>();
+  /** Runs inside the commit hook after a transaction that changed rows, so it must not use the database. */
+  afterCommit: (() => void) | null = null;
 
   private constructor(opts: SQLiteReactiveDbOptions) {
     this.driver = opts.driver;
@@ -398,7 +398,6 @@ export class SQLiteReactiveDb<Database> {
         }
 
         updateQueue.clear();
-        this.eventTarget.dispatchEvent("transaction-rolled-back", undefined);
       },
       onCommit: () => {
         if (this.isDisposed || updateQueue.size === 0) {
@@ -407,7 +406,7 @@ export class SQLiteReactiveDb<Database> {
 
         const tables = updateQueue;
         updateQueue = new Set<string>();
-        this.eventTarget.dispatchEvent("transaction-committed", undefined);
+        this.afterCommit?.();
 
         queueMicrotask(() => {
           if (!this.isDisposed) {
