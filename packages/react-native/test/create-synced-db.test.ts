@@ -86,11 +86,23 @@ afterEach(() => {
   appState.listeners.clear();
 });
 
-const setUp = () => {
-  const fake = createFakeOpSqlite();
+const setUpFake = (options?: { hookEventBuffer?: boolean }) => {
+  const fake = createFakeOpSqlite(options);
   fakeOpSqlite.current = fake;
   return fake;
 };
+
+function recordHooks() {
+  const calls: string[] = [];
+  return {
+    calls,
+    hooks: {
+      onUpdate: (table: string) => calls.push(`update:${table}`),
+      onCommit: () => calls.push("commit"),
+      onRollback: () => calls.push("rollback"),
+    },
+  };
+}
 
 describe("createOpSqliteDriver", () => {
   it("explains how to enable bytecode virtual tables when they are missing", () => {
@@ -103,7 +115,7 @@ describe("createOpSqliteDriver", () => {
   });
 
   it("maps op-sqlite values to driver values", () => {
-    const fake = setUp();
+    const fake = setUpFake();
     const driver = createOpSqliteDriver(fake.open({ name: "values.sqlite" }) as never);
 
     const { columns, rows } = driver
@@ -115,9 +127,61 @@ describe("createOpSqliteDriver", () => {
     expect(() => driver.prepare("select ?").run([2n ** 60n])).toThrow(/binds numbers as doubles/);
     driver.close();
   });
+
+  it("delivers hooks asynchronously, in order, without a native hook event buffer", async () => {
+    const fake = setUpFake();
+    const driver = createOpSqliteDriver(fake.open({ name: "async-hooks.sqlite" }) as never);
+    const { calls, hooks } = recordHooks();
+    driver.setHooks(hooks);
+
+    driver.prepare("create table t (x)").run([]);
+    driver.prepare("insert into t values (1)").run([]);
+
+    expect(driver.synchronousHooks).toBe(false);
+    expect(calls).toEqual([]);
+    await vi.waitFor(() => expect(calls).toEqual(["commit", "update:t", "commit"]));
+    driver.close();
+  });
+
+  it("replays buffered hook events before each statement returns", () => {
+    const fake = setUpFake({ hookEventBuffer: true });
+    const driver = createOpSqliteDriver(fake.open({ name: "sync-hooks.sqlite" }) as never);
+    const { calls, hooks } = recordHooks();
+    driver.setHooks(hooks);
+    expect(driver.synchronousHooks).toBe(true);
+
+    driver.prepare("create table t (x unique)").run([]);
+    calls.length = 0;
+    driver.prepare("insert into t values (1)").run([]);
+    expect(calls).toEqual(["update:t", "commit"]);
+
+    calls.length = 0;
+    driver.prepare("begin").run([]);
+    driver.prepare("insert into t values (2)").run([]);
+    expect(calls).toEqual(["update:t"]);
+    driver.prepare("rollback").run([]);
+    expect(calls).toEqual(["update:t", "rollback"]);
+
+    calls.length = 0;
+    expect(() => driver.prepare("insert into t values (4), (4)").run([])).toThrow();
+    expect(calls).toEqual(["update:t", "rollback"]);
+
+    calls.length = 0;
+    driver.setHooks(null);
+    driver.prepare("insert into t values (3)").run([]);
+    driver.setHooks(hooks);
+    driver.prepare("select 1").run([]);
+    expect(calls).toEqual([]);
+    driver.close();
+  });
 });
 
-describe("createSyncedDb", () => {
+describe.each([
+  { name: "async hooks", hookEventBuffer: false },
+  { name: "buffered hooks", hookEventBuffer: true },
+])("createSyncedDb ($name)", ({ hookEventBuffer }) => {
+  const setUp = () => setUpFake({ hookEventBuffer });
+
   it("persists writes, pushes them, and keeps them across restarts", async () => {
     const fake = setUp();
     const server = createFakeServer();

@@ -4,6 +4,7 @@ import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
 type Scalar = string | number | boolean | null | ArrayBuffer | ArrayBufferView;
 type Callback = (() => void) | null | undefined;
 type UpdateCallback = ((params: { table: string; operation: string; rowId: number }) => void) | null | undefined;
+type HookEvent = { type: "update"; table: string } | { type: "commit" } | { type: "rollback" };
 
 let sqlite3: Sqlite3Static | null = null;
 
@@ -14,8 +15,10 @@ export async function loadFakeOpSqlite() {
 /**
  * op-sqlite's observable behavior on top of sqlite-wasm: synchronous raw execution,
  * blobs as ArrayBuffers, and hooks posted to the JS thread after the call returns.
+ * With `hookEventBuffer`, connections also have the native hook event buffer
+ * (`enableHookEventBuffer`/`takeHookEvents`) that patched op-sqlite builds expose.
  */
-export function createFakeOpSqlite() {
+export function createFakeOpSqlite({ hookEventBuffer = false }: { hookEventBuffer?: boolean } = {}) {
   const files = new Map<string, Uint8Array<ArrayBufferLike>>();
   const deleted: string[] = [];
 
@@ -53,9 +56,15 @@ export function createFakeOpSqlite() {
     let onUpdate: UpdateCallback = null;
     let onCommit: Callback = null;
     let onRollback: Callback = null;
+    let buffering = false;
+    let bufferedEvents: HookEvent[] = [];
     capi.sqlite3_update_hook(
       db,
       (_ctx, _op, _db, table, rowId) => {
+        if (buffering) {
+          bufferedEvents.push({ type: "update", table });
+          return;
+        }
         const callback = onUpdate;
         setTimeout(() => callback?.({ table, operation: "UPDATE", rowId: Number(rowId) }));
       },
@@ -64,6 +73,10 @@ export function createFakeOpSqlite() {
     capi.sqlite3_commit_hook(
       db,
       () => {
+        if (buffering) {
+          bufferedEvents.push({ type: "commit" });
+          return 0;
+        }
         const callback = onCommit;
         setTimeout(() => callback?.());
         return 0;
@@ -73,6 +86,10 @@ export function createFakeOpSqlite() {
     capi.sqlite3_rollback_hook(
       db,
       () => {
+        if (buffering) {
+          bufferedEvents.push({ type: "rollback" });
+          return 0;
+        }
         const callback = onRollback;
         setTimeout(() => callback?.());
         return 0;
@@ -118,6 +135,19 @@ export function createFakeOpSqlite() {
       rollbackHook: (callback: Callback) => {
         onRollback = callback;
       },
+      ...(hookEventBuffer && {
+        enableHookEventBuffer: (enabled = true) => {
+          buffering = enabled;
+          if (!enabled) {
+            bufferedEvents = [];
+          }
+        },
+        takeHookEvents: () => {
+          const events = bufferedEvents;
+          bufferedEvents = [];
+          return events;
+        },
+      }),
       close: () => close(true),
       delete: () => {
         close(false);

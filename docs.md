@@ -394,6 +394,8 @@ Writes that were not pushed yet are lost with `clean: true`. Unlike the browser,
 
 `createSyncedDb` is a thin wrapper over `createLocalSyncedDb` from `@sqlite-sync/core/local`, which accepts any synchronous `SqliteDriver` (see `createOpSqliteDriver` for a reference implementation). Hooks may be delivered asynchronously, as long as they arrive in order.
 
+Stock op-sqlite posts its update, commit and rollback hooks to the JS thread after each call returns. If the op-sqlite connection also exposes `enableHookEventBuffer` and `takeHookEvents`, a native hook event buffer that op-sqlite doesn't ship yet (it can be added with a patch), `createOpSqliteDriver` turns the buffer on, drains it after every statement and runs the hooks before the statement returns (`synchronousHooks: true`).
+
 ---
 
 ## React Integration
