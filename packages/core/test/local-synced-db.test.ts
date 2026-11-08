@@ -128,7 +128,7 @@ function createFakeServer() {
 function createDb(
   fs: ReturnType<typeof createFileSystem>,
   name: string,
-  opts: { server?: ReturnType<typeof createFakeServer>; storageVersion?: string } = {},
+  opts: { server?: ReturnType<typeof createFakeServer>; storageVersion?: string; eventLogGc?: boolean } = {},
 ) {
   return createLocalSyncedDb({
     dbId: "local-test",
@@ -137,6 +137,7 @@ function createDb(
     deleteDatabase: () => fs.remove(name),
     createRemoteSource: opts.server?.createRemoteSource,
     storageVersion: opts.storageVersion,
+    eventLogGc: opts.eventLogGc,
     logger: noopLogger,
   });
 }
@@ -360,5 +361,27 @@ describe.each<HookMode>(["synchronous", "asynchronous"])("createLocalSyncedDb wi
 
     await vi.waitFor(() => expect(server.events.map((event) => event.item_id)).toEqual(["1", "2"]));
     await second.dispose();
+  });
+
+  it("collects pushed events on startup by default unless disabled", async () => {
+    const fs = createFileSystem(mode);
+    const server = createFakeServer();
+    const first = await createDb(fs, "a", { server });
+    first.db.executeTransaction((tx) => {
+      for (let i = 0; i < 150; i++) {
+        tx.execute({ sql: `INSERT INTO "todo" ("id", "title") VALUES (?, ?)`, parameters: [`${i}`, `Todo ${i}`] });
+      }
+    });
+    await vi.waitFor(() => expect(server.events).toHaveLength(150));
+    await first.dispose();
+
+    const disabled = await createDb(fs, "a", { eventLogGc: false });
+    expect(countEvents(disabled, "applied")).toBe(150);
+    await disabled.dispose();
+
+    const enabled = await createDb(fs, "a");
+    expect(countEvents(enabled, "applied")).toBe(100);
+    expect(todoTitles(enabled)).toHaveLength(150);
+    await enabled.dispose();
   });
 });

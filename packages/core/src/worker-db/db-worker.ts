@@ -147,7 +147,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     await storageVersion.markCurrentVersionApplied();
   }
 
-  if (opts.eventLogGc === true) {
+  if (opts.eventLogGc !== false) {
     await runWithNoActiveReplicas({
       dbId: config.dbId,
       run: () => {
@@ -403,8 +403,8 @@ type WorkerOptions = {
    */
   verifySchema?: boolean;
   /**
-   * Runs local worker event-log garbage collection on startup. Disabled by default;
-   * set `eventLogGc: true` to enable. GC keeps the latest event rows and never removes
+   * Runs local worker event-log garbage collection on startup. Enabled by default;
+   * set `eventLogGc: false` to disable. GC keeps the latest event rows and never removes
    * pending events or local rows that have not been pushed to the remote.
    * Skipped while an existing tab holds an in-memory replica of this DB.
    */

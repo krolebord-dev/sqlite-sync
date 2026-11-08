@@ -53,9 +53,9 @@ export type LocalSyncedDbOptions<Database> = {
    */
   verifySchemaDriver?: () => SqliteDriver | Promise<SqliteDriver>;
   /**
-   * Runs event-log garbage collection on startup. Disabled by default. GC keeps the
-   * latest event rows and never removes pending events or local rows that have not
-   * been pushed to the remote.
+   * Runs event-log garbage collection on startup. Enabled by default; set `false` to
+   * disable. GC keeps the latest event rows and never removes pending events or local
+   * rows that have not been pushed to the remote.
    */
   eventLogGc?: boolean;
   /** Runs once when the instance is disposed, including by `requestReload`. */
@@ -138,7 +138,7 @@ export async function createLocalSyncedDb<Database>(
       storageGeneration.current = generateId();
     }
 
-    if (options.eventLogGc === true) {
+    if (options.eventLogGc !== false) {
       runWorkerEventLogGc({ db, dbConfig: localDbConfig, pushSyncId, logger });
     }
 

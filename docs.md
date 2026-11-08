@@ -365,7 +365,7 @@ The result has the same shape as the browser `SyncedDb`, so `createDbContext` fr
 | `encryptionKey` | `string` | Optional. Requires op-sqlite built with SQLCipher. |
 | `storageVersion` | `string` | Optional. See [Breaking Storage Changes](#breaking-storage-changes); a mismatch deletes the local database on startup. |
 | `verifySchema` | `boolean` | Optional dev-time check that replays the migrations on an in-memory database. |
-| `eventLogGc` | `boolean` | Optional event-log garbage collection on startup. |
+| `eventLogGc` | `boolean` | Default `true`. Event-log garbage collection on every startup. See [`startDbWorker`](#startdbworkeroptions). |
 | `syncOnAppStateChange` | `boolean` | Default `true`. Syncs when the app returns to the foreground and drops the connection when it goes to the background. |
 | `logger` | `Logger` | Optional logger. |
 
@@ -1371,14 +1371,21 @@ function startDbWorker(options: {
   storageVersion?: string;
   /** Dev-time drift check — throws and refuses to start on schema/migration mismatch. */
   verifySchema?: boolean;
-  /** Local worker event-log garbage collection. Disabled by default. */
+  /** Local worker event-log garbage collection. Enabled by default. */
   eventLogGc?: boolean;
 }): Promise<void>
 ```
 
 `storageVersion` is combined with the library's internal storage version. Bump it to wipe local DBs across an incompatible deploy; see [Breaking Storage Changes](#breaking-storage-changes).
 
-`eventLogGc` controls startup-only worker event-log garbage collection. It is disabled by default. GC keeps at least the latest 100 applied/deduped event rows, never deletes pending rows, and never deletes local rows that have not been pushed to the remote. Set `eventLogGc: true` to enable it. Cleanup is skipped while any open tab holds an in-memory copy of the database, including during worker handoff, so in practice it runs on a fresh startup.
+`eventLogGc` controls startup-only event-log garbage collection. It is enabled by default; set `eventLogGc: false` to disable it. GC keeps at least the latest 100 applied/deduped event rows, never deletes pending or failed rows, and never deletes local rows that have not been pushed to the remote. Each startup deletes at most 5,000 rows, in chunks of 1,000, and leaves the rest for later startups. A GC error is logged and does not fail startup. Freed space is reused by SQLite; the file is not vacuumed.
+
+On the web, cleanup is skipped while any open tab holds an in-memory copy of the database, including during worker handoff, so in practice it runs on a fresh startup. On React Native it runs every time `createSyncedDb` opens the database.
+
+Because client history is deleted, code that runs on the client must not depend on old events:
+
+- Event migrations (`migrateEvent` transformers) must be safe to run more than once. After GC, an event the client already applied can be pulled again (for example this client's own events from an earlier session) and is migrated again before last-write-wins discards it.
+- Data repairs in future migrations must work from the current tables and update log, not by replaying the client event log.
 
 #### `getWorkerConfig<Props>()`
 

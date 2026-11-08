@@ -28,7 +28,7 @@ export type SyncedDbOptions<Database> = {
    * development only, e.g. `verifySchema: __DEV__`.
    */
   verifySchema?: boolean;
-  /** Runs event-log garbage collection on startup. Disabled by default. */
+  /** Runs event-log garbage collection on startup. Enabled by default; set `false` to disable. */
   eventLogGc?: boolean;
   /**
    * Syncs when the app returns to the foreground and drops the remote connection

@@ -1,9 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SQLiteReactiveDb } from "../src/memory-db/sqlite-reactive-db";
 import { createSQLiteReactiveDb } from "../src/memory-db/wasm-reactive-db";
 import { applyMemoryDbSchema, type MemoryDbSchema, memoryDbConfig } from "../src/migrations/system-schema";
 import { createStoredValue } from "../src/sqlite-crdt/stored-value";
-import { runWorkerEventLogGc } from "../src/worker-db/event-log-gc";
+import {
+  EVENT_LOG_GC_MAX_DELETED_EVENTS,
+  runWorkerEventLogGc,
+  WORKER_EVENT_LOG_GC_MIN_RETAINED_EVENTS,
+} from "../src/worker-db/event-log-gc";
 import { acquireReplicaLock, runWithNoActiveReplicas } from "../src/worker-db/replica-lock";
 
 const noopLogger = () => {};
@@ -91,6 +95,49 @@ describe("worker event log GC", () => {
     expect(selectSyncIdsByStatus("pending")).toEqual([1]);
     expect(selectSyncIdsByStatus("failed")).toEqual([2]);
     expect(getEventStats()).toEqual({ count: 102, minSyncId: 1, maxSyncId: 152 });
+  });
+
+  it("deletes a bounded number of events per run and continues on the next run", () => {
+    const total = EVENT_LOG_GC_MAX_DELETED_EVENTS + 2500;
+    reactiveDb.db.execute({
+      sql: `
+        WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM ids WHERE n < ?)
+        INSERT INTO "persisted_crdt_events" (
+          "sync_id", "schema_version", "status", "type", "timestamp", "origin",
+          "source_node_id", "dataset", "item_id", "payload"
+        )
+        SELECT n, 0, 'applied', 'item-updated', 'timestamp-' || n, 'remote', '', '_todo', 'todo-' || n, '{}'
+        FROM ids
+      `,
+      parameters: [total],
+    });
+    const runGc = () =>
+      runWorkerEventLogGc({
+        db: reactiveDb.db,
+        dbConfig: memoryDbConfig,
+        pushSyncId: createStoredValue({ initialValue: -1 }),
+      });
+
+    expect(runGc()).toBe(EVENT_LOG_GC_MAX_DELETED_EVENTS);
+    expect(getEventStats()).toEqual({ count: 2500, minSyncId: EVENT_LOG_GC_MAX_DELETED_EVENTS + 1, maxSyncId: total });
+
+    expect(runGc()).toBe(2500 - WORKER_EVENT_LOG_GC_MIN_RETAINED_EVENTS);
+    expect(getEventStats()).toEqual({ count: 100, minSyncId: total - 99, maxSyncId: total });
+  });
+
+  it("logs a failure instead of throwing", () => {
+    const logger = vi.fn();
+    reactiveDb.db.execute(`DROP TABLE "persisted_crdt_events"`);
+
+    expect(
+      runWorkerEventLogGc({
+        db: reactiveDb.db,
+        dbConfig: memoryDbConfig,
+        pushSyncId: createStoredValue({ initialValue: -1 }),
+        logger,
+      }),
+    ).toBe(0);
+    expect(logger).toHaveBeenCalledWith("worker", expect.stringContaining("Event log GC failed"), "warning");
   });
 
   function insertEvents({
