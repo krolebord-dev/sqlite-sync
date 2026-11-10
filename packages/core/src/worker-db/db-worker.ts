@@ -269,6 +269,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     sync: () => {
       remoteSource.syncWithRemote().catch((error) => console.warn("Sync failed", error));
     },
+    // Tab events are pushed to the remote only once they are applied here.
+    catchUp: (options) => remoteSource.catchUp(options, () => crdtStorage.internal.processEnqueuedEvents()),
     requestReload: createReloadRequestHandler({
       resetState,
       broadcast: broadcastNotification,

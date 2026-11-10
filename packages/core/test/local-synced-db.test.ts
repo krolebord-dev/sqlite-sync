@@ -102,7 +102,7 @@ function createFakeServer() {
           events: page
             .filter((event) => event.source_node_id !== excludeNodeId)
             .map(({ sync_id: _syncId, source_node_id: _sourceNodeId, ...event }) => event),
-          hasMore: events.length > afterSyncId + page.length,
+          hasMore: events.length > Math.max(afterSyncId, 0) + page.length,
           nextSyncId: page.at(-1)?.sync_id ?? afterSyncId,
         };
       },
@@ -197,6 +197,30 @@ describe.each<HookMode>(["synchronous", "asynchronous"])("createLocalSyncedDb wi
 
     unsubscribe();
     await Promise.all([a.dispose(), b.dispose()]);
+  });
+
+  it("catches up with several pages of remote events before resolving", async () => {
+    const server = createFakeServer();
+    const a = await createDb(createFileSystem(mode), "a", { server });
+    a.db.executeTransaction((tx) => {
+      for (let i = 0; i < 250; i++) {
+        tx.execute({ sql: `INSERT INTO "todo" ("id", "title") VALUES (?, ?)`, parameters: [`${i}`, `Todo ${i}`] });
+      }
+    });
+    await expect(a.state.catchUp()).resolves.toEqual({ pulled: true, pushed: true, timedOut: false });
+    expect(server.events).toHaveLength(250);
+
+    const b = await createDb(createFileSystem(mode), "b", { server });
+    await expect(b.state.catchUp()).resolves.toEqual({ pulled: true, pushed: true, timedOut: false });
+    expect(todoTitles(b)).toHaveLength(250);
+
+    await b.state.goOffline();
+    await expect(b.state.catchUp()).resolves.toEqual({ pulled: false, pushed: false, timedOut: false });
+
+    await Promise.all([a.dispose(), b.dispose()]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(b.state.catchUp()).resolves.toEqual({ pulled: false, pushed: false, timedOut: false });
+    vi.restoreAllMocks();
   });
 
   it("reopens a persisted database without recreating its schema", async () => {

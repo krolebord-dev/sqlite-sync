@@ -1,5 +1,7 @@
 import type { ImportDataOptions, ImportDataResult, SyncedDbExport } from "../export-import";
 import type {
+  CatchUpOptions,
+  CatchUpResult,
   DeSyncDetectedReason,
   EventsPullRequest,
   EventsPushRequest,
@@ -81,6 +83,7 @@ export interface WorkerRpc {
   goOffline: () => void;
   dropConnection: () => void;
   sync: () => void;
+  catchUp: (options?: CatchUpOptions) => CatchUpResult | Promise<CatchUpResult>;
   requestReload: (options: { clean: boolean }) => Promise<void>;
 }
 

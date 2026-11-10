@@ -36,6 +36,24 @@ export type EventsPushResponse = {
   afterSyncId?: number;
 };
 
+export type CatchUpOptions = {
+  /** How long to wait before giving up. Defaults to 10 seconds. */
+  timeoutMs?: number;
+};
+
+export type CatchUpResult = {
+  /** The pull reached the end of what the remote had, and those events were processed locally. */
+  pulled: boolean;
+  /** The remote accepted every local event that was waiting to be pushed. */
+  pushed: boolean;
+  /** The timeout ran out first. The sync keeps going in the background. */
+  timedOut: boolean;
+};
+
+const CATCH_UP_TIMEOUT_MS = 10_000;
+
+type SyncProgress = Pick<CatchUpResult, "pulled" | "pushed">;
+
 const DISCONNECT_WATCHDOG_MS = 15_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RECONNECT_BASE_DELAY_MS = 1_000;
@@ -213,6 +231,7 @@ export const createCrdtSyncRemoteSource = ({
     let establishedAt: number | null = null;
     let lastActivityAt = Date.now();
     let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
+    let initialPull: Promise<boolean> | null = null;
 
     const untilClosed = <T>(operation: () => Promise<T>, timeoutMs?: number) =>
       new Promise<T>((resolve, reject) => {
@@ -290,7 +309,15 @@ export const createCrdtSyncRemoteSource = ({
         return;
       }
       source = created;
-      void sync();
+      const firstPull = pull();
+      initialPull = firstPull;
+      void firstPull.then(() => {
+        initialPull = null;
+      });
+      firstPull
+        .then(() => push.promise())
+        .then(() => push())
+        .catch((error) => console.warn("Initial sync failed", error));
     };
 
     const scheduleHeartbeat = () => {
@@ -317,15 +344,16 @@ export const createCrdtSyncRemoteSource = ({
       );
     };
 
-    type ActivePull = { promise: Promise<void>; requestedSyncId: number | null };
+    // The promise tells whether the pull reached the end of the remote's events.
+    type ActivePull = { promise: Promise<boolean>; requestedSyncId: number | null };
     let activePull: ActivePull | null = null;
     const pull = (request?: {
       remoteSyncId?: number;
       remoteStateHash?: string | null;
       includeSelf?: boolean;
-    }): Promise<void> => {
+    }): Promise<boolean> => {
       if (!source || signal.aborted) {
-        return Promise.resolve();
+        return Promise.resolve(false);
       }
       const activeSource = source;
 
@@ -337,7 +365,7 @@ export const createCrdtSyncRemoteSource = ({
         // remote (the check is a no-op unless we are exactly aligned: remoteSyncId
         // === pullSyncId.current).
         checkRemoteConsistency(remoteSyncId, request?.remoteStateHash ?? null);
-        return Promise.resolve();
+        return Promise.resolve(true);
       }
 
       if (activePull) {
@@ -347,17 +375,17 @@ export const createCrdtSyncRemoteSource = ({
         return activePull.promise;
       }
 
-      const nextPull: ActivePull = { promise: Promise.resolve(), requestedSyncId: null };
+      const nextPull: ActivePull = { promise: Promise.resolve(false), requestedSyncId: null };
       nextPull.promise = pullAllEvents(activeSource, {
         afterSyncId: pullSyncId.current,
         excludeNodeId: request?.includeSelf ? undefined : nodeId,
       })
         .catch((error) => {
-          if (signal.aborted) {
-            return;
+          if (!signal.aborted) {
+            console.error("Error pulling events. Going offline.", error);
+            fail("REMOTE_PULL_ERROR");
           }
-          console.error("Error pulling events. Going offline.", error);
-          fail("REMOTE_PULL_ERROR");
+          return false;
         })
         .finally(() => {
           if (activePull === nextPull) {
@@ -384,7 +412,7 @@ export const createCrdtSyncRemoteSource = ({
           }),
         );
         if (signal.aborted) {
-          return;
+          return false;
         }
         hasMore = response.hasMore;
         afterSyncId = response.nextSyncId;
@@ -407,7 +435,7 @@ export const createCrdtSyncRemoteSource = ({
           );
           await untilClosed(() => processed);
           if (signal.aborted) {
-            return;
+            return false;
           }
         }
         if (response.nextSyncId <= pullSyncId.current) {
@@ -417,6 +445,7 @@ export const createCrdtSyncRemoteSource = ({
           pullSyncId.current = response.nextSyncId;
         }
       }
+      return !hasMore;
     };
 
     const push = ensureSingletonExecution(async () => {
@@ -429,7 +458,7 @@ export const createCrdtSyncRemoteSource = ({
           limit: bufferSize,
         });
         if (eventsBatch.events.length === 0) {
-          break;
+          return true;
         }
 
         let response: EventsPushResponse;
@@ -452,18 +481,18 @@ export const createCrdtSyncRemoteSource = ({
             console.error("Error pushing events. Going offline.", error);
             fail("REMOTE_PUSH_ERROR");
           }
-          return;
+          return false;
         }
 
         if (signal.aborted) {
-          return;
+          return false;
         }
 
         if (!response.ok) {
           // The remote would reject the same batch again, so only an explicit sync retries it.
           console.error("Remote rejected pushed events. Going offline.");
           fail("REMOTE_PUSH_ERROR", { reconnect: false });
-          return;
+          return false;
         }
 
         pushSyncId.current = eventsBatch.nextSyncId;
@@ -482,9 +511,10 @@ export const createCrdtSyncRemoteSource = ({
           pullSyncId.current = response.afterSyncId;
         }
         if (!eventsBatch.hasMore) {
-          break;
+          return true;
         }
       }
+      return false;
     });
 
     // Waits out in-flight operations first: they may have started before the caller's request.
@@ -493,6 +523,20 @@ export const createCrdtSyncRemoteSource = ({
       await pull();
       await push.promise();
       await push();
+    };
+
+    // Records each step in `progress` as it finishes, so a caller that stops waiting sees how far it got.
+    // While the connection's first pull is running nothing has been pulled yet, so that pull is recent
+    // enough and another one would only cost a round trip.
+    const catchUp = async (progress: SyncProgress) => {
+      if (initialPull) {
+        progress.pulled = await initialPull;
+      } else {
+        await activePull?.promise;
+        progress.pulled = await pull();
+      }
+      await push.promise();
+      progress.pushed = await push();
     };
 
     const close = () => {
@@ -504,7 +548,7 @@ export const createCrdtSyncRemoteSource = ({
       }
     };
 
-    const connection = { ready: ready.promise, start, close, push, sync };
+    const connection = { ready: ready.promise, start, close, push, sync, catchUp };
     return connection;
   };
 
@@ -558,6 +602,37 @@ export const createCrdtSyncRemoteSource = ({
     } else if (wantsOnline && !remoteState.schemaVersionMismatched) {
       await goOnline();
     }
+  };
+
+  // Reconnects like syncWithRemote. Never rejects: a failed sync shows up in the result and in the state.
+  // `prepare` runs first, within the same timeout, for storage work that makes local events ready to push.
+  const catchUp = async (
+    { timeoutMs = CATCH_UP_TIMEOUT_MS }: CatchUpOptions = {},
+    prepare?: () => Promise<void>,
+  ): Promise<CatchUpResult> => {
+    const progress: SyncProgress = { pulled: false, pushed: false };
+    const run = async () => {
+      await prepare?.();
+      if (!current && wantsOnline && !remoteState.schemaVersionMismatched) {
+        void goOnline();
+      }
+      await current?.catchUp(progress);
+    };
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+    });
+    const finished = run().then(
+      () => false,
+      (error) => {
+        console.warn("Failed to catch up with the remote", error);
+        return false;
+      },
+    );
+    const timedOut = await Promise.race([finished, timeout]);
+    clearTimeout(timer);
+    return { ...progress, timedOut };
   };
 
   // De-sync detection: when we are exactly caught up to the remote's broadcast
@@ -635,6 +710,7 @@ export const createCrdtSyncRemoteSource = ({
     goOffline,
     dropConnection,
     syncWithRemote,
+    catchUp,
     getState,
     dispose,
     addEventListener: eventTarget.addEventListener,

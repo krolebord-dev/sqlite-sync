@@ -7,7 +7,11 @@ import { createMemoryDb } from "./memory-db/memory-db";
 import { createSQLiteReactiveDb } from "./memory-db/wasm-reactive-db";
 import type { SyncDbMigrator } from "./migrations/migrator";
 import type { SyncDbSchema } from "./sqlite-crdt/crdt-schema";
-import { createCrdtSyncRemoteSource } from "./sqlite-crdt/crdt-sync-remote-source";
+import {
+  type CatchUpOptions,
+  type CatchUpResult,
+  createCrdtSyncRemoteSource,
+} from "./sqlite-crdt/crdt-sync-remote-source";
 import { createStoredValue } from "./sqlite-crdt/stored-value";
 import { createSyncedDbDatabase } from "./synced-db-database";
 import { acquireLock, generateId } from "./utils";
@@ -187,6 +191,44 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
       workerClient.sync().catch((error) => console.warn("Failed to start sync", error));
     };
 
+    // The tab talks to the worker and the worker to the remote, so new remote events reach the tab
+    // only after the tab hands its writes to the worker, the worker syncs, and the tab pulls again.
+    const catchUp = async ({ timeoutMs = 10_000 }: CatchUpOptions = {}): Promise<CatchUpResult> => {
+      const deadline = Date.now() + timeoutMs;
+      const timedOut: CatchUpResult = { pulled: false, pushed: false, timedOut: true };
+      // The worker may take up to 30 seconds to answer, or never answer while one is being elected.
+      const step = async (run: (remaining: number) => Promise<CatchUpResult>) => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          return timedOut;
+        }
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<CatchUpResult>((resolve) => {
+          timer = setTimeout(() => resolve(timedOut), remaining);
+        });
+        try {
+          return await Promise.race([run(remaining), timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
+      const toWorker = await step((remaining) => tabRemoteSource.catchUp({ timeoutMs: remaining }));
+      const remote = await step((remaining) =>
+        workerClient.catchUp({ timeoutMs: Math.min(remaining, 25_000) }).catch((error) => {
+          console.warn("Failed to catch up with the remote", error);
+          return { pulled: false, pushed: false, timedOut: false };
+        }),
+      );
+      const fromWorker = await step((remaining) => tabRemoteSource.catchUp({ timeoutMs: remaining }));
+
+      return {
+        pulled: remote.pulled && fromWorker.pulled,
+        pushed: toWorker.pushed && remote.pushed,
+        timedOut: toWorker.timedOut || remote.timedOut || fromWorker.timedOut,
+      };
+    };
+
     // Mobile browsers suspend background pages, and the socket can reconnect or die unnoticed meanwhile.
     const syncWhenVisible = () => {
       if (globalThis.document?.visibilityState === "visible") {
@@ -226,6 +268,12 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
         goOnline: workerClient.goOnline.bind(workerClient),
         goOffline: workerClient.goOffline.bind(workerClient),
         sync,
+        /**
+         * Pulls what the remote has now and pushes pending local events, and resolves once that
+         * is done or `timeoutMs` (10 seconds by default) runs out. Best effort: it never rejects,
+         * does not wait for other clients to stop writing, and the result tells how far it got.
+         */
+        catchUp,
       },
       /**
        * Ask the elected worker to broadcast a page reload to all tabs for this dbId.

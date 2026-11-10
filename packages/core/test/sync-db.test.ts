@@ -148,7 +148,14 @@ describe("SyncedDb database facade", () => {
 });
 
 describe("SyncedDb state", () => {
-  it("returns immediately and delivers events pulled by the worker to the tab", async () => {
+  type TodoDb = SyncedDb<{ todo: { id: string; title: string } }>;
+
+  // A worker whose remote has one event, which it pulls on `sync` or `catchUp`.
+  const withFakeWorker = async (
+    run: (syncedDb: TodoDb, worker: { pushedTabEvents: number }) => Promise<void>,
+    opts: { answerCatchUp?: boolean } = {},
+  ) => {
+    const calls = { pushedTabEvents: 0 };
     vi.stubGlobal("navigator", {
       locks: { request: (_name: string, _options: unknown, callback: () => Promise<void>) => callback() },
     });
@@ -212,6 +219,17 @@ describe("SyncedDb state", () => {
             });
             respond(request.requestId, undefined);
             break;
+          case "catchUp":
+            if (opts.answerCatchUp === false) {
+              break;
+            }
+            serverSyncDone = true;
+            respond(request.requestId, { pulled: true, pushed: calls.pushedTabEvents > 0, timedOut: false });
+            break;
+          case "pushTabEvents":
+            calls.pushedTabEvents += request.args[0].events.length;
+            respond(request.requestId, { ok: true });
+            break;
           default:
             throw new Error(`Unexpected request ${request.method}`);
         }
@@ -228,11 +246,7 @@ describe("SyncedDb state", () => {
         worker,
         syncDbSchema: schema,
       });
-      expect(syncedDb.state.sync()).toBeUndefined();
-      expect(syncedDb.db.execute("SELECT * FROM todo").rows).toEqual([]);
-      await vi.waitFor(() =>
-        expect(syncedDb?.db.execute("SELECT title FROM todo").rows).toEqual([{ title: "From server" }]),
-      );
+      await run(syncedDb as unknown as TodoDb, calls);
     } finally {
       await syncedDb?.dispose();
       initialDb.dispose();
@@ -240,6 +254,44 @@ describe("SyncedDb state", () => {
       channels.responses.close();
       vi.unstubAllGlobals();
     }
+  };
+
+  it("returns immediately and delivers events pulled by the worker to the tab", async () => {
+    await withFakeWorker(async (syncedDb) => {
+      expect(syncedDb.state.sync()).toBeUndefined();
+      expect(syncedDb.db.execute("SELECT * FROM todo").rows).toEqual([]);
+      await vi.waitFor(() =>
+        expect(syncedDb.db.execute("SELECT title FROM todo").rows).toEqual([{ title: "From server" }]),
+      );
+    });
+  });
+
+  it("catches up by handing tab writes to the worker, syncing it, and pulling the result", async () => {
+    await withFakeWorker(async (syncedDb, worker) => {
+      syncedDb.db.execute(`INSERT INTO todo (id, title) VALUES ('2', 'From tab')`);
+      // The fake worker reports `pushed` only when the tab's write reached it before it synced.
+      await expect(syncedDb.state.catchUp()).resolves.toEqual({ pulled: true, pushed: true, timedOut: false });
+      expect(worker.pushedTabEvents).toBe(1);
+      expect(syncedDb.db.execute("SELECT title FROM todo ORDER BY id").rows).toEqual([
+        { title: "From server" },
+        { title: "From tab" },
+      ]);
+    });
+  });
+
+  it("stops waiting for a worker that does not answer once the timeout runs out", async () => {
+    await withFakeWorker(
+      async (syncedDb) => {
+        const startedAt = Date.now();
+        await expect(syncedDb.state.catchUp({ timeoutMs: 200 })).resolves.toEqual({
+          pulled: false,
+          pushed: false,
+          timedOut: true,
+        });
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
+      },
+      { answerCatchUp: false },
+    );
   });
 });
 

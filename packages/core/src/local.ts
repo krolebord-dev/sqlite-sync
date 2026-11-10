@@ -4,6 +4,8 @@ export {
   type LocalSyncedDbOptions,
 } from "./local/local-synced-db";
 export type {
+  CatchUpOptions,
+  CatchUpResult,
   CreateRemoteSourceFactory,
   EventsPullRequest,
   EventsPushRequest,

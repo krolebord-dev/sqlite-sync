@@ -408,6 +408,196 @@ describe("createCrdtSyncRemoteSource", () => {
     });
   });
 
+  describe("catchUp", () => {
+    const caughtUp = { pulled: true, pushed: true, timedOut: false };
+    const notSynced = { pulled: false, pushed: false, timedOut: false };
+    const page = (nextSyncId: number, hasMore: boolean): EventsPullResponse => ({
+      events: [remoteEvent],
+      hasMore,
+      nextSyncId,
+    });
+
+    it("resolves after every page of the first pull is processed, without pulling again", async () => {
+      const processing = createDeferredPromise<void>();
+      const storage = createStorageMock();
+      const enqueue = vi
+        .spyOn(storage, "enqueueRemoteEvents")
+        .mockReturnValue({ beforeSyncId: 0, afterSyncId: 0, processed: processing.promise });
+      const pages = [page(1, true), page(2, false)];
+      const source = createSource({
+        pullEvents: async () => pages.shift() ?? { events: [], hasMore: false, nextSyncId: 2 },
+      });
+      const pullSyncId = createStoredValue({ initialValue: 0 });
+      const remoteSource = setup({ sources: [source], storage, pullSyncId });
+      void remoteSource.goOnline();
+
+      let result: unknown;
+      const catchingUp = remoteSource.catchUp().then((value) => {
+        result = value;
+      });
+      await vi.waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      // The remote is online as soon as the first page arrives, before any of it is applied.
+      expect(remoteSource.getState().remoteState).toBe("online");
+      expect(result).toBeUndefined();
+
+      processing.resolve();
+      await catchingUp;
+      expect(result).toEqual(caughtUp);
+      expect(pullSyncId.current).toBe(2);
+      expect(source.pullEvents).toHaveBeenCalledTimes(2);
+    });
+
+    it("pulls again once the first sync has finished", async () => {
+      const source = createSource({});
+      const remoteSource = setup({ sources: [source] });
+      await remoteSource.goOnline();
+      await remoteSource.syncWithRemote();
+      const pulls = source.pullEvents.mock.calls.length;
+
+      await expect(remoteSource.catchUp()).resolves.toEqual(caughtUp);
+      expect(source.pullEvents).toHaveBeenCalledTimes(pulls + 1);
+    });
+
+    it("pushes events written while the first sync was running", async () => {
+      const firstPull = createDeferredPromise<EventsPullResponse>();
+      const source = createSource({ pullEvents: () => firstPull.promise });
+      let hasEvent = false;
+      const storage = {
+        ...createStorageMock(),
+        getEventsBatch: ({ afterSyncId }: { afterSyncId: number }) =>
+          hasEvent && afterSyncId < 1
+            ? { events: [remoteEvent], hasMore: false, nextSyncId: 1 }
+            : { events: [], hasMore: false, nextSyncId: afterSyncId },
+      } as unknown as CrdtStorage;
+      const pushSyncId = createStoredValue({ initialValue: 0 });
+      const remoteSource = setup({ sources: [source], storage, pushSyncId });
+      void remoteSource.goOnline();
+
+      const catchingUp = remoteSource.catchUp();
+      hasEvent = true;
+      firstPull.resolve({ events: [], hasMore: false, nextSyncId: 0 });
+
+      await expect(catchingUp).resolves.toEqual(caughtUp);
+      expect(source.pushEvents).toHaveBeenCalledTimes(1);
+      expect(pushSyncId.current).toBe(1);
+    });
+
+    it("reports a failed pull without rejecting", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const source = createSource({ pullEvents: () => Promise.reject(new Error("boom")) });
+      const remoteSource = setup({ sources: [source] });
+      void remoteSource.goOnline();
+
+      await expect(remoteSource.catchUp()).resolves.toEqual({ pulled: false, pushed: false, timedOut: false });
+    });
+
+    it("reports a pull that completed when the remote rejects the push", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const source = createSource({ pushEvents: async () => ({ ok: false }) });
+      const remoteSource = setup({ sources: [source], storage: createStorageWithEventToPush() });
+      void remoteSource.goOnline();
+
+      await expect(remoteSource.catchUp()).resolves.toEqual({ pulled: true, pushed: false, timedOut: false });
+    });
+
+    it("gives up after the timeout and lets the sync finish in the background", async () => {
+      vi.useFakeTimers();
+      const firstPull = createDeferredPromise<EventsPullResponse>();
+      const source = createSource({ pullEvents: () => firstPull.promise });
+      const pullSyncId = createStoredValue({ initialValue: 0 });
+      const remoteSource = setup({ sources: [source], pullSyncId });
+      void remoteSource.goOnline();
+
+      const catchingUp = remoteSource.catchUp({ timeoutMs: 2_000 });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(catchingUp).resolves.toEqual({ pulled: false, pushed: false, timedOut: true });
+
+      firstPull.resolve({ events: [], hasMore: false, nextSyncId: 3 });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pullSyncId.current).toBe(3);
+    });
+
+    it("pulls again when the first pull is done and only the first push is still running", async () => {
+      const firstPush = createDeferredPromise<EventsPushResponse>();
+      const source = createSource({ pushEvents: () => firstPush.promise });
+      const remoteSource = setup({ sources: [source], storage: createStorageWithEventToPush() });
+      await remoteSource.goOnline();
+      await vi.waitFor(() => expect(source.pushEvents).toHaveBeenCalledTimes(1));
+      expect(source.pullEvents).toHaveBeenCalledTimes(1);
+
+      const catchingUp = remoteSource.catchUp();
+      await vi.waitFor(() => expect(source.pullEvents).toHaveBeenCalledTimes(2));
+      firstPush.resolve({ ok: true });
+      await expect(catchingUp).resolves.toEqual(caughtUp);
+    });
+
+    it("reports a finished pull when the timeout runs out during the push", async () => {
+      vi.useFakeTimers();
+      const source = createSource({ pushEvents: () => new Promise<never>(() => {}) });
+      const remoteSource = setup({ sources: [source], storage: createStorageWithEventToPush() });
+      void remoteSource.goOnline();
+
+      const catchingUp = remoteSource.catchUp({ timeoutMs: 2_000 });
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(catchingUp).resolves.toEqual({ pulled: true, pushed: false, timedOut: true });
+    });
+
+    it("reports a failure in the preparation step without rejecting or connecting", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const source = createSource({});
+      const remoteSource = setup({ sources: [source] });
+      await remoteSource.goOnline();
+      await remoteSource.syncWithRemote();
+      const pulls = source.pullEvents.mock.calls.length;
+
+      await expect(remoteSource.catchUp({}, () => Promise.reject(new Error("closed")))).resolves.toEqual(notSynced);
+      expect(source.pullEvents).toHaveBeenCalledTimes(pulls);
+    });
+
+    it("leaves no timer running once it resolves", async () => {
+      vi.useFakeTimers();
+      const remoteSource = setup({ sources: [createSource({})] });
+      await remoteSource.goOnline();
+      await remoteSource.catchUp();
+      await remoteSource.dispose();
+      // Disposing clears its disconnect watchdog a few microtasks later.
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("reconnects after a dropped connection", async () => {
+      const first = createSource({});
+      const second = createSource({});
+      const remoteSource = setup({ sources: [first, second] });
+      await remoteSource.goOnline();
+      remoteSource.dropConnection("NETWORK_OFFLINE");
+
+      await expect(remoteSource.catchUp()).resolves.toEqual(caughtUp);
+      expect(second.pullEvents).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing after goOffline", async () => {
+      const remoteFactory = vi.fn<CreateRemoteSourceFactory>(() => createSource({}));
+      const remoteSource = setup({ remoteFactory });
+      await remoteSource.goOnline();
+      await remoteSource.goOffline("DISCONNECTED");
+
+      await expect(remoteSource.catchUp()).resolves.toEqual(notSynced);
+      expect(remoteFactory).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops waiting when the connection is closed", async () => {
+      const source = createSource({ pullEvents: hangingPull });
+      const remoteSource = setup({ sources: [source] });
+      void remoteSource.goOnline();
+
+      const catchingUp = remoteSource.catchUp();
+      await remoteSource.goOffline("DISCONNECTED");
+      await expect(catchingUp).resolves.toEqual(notSynced);
+    });
+  });
+
   describe("reconnecting", () => {
     it("shows the remote as connecting until the first request succeeds", async () => {
       const pulled = createDeferredPromise<EventsPullResponse>();

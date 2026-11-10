@@ -106,6 +106,8 @@ export {
 } from "./sqlite-crdt/crdt-storage-mutator";
 export { createCrdtSyncProducer } from "./sqlite-crdt/crdt-sync-producer";
 export {
+  type CatchUpOptions,
+  type CatchUpResult,
   type CrdtSyncRemoteSource,
   createCrdtSyncRemoteSource,
   type EventsPullRequest,

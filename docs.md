@@ -371,6 +371,8 @@ The result has the same shape as the browser `SyncedDb`, so `createDbContext` fr
 
 `state.dropConnection()` is also available, for example to react to a network library reporting the device offline. Call `state.sync()` once the network is back.
 
+A background job that needs recent data before it reads the database can call [`state.catchUp()`](#controlling-sync), which reconnects if the connection was dropped and waits for the sync, up to a timeout. The connection then stays open until `state.dropConnection()` or `dispose()`.
+
 ### Reload on React Native
 
 There is no page to reload, so `requestReload({ clean })` disposes the instance (and with `clean: true` deletes the database file), then emits `reload-requested`. Create a new instance when that event fires:
@@ -862,6 +864,22 @@ function SyncToggle() {
 
 `state.sync()` pulls new remote events and pushes pending local ones in the background, and returns immediately. New data reaches the tab like any other remote change, and failures show up as `remoteState` leaving `online`. It runs automatically whenever the page becomes visible or the browser comes back online. While `connecting`, or `offline` after a network loss or a rejected push, it reconnects right away. After `goOffline()` or a schema version mismatch it does nothing; call `goOnline()` instead.
 
+`state.catchUp()` does the same work and waits for it, for code that needs recent remote data before it continues, such as a background job that reads the database and exits:
+
+```ts
+const { pulled, pushed, timedOut } = await db.state.catchUp({ timeoutMs: 5_000 });
+```
+
+It is best effort and never rejects. The result tells how far it got, also when it timed out:
+
+| Field | Meaning |
+|-------|---------|
+| `pulled` | The pull reached the end of the events the remote had, and they were processed locally. |
+| `pushed` | The remote accepted every local event that was waiting. |
+| `timedOut` | `timeoutMs` (10 seconds by default) ran out first. The sync keeps going in the background. |
+
+`pulled` is not a promise that the database is in sync: other clients can write right after the pull ends, and `catchUp()` does not wait for them to stop. A very large backlog, or other clients writing faster than this one pulls, ends in a timeout with `pulled: false` and part of the events applied; the next sync continues from there. When the remote cannot be reached, or after `goOffline()` or a schema version mismatch, both `pulled` and `pushed` are `false` and `remoteState` tells why. `remoteState` turning `online` is not a substitute: it only means the remote answered one request, before the events in that answer are applied.
+
 ### Reload and Recovery
 
 `requestReload({ clean })` asks the elected worker to reload every tab for the same `dbId`. With `clean: true`, the persisted worker DB is also wiped on the next startup. React Native works differently, see [Reload on React Native](#reload-on-react-native).
@@ -1298,6 +1316,7 @@ function createSyncedDb<Database, Props = undefined>(
 | `state.goOnline()` | `() => Promise<void>` | Connect to the remote. Resolves once the remote answers the first request, the attempt fails, or it is cancelled |
 | `state.goOffline()` | `() => Promise<void>` | Disconnect from remote server. Goes offline immediately and cancels a connection attempt in progress or a scheduled retry |
 | `state.sync()` | `() => void` | Pull and push in the background without waiting. See [Controlling Sync](#controlling-sync) |
+| `state.catchUp(options?)` | `(options?: { timeoutMs?: number }) => Promise<CatchUpResult>` | Pull and push, and wait until that is done or the timeout runs out. Best effort; never rejects. See [Controlling Sync](#controlling-sync) |
 | `subscribe(type, handler)` | `(type, handler) => { unsubscribe: () => void }` | Subscribe to worker notifications such as `de-sync-detected` and `remote-schema-version-mismatch` |
 | `requestReload(options)` | `(options: { clean: boolean }) => Promise<void>` | Reload all tabs for this `dbId`; `clean: true` also wipes the persisted worker DB on next startup |
 | `exportData(options?)` | `(options?) => SyncedDbExport` | Export the current active rows |

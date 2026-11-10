@@ -249,6 +249,8 @@ export async function createLocalSyncedDb<Database>(
         goOffline: () => remoteSource.goOffline("DISCONNECTED"),
         dropConnection: () => remoteSource.dropConnection("NETWORK_OFFLINE"),
         sync,
+        // With asynchronous driver hooks, a write that just returned is not yet ready to push.
+        catchUp: (options) => remoteSource.catchUp(options, () => crdtStorage.internal.processEnqueuedEvents()),
       },
       /**
        * Disposes this instance and notifies `reload-requested` subscribers, which are
