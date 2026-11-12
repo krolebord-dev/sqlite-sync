@@ -6,7 +6,7 @@ AI agent tools for [@sqlite-sync](https://github.com/krolebord-dev/sqlite-sync) 
 
 - `createSchemaDoc` builds a markdown schema doc from the declared sync schema. Structure comes from the `t.table()` builders; semantics come from `.describe()` and app-provided context. No database access needed.
 - `createAiDbAccess` is the server-side access object that sits next to storage. Its methods are also the RPC contract for cross-Durable-Object setups.
-- `createDbTools` builds an AI SDK v6 `ToolSet` (`getDbSchema`, `queryDb`, and optional `mutateDb`) from an `AiDbAccess` or a stub that proxies to one.
+- `createDbTools` builds an AI SDK `ToolSet` (v6 or v7) (`getDbSchema`, `queryDb`, and optional `mutateDb`) from an `AiDbAccess` or a stub that proxies to one.
 - `registerDbTools` (from `@sqlite-sync/ai/mcp`) registers the same tools on an MCP server, with an optional multi-database mode.
 
 Peer dependencies: `ai` ^6 and `zod` ^4.1.8. Install `@modelcontextprotocol/sdk` ^1.29 to use `@sqlite-sync/ai/mcp`.

@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/provider": "^3.0.12",
     "@ai-sdk/react": "^3.0.210",
     "@cloudflare/ai-chat": "^0.9.0",
     "@cloudflare/think": "^0.11.0",

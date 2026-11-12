@@ -31,3 +31,10 @@ onlyBuiltDependencies:
   - react-grab
   - sharp
   - workerd
+
+# openrouter v2 imports @ai-sdk/provider types without declaring it, so it would pick up the
+# hoisted v4 brought in by the ai-v7 test alias in @sqlite-sync/ai.
+packageExtensions:
+  '@openrouter/ai-sdk-provider@2':
+    dependencies:
+      '@ai-sdk/provider': ^3.0.0

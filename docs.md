@@ -1599,7 +1599,7 @@ function createAiDbAccess(options: {
 
 #### `createDbTools(options)`
 
-Builds an AI SDK v6 `ToolSet` backed by an `AiDbAccess` (or a stub proxying to one). `access` is a factory because acquiring the database may itself be async per call.
+Builds an AI SDK `ToolSet` (v6 or v7) backed by an `AiDbAccess` (or a stub proxying to one). `access` is a factory because acquiring the database may itself be async per call.
 
 ```ts
 function createDbTools(options: {
