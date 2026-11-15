@@ -3,6 +3,7 @@ import type { SystemDbConfig } from "../migrations/system-schema";
 import type { InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import type { SqliteDriverValue } from "../sqlite-driver";
 import { quoteId } from "../utils";
+import type { SnapshotItem } from "./crdt-snapshot";
 import {
   type CrdtEventType,
   type CrdtUpdateLogItem,
@@ -19,16 +20,20 @@ export type PendingCrdtEvent = {
   payload: string;
 };
 
-export const createSQLiteCrdtApplyFunction = ({
-  db,
-  dbConfig,
-  getStateHash,
-}: {
+type SQLiteCrdtApplyOpts = {
   db: InternalSQLiteWrapper<any>;
   dbConfig: SystemDbConfig;
   getStateHash?: () => StateHashAccumulator | null;
-}) => {
-  const applyCrdtEvent = createCrdtApplyFunction({
+};
+
+export const createSQLiteCrdtApplyFunction = (opts: SQLiteCrdtApplyOpts) =>
+  createCrdtApplyFunction(createSQLiteCrdtApplyOpts(opts));
+
+export const createSQLiteCrdtMergeFunction = (opts: SQLiteCrdtApplyOpts) =>
+  createCrdtMergeFunction(createSQLiteCrdtApplyOpts(opts));
+
+function createSQLiteCrdtApplyOpts({ db, dbConfig, getStateHash }: SQLiteCrdtApplyOpts): CreateCrdtApplyOpts {
+  return {
     getStateHash,
     getCrdtUpdateLog(opts) {
       const [metaRow] = db.executePrepared(
@@ -111,10 +116,8 @@ export const createSQLiteCrdtApplyFunction = ({
         meta: { loggerLevel: "system" },
       });
     },
-  });
-
-  return applyCrdtEvent;
-};
+  };
+}
 
 type CreateCrdtApplyOpts = {
   getStateHash?: () => StateHashAccumulator | null;
@@ -241,5 +244,67 @@ export function createCrdtApplyFunction({
     }
 
     throw new Error(`Item ${event.item_id} in dataset ${event.dataset} not found`);
+  };
+}
+
+/**
+ * Merges an item from a remote snapshot and returns the highest HLC in its update log. Every
+ * cell is taken or kept by the rule events are applied with, so the result is what replaying the
+ * remote's events for the item would have produced, whatever the local item looked like before.
+ */
+export function createCrdtMergeFunction({
+  getStateHash,
+  getCrdtUpdateLog,
+  insertItem,
+  insertCrdtUpdateLog,
+  updateItem,
+  updateCrdtUpdateLog,
+}: CreateCrdtApplyOpts) {
+  return ({ dataset, row: rowJson, updateLog }: SnapshotItem): string => {
+    const row = JSON.parse(rowJson) as Record<string, unknown>;
+    const itemId = row.id as string;
+    const remoteMeta = JSON.parse(updateLog) as CrdtUpdateLogPayload;
+    const latestHlc = Object.values(remoteMeta).reduce((latest, hlc) => (hlc > latest ? hlc : latest), "");
+
+    const meta = getCrdtUpdateLog({ itemId, dataset });
+    if (!meta) {
+      insertItem({ dataset, payload: row });
+      insertCrdtUpdateLog({ dataset, itemId, payload: updateLog });
+      getStateHash?.()?.addItem(dataset, itemId, remoteMeta);
+      return latestHlc;
+    }
+
+    const updatePayload = {} as Record<string, unknown>;
+    const replacedCells: [column: string, previousHlc: string | undefined][] = [];
+    const previousCreateHlc = meta.id;
+
+    for (const [key, remoteHlc] of Object.entries(remoteMeta)) {
+      if (key === "id" || !(key in row)) {
+        continue;
+      }
+
+      const localHlc = meta[key];
+      if (!localHlc || remoteHlc > localHlc) {
+        updatePayload[key] = row[key];
+        replacedCells.push([key, localHlc]);
+        meta[key] = remoteHlc;
+      }
+    }
+
+    const isLatestCreate = !!remoteMeta.id && (!previousCreateHlc || remoteMeta.id > previousCreateHlc);
+    if (isLatestCreate) {
+      meta.id = remoteMeta.id;
+    }
+
+    if (replacedCells.length === 0 && !isLatestCreate) {
+      return latestHlc;
+    }
+
+    if (replacedCells.length > 0) {
+      updateItem({ dataset, itemId, payload: updatePayload });
+    }
+    updateCrdtUpdateLog({ dataset, itemId, payload: JSON.stringify(meta) });
+    getStateHash?.()?.updateItem(dataset, itemId, meta, previousCreateHlc, replacedCells);
+    return latestHlc;
   };
 }

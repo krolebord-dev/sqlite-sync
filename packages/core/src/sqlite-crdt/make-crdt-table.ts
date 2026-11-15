@@ -61,7 +61,7 @@ export function makeCrdtTable({
 }
 
 // Workerd caps expr depth at 100; a left-deep `||` chain fails around 34 columns.
-function concatSql(parts: readonly string[]): string {
+export function concatSql(parts: readonly string[]): string {
   if (parts.length === 0) {
     return "''";
   }
@@ -72,7 +72,7 @@ function concatSql(parts: readonly string[]): string {
   return `(${concatSql(parts.slice(0, mid))})||(${concatSql(parts.slice(mid))})`;
 }
 
-function sqlStringLiteral(value: string) {
+export function sqlStringLiteral(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 

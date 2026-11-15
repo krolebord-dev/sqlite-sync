@@ -23,7 +23,12 @@ import {
 } from "../sqlite-crdt/crdt-sync-remote-source";
 import { makeCrdtTable, registerCrdtIntentDrainer } from "../sqlite-crdt/make-crdt-table";
 import type { SqliteDriver } from "../sqlite-driver";
-import { createKvStateHashStore, createKvStoreTableQuery, createSQLiteKvStore } from "../sqlite-kv-store";
+import {
+  createKvSnapshotProgressStore,
+  createKvStateHashStore,
+  createKvStoreTableQuery,
+  createSQLiteKvStore,
+} from "../sqlite-kv-store";
 import type { SyncedDb } from "../sync-db";
 import { createSyncedDbDatabase } from "../synced-db-database";
 import { createTypedEventTarget, generateId } from "../utils";
@@ -58,6 +63,11 @@ export type LocalSyncedDbOptions<Database> = {
    * rows that have not been pushed to the remote.
    */
   eventLogGc?: boolean;
+  /**
+   * Lets a database that has not synced yet start from a snapshot of the remote's current state
+   * instead of replaying its event history. Enabled by default; set `false` to always replay events.
+   */
+  snapshotBootstrap?: boolean;
   /** Runs once when the instance is disposed, including by `requestReload`. */
   onDispose?: () => void;
 };
@@ -185,6 +195,8 @@ export async function createLocalSyncedDb<Database>(
       storage: crdtStorage,
       migrator,
       remoteFactory: options.createRemoteSource,
+      snapshotBootstrap: options.snapshotBootstrap,
+      snapshotProgress: createKvSnapshotProgressStore(kvStore),
     });
 
     let stateSnapshot = remoteSource.getState();

@@ -158,6 +158,7 @@ export async function createSyncedDb<Database, Props = undefined>(options: Synce
 
         return {
           pullEvents: (request) => workerClient.pullEvents(request),
+          pullSnapshot: (request) => workerClient.pullSnapshot(request),
           pushEvents: (request) => workerClient.pushTabEvents(request),
           disconnect: () => {
             subscription.unsubscribe();

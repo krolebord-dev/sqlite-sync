@@ -2,9 +2,10 @@ import type { SyncDbMigrator } from "../migrations/migrator";
 import { createDeferredPromise, createTypedEventTarget, ensureSingletonExecution, tryCatchAsync } from "../utils";
 import type { EventsPullResponse, WorkerState } from "../worker-db/worker-common";
 import type { PendingCrdtEvent } from "./apply-crdt-event";
+import type { SnapshotProgress, SnapshotPullMode, SnapshotPullRequest, SnapshotPullResponse } from "./crdt-snapshot";
 import type { CrdtStorage } from "./crdt-storage";
 import { parseStateHash } from "./state-hash";
-import type { StoredValue } from "./stored-value";
+import { createStoredValue, type StoredValue } from "./stored-value";
 
 type CrdtSyncRemoteSourceConfig = {
   bufferSize: number;
@@ -14,11 +15,17 @@ type CrdtSyncRemoteSourceConfig = {
   pushSyncId: StoredValue<number>;
   nodeId: string;
   remoteFactory?: CreateRemoteSourceFactory;
+  /** Set to `false` to always replay events, even when the remote offers a snapshot. */
+  snapshotBootstrap?: boolean;
+  /** Where an unfinished snapshot is remembered, so a new connection continues it. In memory by default. */
+  snapshotProgress?: StoredValue<SnapshotProgress | null>;
 };
 
 export type EventsPullRequest = {
   afterSyncId: number;
   excludeNodeId?: string;
+  /** Set when the requester can pull a snapshot instead, see `RemoteSource.pullSnapshot`. */
+  acceptSnapshot?: boolean;
 };
 
 export const PUSH_BATCH_SIZE = 75;
@@ -63,6 +70,8 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 const RECONNECT_MIN_UPTIME_MS = 5_000;
 // Pings a remote that has sent nothing for this long, to catch connections that died without closing.
 const HEARTBEAT_IDLE_MS = 25_000;
+// A remote can ask again while it is still finishing the snapshot it merged itself.
+const MAX_SNAPSHOTS_PER_PULL = 3;
 
 export type CrdtSyncRemoteSource = ReturnType<typeof createCrdtSyncRemoteSource>;
 
@@ -78,7 +87,8 @@ export type EventsAvailable = {
  * reject once it closes. The library times requests out and shows the remote as online after the first one succeeds.
  * With `ping`, the library also checks idle connections and replaces one whose ping fails or times out. It calls `ping`
  * only on an online connection, one at a time, and never after the connection closes; a ping does not need to settle
- * once the source has closed.
+ * once the source has closed. With `pullSnapshot`, pulls set `acceptSnapshot`, and the remote may answer one with
+ * `snapshot` instead of events; the library then pulls the snapshot page by page before it pulls events again.
  */
 export type CreateRemoteSourceFactory = (opts: {
   onEventsAvailable: (event: EventsAvailable) => void;
@@ -88,6 +98,7 @@ export type CreateRemoteSourceFactory = (opts: {
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
+  pullSnapshot?: (request: SnapshotPullRequest) => Promise<SnapshotPullResponse>;
   ping?: () => Promise<void>;
   disconnect?: () => void | Promise<void>;
 };
@@ -139,6 +150,8 @@ export const createCrdtSyncRemoteSource = ({
   pushSyncId,
   nodeId,
   remoteFactory,
+  snapshotBootstrap = true,
+  snapshotProgress = createStoredValue<SnapshotProgress | null>({ initialValue: null }),
 }: CrdtSyncRemoteSourceConfig) => {
   const eventTarget = createTypedEventTarget<{
     "state-changed": RemoteSourceState["type"];
@@ -404,15 +417,41 @@ export const createCrdtSyncRemoteSource = ({
     const pullAllEvents = async (activeSource: RemoteSource, opts: EventsPullRequest) => {
       let hasMore = true;
       let afterSyncId = opts.afterSyncId;
+      let pullSnapshotPage = snapshotBootstrap ? activeSource.pullSnapshot?.bind(activeSource) : undefined;
+      let snapshotsLeft = MAX_SNAPSHOTS_PER_PULL;
       while (hasMore) {
         const response = await request(() =>
           activeSource.pullEvents({
             ...opts,
             afterSyncId,
+            ...(pullSnapshotPage && { acceptSnapshot: true }),
           }),
         );
         if (signal.aborted) {
           return false;
+        }
+        if (response.snapshot && pullSnapshotPage) {
+          if (snapshotsLeft-- === 0) {
+            throw new Error("The remote keeps asking for a snapshot");
+          }
+          const merged = await mergeSnapshot(pullSnapshotPage, response.snapshot);
+          if (signal.aborted) {
+            return false;
+          }
+          if (!merged) {
+            pullSnapshotPage = undefined;
+          }
+          afterSyncId = Math.max(afterSyncId, pullSyncId.current);
+          continue;
+        }
+        // A snapshot was given up part way, so its merged pages are completed as they are: nodes
+        // pulling from this one take them as a snapshot, and the events replayed here bring the rest.
+        if (snapshotProgress.current) {
+          await untilClosed(() => storage.completeSnapshotMerge());
+          snapshotProgress.current = null;
+          if (signal.aborted) {
+            return false;
+          }
         }
         hasMore = response.hasMore;
         afterSyncId = response.nextSyncId;
@@ -421,14 +460,7 @@ export const createCrdtSyncRemoteSource = ({
           const { processed } = storage.enqueueRemoteEvents(
             response.events.map((x) => {
               if (x.schema_version > migrator.currentSchemaVersion) {
-                eventTarget.dispatchEvent("remote-schema-version-mismatch", {
-                  remoteSchemaVersion: x.schema_version,
-                  localSchemaVersion: migrator.currentSchemaVersion,
-                });
-                if (!remoteState.schemaVersionMismatched) {
-                  patchRemoteState({ schemaVersionMismatched: true });
-                }
-                throw new SchemaVersionMismatchError(x.schema_version, migrator.currentSchemaVersion);
+                throw newerRemoteSchemaError(x.schema_version);
               }
               return x;
             }),
@@ -446,6 +478,71 @@ export const createCrdtSyncRemoteSource = ({
         }
       }
       return !hasMore;
+    };
+
+    const newerRemoteSchemaError = (remoteSchemaVersion: number) => {
+      eventTarget.dispatchEvent("remote-schema-version-mismatch", {
+        remoteSchemaVersion,
+        localSchemaVersion: migrator.currentSchemaVersion,
+      });
+      if (!remoteState.schemaVersionMismatched) {
+        patchRemoteState({ schemaVersionMismatched: true });
+      }
+      return new SchemaVersionMismatchError(remoteSchemaVersion, migrator.currentSchemaVersion);
+    };
+
+    // Items are merged cell by cell, so pages that already hold later writes, a page merged twice
+    // and local writes made meanwhile all converge once the events after the first page's sync id
+    // are pulled. Returns false when the snapshot cannot be used and events must be replayed instead.
+    const mergeSnapshot = async (
+      pullSnapshotPage: NonNullable<RemoteSource["pullSnapshot"]>,
+      mode: SnapshotPullMode,
+    ) => {
+      let progress = snapshotProgress.current;
+      for (;;) {
+        const cursor = progress?.cursor ?? null;
+        const page = await request(() => pullSnapshotPage({ cursor }));
+        if (signal.aborted) {
+          return false;
+        }
+        // The remote's sync ids started over, so the remembered progress belongs to older data.
+        if (progress && page.syncId < progress.syncId) {
+          progress = null;
+          snapshotProgress.current = null;
+          continue;
+        }
+
+        try {
+          if (page.schemaVersion !== migrator.currentSchemaVersion) {
+            throw new SchemaVersionMismatchError(page.schemaVersion, migrator.currentSchemaVersion);
+          }
+          storage.mergeSnapshotItems(page.items);
+        } catch (error) {
+          if (mode === "required") {
+            snapshotProgress.current = null;
+            throw page.schemaVersion > migrator.currentSchemaVersion
+              ? newerRemoteSchemaError(page.schemaVersion)
+              : error;
+          }
+          console.warn("Could not use the remote snapshot. Replaying events instead.", error);
+          return false;
+        }
+
+        const syncId = progress?.syncId ?? page.syncId;
+        if (page.nextCursor) {
+          progress = { syncId, cursor: page.nextCursor };
+          snapshotProgress.current = progress;
+          continue;
+        }
+
+        // A stop between these steps repeats the snapshot or its last page on the next start.
+        await untilClosed(() => storage.completeSnapshotMerge());
+        snapshotProgress.current = null;
+        if (syncId > pullSyncId.current) {
+          pullSyncId.current = syncId;
+        }
+        return true;
+      }
     };
 
     const push = ensureSingletonExecution(async () => {

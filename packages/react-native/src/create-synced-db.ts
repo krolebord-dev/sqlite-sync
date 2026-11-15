@@ -31,6 +31,11 @@ export type SyncedDbOptions<Database> = {
   /** Runs event-log garbage collection on startup. Enabled by default; set `false` to disable. */
   eventLogGc?: boolean;
   /**
+   * Starts a database that has not synced yet from a snapshot of the remote's current state
+   * instead of its event history. Enabled by default; set `false` to always replay events.
+   */
+  snapshotBootstrap?: boolean;
+  /**
    * Syncs when the app returns to the foreground and drops the remote connection
    * when it goes to the background. Enabled by default.
    */
@@ -53,6 +58,7 @@ export async function createSyncedDb<Database>(options: SyncedDbOptions<Database
     logger: options.logger,
     storageVersion: options.storageVersion,
     eventLogGc: options.eventLogGc,
+    snapshotBootstrap: options.snapshotBootstrap,
     openDriver: () => createOpSqliteDriver(open(openOptions)),
     deleteDatabase: () => open(openOptions).delete(),
     verifySchemaDriver: options.verifySchema

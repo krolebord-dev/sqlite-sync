@@ -1,3 +1,9 @@
+export type {
+  SnapshotCursor,
+  SnapshotItem,
+  SnapshotPullRequest,
+  SnapshotPullResponse,
+} from "./sqlite-crdt/crdt-snapshot";
 export type { GetEventsBatch } from "./sqlite-crdt/crdt-storage";
 export type {
   EventsPullRequest,

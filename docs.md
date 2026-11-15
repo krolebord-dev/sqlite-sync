@@ -85,6 +85,19 @@ Every mutation generates a CRDT event containing:
 
 Events are conflict-free — concurrent edits to different columns merge automatically, and concurrent edits to the same column resolve via last-write-wins using HLC comparison.
 
+### First Sync
+
+A database that has never synced does not replay the server's event history. When the server holds more events than one pull returns, it answers the first pull with a snapshot instead: every row of the synced tables, deleted rows included, with the HLC of each cell. The first sync then costs time in proportion to the number of rows, not to the number of edits ever made.
+
+- The client merges the snapshot cell by cell under the same last-write-wins rule events use, then pulls the events that arrived meanwhile. The result, including the [state hash](#de-sync-and-schema-mismatch), is the same as after replaying every event.
+- Writes made before the first sync are kept and pushed as usual.
+- Tabs that are already open get the rows from the worker the same way.
+- A snapshot that was interrupted continues from the last page it merged, also after a restart.
+- Both sides must support it. A client or server on an older version of the library keeps replaying events, and so does a client whose schema version differs from the server's.
+- A client that has synced before catches up with events, however far behind it is.
+
+Set `snapshotBootstrap: false` in [`startDbWorker`](#startdbworkeroptions), or in `createSyncedDb` on React Native, to always replay events.
+
 ---
 
 ## Schema Definition
@@ -366,6 +379,7 @@ The result has the same shape as the browser `SyncedDb`, so `createDbContext` fr
 | `storageVersion` | `string` | Optional. See [Breaking Storage Changes](#breaking-storage-changes); a mismatch deletes the local database on startup. |
 | `verifySchema` | `boolean` | Optional dev-time check that replays the migrations on an in-memory database. |
 | `eventLogGc` | `boolean` | Default `true`. Event-log garbage collection on every startup. See [`startDbWorker`](#startdbworkeroptions). |
+| `snapshotBootstrap` | `boolean` | Default `true`. Starts a database that has not synced yet from a snapshot instead of the event history. See [First Sync](#first-sync). |
 | `syncOnAppStateChange` | `boolean` | Default `true`. Syncs when the app returns to the foreground and drops the connection when it goes to the background. |
 | `logger` | `Logger` | Optional logger. |
 
@@ -835,7 +849,7 @@ function SyncStatusMonitor() {
 Prompt the user before calling `requestReload` — it reloads every open tab for the `dbId` (see [Reload and Recovery](#reload-and-recovery)).
 
 - **Schema mismatch:** use `clean: false` so the app loads newer code and migrations while keeping the persisted worker DB. If the mismatch persists on the latest code, deploy compatibility migrations or treat it as a recovery incident.
-- **De-sync:** sqlite-sync only reports it and does not recover on its own, so apps need a `de-sync-detected` handler. Use `clean: true` to wipe the persisted worker DB and rehydrate from the remote event log. Pending in-memory tab events and local events that never reached the remote are lost.
+- **De-sync:** sqlite-sync only reports it and does not recover on its own, so apps need a `de-sync-detected` handler. Use `clean: true` to wipe the persisted worker DB and rehydrate from the remote. Pending in-memory tab events and local events that never reached the remote are lost.
 
 ### Controlling Sync
 
@@ -1083,9 +1097,9 @@ syncDb.applySnapshot({
 
 `applySnapshot` reads the current row if there is one, applies the patch, and writes an `item-created` event with the complete row and `tombstone: false`. Existing rows treat it as an update, and a deleted row is restored. Event listeners receive it as `item-created`.
 
-Older events for the row stay in the log, but their payloads are replaced with a no-op marker. Sync cursors and the state hash stay intact while superseded data is dropped. Fresh replicas replay the no-ops, then the snapshot.
+Older events for the row stay in the log, but their payloads are replaced with a no-op marker. Sync cursors and the state hash stay intact while superseded data is dropped. Fresh replicas that replay events replay the no-ops, then the snapshot.
 
-- If an event for the row is newer than the snapshot (e.g. a pending client edit from a clock running ahead), the history is kept: that event still wins for its fields, and fresh replicas need the history to replay it. The next snapshot newer than every event for the row compacts it.
+- If an event for the row is newer than the snapshot (e.g. a pending client edit from a clock running ahead), the history is kept: that event still wins for its fields, and fresh replicas that replay events need the history to replay it. The next snapshot newer than every event for the row compacts it.
 - If the row does not exist, the patch must supply every required column. This path does not run runtime schema validation, so SQLite rejects an incomplete create. TypeScript prevents patching `id` or `tombstone`.
 - Use it only where discarding the row's change history is intentional.
 
@@ -1392,6 +1406,8 @@ function startDbWorker(options: {
   verifySchema?: boolean;
   /** Local worker event-log garbage collection. Enabled by default. */
   eventLogGc?: boolean;
+  /** Start a database that has not synced yet from a snapshot. Enabled by default. */
+  snapshotBootstrap?: boolean;
 }): Promise<void>
 ```
 
@@ -1405,6 +1421,8 @@ Because client history is deleted, code that runs on the client must not depend 
 
 - Event migrations (`migrateEvent` transformers) must be safe to run more than once. After GC, an event the client already applied can be pulled again (for example this client's own events from an earlier session) and is migrated again before last-write-wins discards it.
 - Data repairs in future migrations must work from the current tables and update log, not by replaying the client event log.
+
+`snapshotBootstrap` controls whether a database that has not synced yet may start from a snapshot of the remote's state; see [First Sync](#first-sync). It is enabled by default and needs a remote source with `pullSnapshot`, which `createWsRemoteSource` has. Like event-log GC, it means the client never holds the events from before the snapshot.
 
 #### `getWorkerConfig<Props>()`
 
@@ -1445,6 +1463,7 @@ type CreateRemoteSourceFactory = (opts: {
 type RemoteSource = {
   pullEvents: (request: EventsPullRequest) => Promise<EventsPullResponse>;
   pushEvents: (request: EventsPushRequest) => Promise<EventsPushResponse>;
+  pullSnapshot?: (request: SnapshotPullRequest) => Promise<SnapshotPullResponse>;
   ping?: () => Promise<void>;
   disconnect?: () => void | Promise<void>;
 };
@@ -1455,6 +1474,7 @@ type RemoteSource = {
 - Call `onClosed` when the connection ends on its own. It is safe to call at any time, including during the factory call, and is ignored after `disconnect`. The library then reports `connecting` and opens a new source after a backoff. Throwing from the factory counts as a failed attempt too.
 - Call `onEventsAvailable` when the remote broadcasts new events. Pass its `stateHash` as `remoteStateHash`, or `null` if it reports none, which skips [de-sync detection](#de-sync-and-schema-mismatch).
 - `pullEvents` and `pushEvents` may wait for the connection to open. Once the connection has closed, they should reject so failures surface quickly.
+- `pullSnapshot` is optional and enables [First Sync](#first-sync) snapshots. With it, the library sets `acceptSnapshot: true` on pulls. The remote may then answer a pull with `snapshot: "offered"` or `"required"` and no events, and the library calls `pullSnapshot` with `cursor: null`, then with each page's `nextCursor` until it is `null`, before it pulls events again. Pass requests and responses through unchanged. A remote that does not know `acceptSnapshot` must ignore it.
 - `ping` is optional. When present, the library pings a connection that has received nothing (no response or broadcast) for 25 seconds, and replaces it if the ping fails or gets no answer within 10 seconds. Pings never overlap, run only on an online connection, and never start after the connection closes, so a ping does not need to settle once the source has closed. Without `ping`, a connection that dies without closing is only noticed when a request times out.
 - The library times requests out after 10 seconds and does not retry on the same source: any failed request closes the connection, and the library reconnects with backoff. A push response with `ok: false` also closes the connection, but the library does not reconnect until the next `state.sync()`. The remote counts as `online` once the first request succeeds.
 
@@ -1659,18 +1679,26 @@ The sync protocol uses JSON messages over WebSocket.
 **Client → Server:**
 
 ```ts
-// Pull events since a given sync ID
-{ type: "pull-events", requestId: string, afterSyncId: number, excludeNodeId?: string }
+// Pull events since a given sync ID. acceptSnapshot: the client can pull a snapshot instead
+{ type: "pull-events", requestId: string, afterSyncId: number, excludeNodeId?: string, acceptSnapshot?: boolean }
 
 // Push new events to the server
 { type: "push-events", requestId: string, nodeId: string, events: CrdtEvent[] }
+
+// Pull one page of a snapshot. cursor is null for the first page, then the previous page's nextCursor
+{ type: "pull-snapshot", requestId: string, cursor: { dataset: string, afterId: string } | null }
 ```
 
 **Server → Client:**
 
 ```ts
-// Response to pull-events
-{ type: "events-pull-response", requestId: string, data: { events: CrdtEvent[], hasMore: boolean, nextSyncId: number } }
+// Response to pull-events. With snapshot set there are no events and the client pulls a snapshot first.
+// Only sent to clients that set acceptSnapshot
+{ type: "events-pull-response", requestId: string, data: { events: CrdtEvent[], hasMore: boolean, nextSyncId: number, snapshot?: "offered" | "required" } }
+
+// Response to pull-snapshot. Each item is a base table row and its update log (column to HLC), both as JSON object strings.
+// The client pulls events after the first page's syncId once nextCursor is null
+{ type: "snapshot-pull-response", requestId: string, data: { schemaVersion: number, syncId: number, items: { dataset: string, row: string, updateLog: string }[], nextCursor: { dataset: string, afterId: string } | null } }
 
 // Response to push-events
 { type: "events-push-response", requestId: string, data: { ok: true, beforeSyncId: number, afterSyncId: number } }

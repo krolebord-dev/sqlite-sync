@@ -4,6 +4,12 @@ export {
   type LocalSyncedDbOptions,
 } from "./local/local-synced-db";
 export type {
+  SnapshotCursor,
+  SnapshotItem,
+  SnapshotPullRequest,
+  SnapshotPullResponse,
+} from "./sqlite-crdt/crdt-snapshot";
+export type {
   CatchUpOptions,
   CatchUpResult,
   CreateRemoteSourceFactory,

@@ -93,6 +93,12 @@ export {
 } from "./sqlite-crdt/apply-crdt-event";
 // CRDT Schema
 export type { CrdtTableConfig, ReadonlyTable, SyncDbSchema } from "./sqlite-crdt/crdt-schema";
+export type {
+  SnapshotCursor,
+  SnapshotItem,
+  SnapshotPullRequest,
+  SnapshotPullResponse,
+} from "./sqlite-crdt/crdt-snapshot";
 export {
   type CrdtStorage,
   createCrdtStorage,

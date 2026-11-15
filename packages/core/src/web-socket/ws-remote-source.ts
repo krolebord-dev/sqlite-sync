@@ -1,5 +1,6 @@
 import type { SyncServerMessage, SyncServerRequest } from "../server";
 import { HEARTBEAT_PING, HEARTBEAT_PONG } from "../server/heartbeat";
+import type { SnapshotPullRequest, SnapshotPullResponse } from "../sqlite-crdt/crdt-snapshot";
 import type { CreateRemoteSourceFactory } from "../sqlite-crdt/crdt-sync-remote-source";
 import {
   createDeferredPromise,
@@ -8,7 +9,8 @@ import {
   generateId,
   jsonSafeParse,
 } from "../utils";
-import type { EventsPullRequest, EventsPushRequest, EventsPushResponse, GetEventsBatch } from "../worker";
+import type { EventsPullRequest, EventsPushRequest, EventsPushResponse } from "../worker";
+import type { EventsPullResponse } from "../worker-db/worker-common";
 
 const WS_OPEN = 1;
 
@@ -73,11 +75,15 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
       send<EventsPushResponse>({ type: "push-events", nodeId: request.nodeId, events: request.events });
 
     const pullEvents = (request: EventsPullRequest) =>
-      send<GetEventsBatch>({
+      send<EventsPullResponse>({
         type: "pull-events",
         afterSyncId: request.afterSyncId,
         excludeNodeId: request.excludeNodeId,
+        acceptSnapshot: request.acceptSnapshot,
       });
+
+    const pullSnapshot = (request: SnapshotPullRequest) =>
+      send<SnapshotPullResponse>({ type: "pull-snapshot", cursor: request.cursor });
 
     const ping = () => {
       socket.send(HEARTBEAT_PING);
@@ -102,7 +108,8 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
 
       switch (message.type) {
         case "events-pull-response":
-        case "events-push-response": {
+        case "events-push-response":
+        case "snapshot-pull-response": {
           const promise = requestsMap.get(message.requestId);
           if (!promise) {
             return;
@@ -123,6 +130,7 @@ export const createWsRemoteSource = ({ createWebSocket }: WsRemoteSourceConfig):
     return {
       pushEvents,
       pullEvents,
+      pullSnapshot,
       ping,
       disconnect: () => {
         shutdown();

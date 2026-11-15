@@ -271,6 +271,8 @@ function createDurableObjectRemoteHandler({
         return handlePullEvents(request);
       case "push-events":
         return handlePushEvents(request);
+      case "pull-snapshot":
+        return handlePullSnapshot(request);
       default:
         request satisfies never;
         return { success: false, error: new Error("Invalid request type") };
@@ -278,33 +280,33 @@ function createDurableObjectRemoteHandler({
   };
 
   const handlePullEvents = (request: ExtractSyncServerRequest<"pull-events">): MessageResult => {
-    const batch = crdtStorage.getEventsBatch({
-      limit: bufferSize,
-      status: "applied",
-      afterSyncId: request.afterSyncId,
-      excludeNodeId: request.excludeNodeId ?? "",
-    });
-
     const eventsPullMessage: SyncServerMessage = {
       type: "events-pull-response",
       requestId: request.requestId,
-      data: {
-        hasMore: batch.hasMore,
-        nextSyncId: batch.nextSyncId,
-        events: batch.events.map((x) => ({
-          schema_version: x.schema_version,
-          timestamp: x.timestamp,
-          type: x.type,
-          dataset: x.dataset,
-          item_id: x.item_id,
-          payload: x.payload,
-        })),
-      },
+      data: crdtStorage.pullEvents({
+        limit: bufferSize,
+        afterSyncId: request.afterSyncId,
+        excludeNodeId: request.excludeNodeId,
+        acceptSnapshot: request.acceptSnapshot,
+      }),
     };
 
     return {
       success: true,
       payload: JSON.stringify(eventsPullMessage),
+    };
+  };
+
+  const handlePullSnapshot = (request: ExtractSyncServerRequest<"pull-snapshot">): MessageResult => {
+    const snapshotPullMessage: SyncServerMessage = {
+      type: "snapshot-pull-response",
+      requestId: request.requestId,
+      data: crdtStorage.getSnapshotPage({ cursor: request.cursor }),
+    };
+
+    return {
+      success: true,
+      payload: JSON.stringify(snapshotPullMessage),
     };
   };
 

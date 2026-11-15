@@ -8,6 +8,7 @@ import { applyWorkerDbSchema, type WorkerDbSchema, workerDbConfig } from "../mig
 import { formatSchemaVerificationIssues } from "../schema/verify-sync-schema";
 import { verifySyncSchema } from "../schema/verify-sync-schema-wasm";
 import type { SyncDbSchema } from "../sqlite-crdt/crdt-schema";
+import { SnapshotRequiredError } from "../sqlite-crdt/crdt-snapshot";
 import { type CrdtStorage, createCrdtStorage } from "../sqlite-crdt/crdt-storage";
 import { createCrdtSyncProducer } from "../sqlite-crdt/crdt-sync-producer";
 import {
@@ -17,7 +18,12 @@ import {
 } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { CrdtEventStatus } from "../sqlite-crdt/crdt-table-schema";
 import { SQLiteDbWrapper } from "../sqlite-db-wrapper";
-import { createKvStateHashStore, type KvStore } from "../sqlite-kv-store";
+import {
+  createKvSnapshotProgressStore,
+  createKvStateHashStore,
+  type KvStore,
+  SNAPSHOT_FLOOR_KV_KEY,
+} from "../sqlite-kv-store";
 import { createDeferredPromise, generateId } from "../utils";
 import { createWasmSqliteDriver } from "../wasm-driver";
 import { runWorkerEventLogGc } from "./event-log-gc";
@@ -169,6 +175,7 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     db,
     dbConfig: workerDbConfig,
     stateHash,
+    snapshotFloor: kvStore.createNumberStoredValue(SNAPSHOT_FLOOR_KV_KEY, 0),
     schema: opts.syncDbSchema,
   });
 
@@ -190,6 +197,8 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
     pullSyncId,
     pushSyncId,
     remoteFactory: opts.createRemoteSource,
+    snapshotBootstrap: opts.snapshotBootstrap,
+    snapshotProgress: createKvSnapshotProgressStore(kvStore),
   });
   remoteSource.goOnline();
 
@@ -256,13 +265,18 @@ async function createDbWorker(config: WorkerConfig, opts: WorkerOptions) {
       };
     },
     pullEvents: (request) => {
-      return crdtStorage.getEventsBatch({
-        afterSyncId: request.afterSyncId,
-        status: "applied",
-        excludeNodeId: request.excludeNodeId ?? "",
-        limit: 100,
-      });
+      try {
+        return crdtStorage.pullEvents({ ...request, limit: 100 });
+      } catch (error) {
+        // Only a tab still running a build without snapshot support gets here. It cannot catch up
+        // from events, and a reload makes it start from the current database.
+        if (error instanceof SnapshotRequiredError) {
+          void rpcTarget.requestReload({ clean: false });
+        }
+        throw error;
+      }
     },
+    pullSnapshot: (request) => crdtStorage.getSnapshotPage(request),
     goOnline: () => remoteSource.goOnline(),
     goOffline: () => remoteSource.goOffline("DISCONNECTED"),
     dropConnection: () => remoteSource.dropConnection("NETWORK_OFFLINE"),
@@ -341,6 +355,8 @@ type InitRemoteOptions = {
   pullSyncId: ReturnType<KvStore["createNumberStoredValue"]>;
   pushSyncId: ReturnType<KvStore["createNumberStoredValue"]>;
   remoteFactory?: CreateRemoteSourceFactory;
+  snapshotBootstrap?: boolean;
+  snapshotProgress: ReturnType<typeof createKvSnapshotProgressStore>;
 };
 
 function createRemoteSource({
@@ -350,6 +366,8 @@ function createRemoteSource({
   pullSyncId,
   pushSyncId,
   remoteFactory,
+  snapshotBootstrap,
+  snapshotProgress,
 }: InitRemoteOptions) {
   return createCrdtSyncRemoteSource({
     bufferSize: PUSH_BATCH_SIZE,
@@ -359,6 +377,8 @@ function createRemoteSource({
     storage: crdtStorage,
     migrator,
     remoteFactory,
+    snapshotBootstrap,
+    snapshotProgress,
   });
 }
 
@@ -411,6 +431,12 @@ type WorkerOptions = {
    * Skipped while an existing tab holds an in-memory replica of this DB.
    */
   eventLogGc?: boolean;
+  /**
+   * Lets a database that has not synced yet start from a snapshot of the remote's current state
+   * instead of replaying its event history. Enabled by default; set `snapshotBootstrap: false`
+   * to always replay events. Needs a remote source with `pullSnapshot` and a remote that offers one.
+   */
+  snapshotBootstrap?: boolean;
 };
 
 export async function startDbWorker(opts: WorkerOptions) {

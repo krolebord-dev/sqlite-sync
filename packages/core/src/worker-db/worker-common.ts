@@ -1,4 +1,5 @@
 import type { ImportDataOptions, ImportDataResult, SyncedDbExport } from "../export-import";
+import type { SnapshotPullMode, SnapshotPullRequest, SnapshotPullResponse } from "../sqlite-crdt/crdt-snapshot";
 import type {
   CatchUpOptions,
   CatchUpResult,
@@ -70,6 +71,11 @@ export type EventsPullResponse = {
   }[];
   hasMore: boolean;
   nextSyncId: number;
+  /**
+   * Set instead of returning events when the requester should pull a snapshot. Only sent to
+   * requesters that set `acceptSnapshot`.
+   */
+  snapshot?: SnapshotPullMode;
 };
 
 export interface WorkerRpc {
@@ -78,6 +84,7 @@ export interface WorkerRpc {
   pushTabEvents: (request: EventsPushRequest) => EventsPushResponse;
   execute: (query: ExecuteParams) => ExecuteResult<unknown>;
   pullEvents: (params: EventsPullRequest) => EventsPullResponse;
+  pullSnapshot: (request: SnapshotPullRequest) => SnapshotPullResponse;
   postState: () => void;
   goOnline: () => Promise<void>;
   goOffline: () => void;

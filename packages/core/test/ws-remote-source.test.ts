@@ -54,6 +54,26 @@ const respondToPull = (socket: FakeSocket, nextSyncId: number) => {
 };
 
 describe("createWsRemoteSource", () => {
+  it("passes on that the client accepts snapshots and pulls snapshot pages", async () => {
+    const socket = new FakeSocket();
+    socket.readyState = WebSocket.OPEN;
+    const { source } = connect(socket);
+
+    void source.pullEvents({ afterSyncId: -1, acceptSnapshot: true });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    expect(socket.sent[0]).toMatchObject({ type: "pull-events", afterSyncId: -1, acceptSnapshot: true });
+
+    const cursor = { dataset: "_todo", afterId: "todo-1" };
+    const pulling = source.pullSnapshot?.({ cursor });
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(2));
+    const request = socket.sent[1];
+    expect(request).toMatchObject({ type: "pull-snapshot", cursor });
+
+    const page = { schemaVersion: 0, syncId: 7, items: [], nextCursor: null };
+    socket.receive({ type: "snapshot-pull-response", requestId: request.requestId, data: page });
+    await expect(pulling).resolves.toEqual(page);
+  });
+
   it("sends requests once the socket opens", async () => {
     const { socket, source } = connect();
 

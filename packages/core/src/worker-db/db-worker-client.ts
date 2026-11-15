@@ -102,6 +102,7 @@ export const createWorkerDbClient = async ({
     importData: (data, opts) => queryWorker("importData", [data, opts]),
     pushTabEvents: (request) => queryWorker("pushTabEvents", [request]),
     pullEvents: (params) => queryWorker("pullEvents", [params]),
+    pullSnapshot: (request) => queryWorker("pullSnapshot", [request]),
     postState: () => queryWorker("postState", []),
     goOnline: () => queryWorker("goOnline", []),
     goOffline: () => queryWorker("goOffline", []),

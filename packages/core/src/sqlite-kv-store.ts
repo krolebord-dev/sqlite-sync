@@ -1,6 +1,7 @@
 import { type SchemaModule, sql } from "kysely";
+import type { SnapshotProgress } from "./sqlite-crdt/crdt-snapshot";
 import type { StateHashStore } from "./sqlite-crdt/state-hash";
-import { createStoredValue } from "./sqlite-crdt/stored-value";
+import { createStoredValue, type StoredValue } from "./sqlite-crdt/stored-value";
 import type { InternalSQLiteWrapper } from "./sqlite-db-wrapper";
 
 export type KvStoreItem = {
@@ -93,4 +94,23 @@ export function createKvStateHashStore(kvStore: Pick<KvStore, "get" | "set">): S
     read: () => kvStore.get(STATE_HASH_KV_KEY),
     write: (value) => kvStore.set(STATE_HASH_KV_KEY, value),
   };
+}
+
+const SNAPSHOT_PROGRESS_KV_KEY = "snapshot-progress";
+export const SNAPSHOT_FLOOR_KV_KEY = "snapshot-floor-sync-id";
+
+export function createKvSnapshotProgressStore(
+  kvStore: Pick<KvStore, "get" | "set" | "remove">,
+): StoredValue<SnapshotProgress | null> {
+  const stored = kvStore.get(SNAPSHOT_PROGRESS_KV_KEY);
+  return createStoredValue<SnapshotProgress | null>({
+    initialValue: stored ? (JSON.parse(stored) as SnapshotProgress) : null,
+    saveToStorage: (value) => {
+      if (value) {
+        kvStore.set(SNAPSHOT_PROGRESS_KV_KEY, JSON.stringify(value));
+      } else {
+        kvStore.remove(SNAPSHOT_PROGRESS_KV_KEY);
+      }
+    },
+  });
 }

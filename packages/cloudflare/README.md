@@ -83,8 +83,8 @@ syncDb.applySnapshot({
 });
 ```
 
-Existing clients apply the create as an update. Fresh clients replay the retained no-op envelopes and then insert the
-full snapshot. If the row does not exist, the patch must include every required column. The snapshot path does not run
+Existing clients apply the create as an update. Fresh clients that replay events replay the retained no-op envelopes and then insert
+the full snapshot. If the row does not exist, the patch must include every required column. The snapshot path does not run
 runtime schema validation, so SQLite rejects an incomplete create.
 
 `syncDb.unsafe` also provides raw `executeKysely` and `transaction` methods. Do not use them to mutate synced views;

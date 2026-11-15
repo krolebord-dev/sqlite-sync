@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SnapshotPullResponse } from "../sqlite-crdt/crdt-snapshot";
 import { type EventsPushResponse, MAX_PUSH_EVENTS } from "../sqlite-crdt/crdt-sync-remote-source";
 import type { EventsPullResponse } from "../worker-db/worker-common";
 
@@ -7,6 +8,12 @@ const pullEventsZodSchema = z.object({
   requestId: z.string(),
   afterSyncId: z.number(),
   excludeNodeId: z.string().optional(),
+  acceptSnapshot: z.boolean().optional(),
+});
+const pullSnapshotZodSchema = z.object({
+  type: z.literal("pull-snapshot"),
+  requestId: z.string(),
+  cursor: z.object({ dataset: z.string(), afterId: z.string() }).nullable(),
 });
 const pushEventsZodSchema = z.object({
   type: z.literal("push-events"),
@@ -29,7 +36,8 @@ const pushEventsZodSchema = z.object({
 export const syncServerZodSchema = {
   pullEvents: pullEventsZodSchema,
   pushEvents: pushEventsZodSchema,
-  request: z.discriminatedUnion("type", [pullEventsZodSchema, pushEventsZodSchema]),
+  pullSnapshot: pullSnapshotZodSchema,
+  request: z.discriminatedUnion("type", [pullEventsZodSchema, pushEventsZodSchema, pullSnapshotZodSchema]),
 };
 
 export type SyncServerMessage =
@@ -42,6 +50,11 @@ export type SyncServerMessage =
       type: "events-push-response";
       requestId: string;
       data: EventsPushResponse;
+    }
+  | {
+      type: "snapshot-pull-response";
+      requestId: string;
+      data: SnapshotPullResponse;
     }
   | {
       type: "events-applied";

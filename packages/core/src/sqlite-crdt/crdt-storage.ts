@@ -5,8 +5,18 @@ import type { SystemDbConfig } from "../migrations/system-schema";
 import { CrdtEventValidationError, validateNewCrdtEvent } from "../schema/validate-crdt-event";
 import type { InternalSQLiteTransactionWrapper, InternalSQLiteWrapper } from "../sqlite-db-wrapper";
 import { createTypedEventTarget, ensureSingletonExecution, quoteId } from "../utils";
-import { createSQLiteCrdtApplyFunction } from "./apply-crdt-event";
+import type { EventsPullResponse } from "../worker-db/worker-common";
+import { createSQLiteCrdtApplyFunction, createSQLiteCrdtMergeFunction } from "./apply-crdt-event";
 import type { SyncDbSchema } from "./crdt-schema";
+import {
+  createSnapshotPageReader,
+  type SnapshotItem,
+  type SnapshotPageLimits,
+  type SnapshotPullMode,
+  type SnapshotPullRequest,
+  type SnapshotPullResponse,
+  SnapshotRequiredError,
+} from "./crdt-snapshot";
 import {
   CRDT_EVENT_NO_OP_PAYLOAD,
   type CrdtEventOrigin,
@@ -18,6 +28,7 @@ import {
   type PersistedCrdtEvent,
 } from "./crdt-table-schema";
 import { createStateHashTracker, type StateHashStore } from "./state-hash";
+import { createStoredValue, type StoredValue } from "./stored-value";
 
 type LocalCrdtEvent = {
   type: CrdtEventType;
@@ -86,6 +97,14 @@ export type GetEventsBatch = {
   nextSyncId: number;
 };
 
+export type PullEventsQuery = {
+  afterSyncId: number;
+  excludeNodeId?: string;
+  limit: number;
+  /** Whether the requester can take a snapshot instead of events. */
+  acceptSnapshot?: boolean;
+};
+
 export type EnqueueEventsResult = {
   beforeSyncId: number;
   afterSyncId: number;
@@ -112,6 +131,11 @@ type DbSyncerStorage = {
   dbConfig: SystemDbConfig;
   hlc: StorageHLC;
   stateHash?: StateHashStore;
+  /**
+   * Sync id below which this node's state did not come from its event log, because a snapshot
+   * was merged. 0 when it never merged one. Persist it wherever other nodes pull from this one.
+   */
+  snapshotFloor?: StoredValue<number>;
   onEventApplied?: (event: PersistedCrdtEvent) => void;
   schema: Pick<SyncDbSchema, "tables" | "tablesConfig">;
 };
@@ -186,6 +210,11 @@ export function createCrdtStorage(storage: DbSyncerStorage) {
   };
 
   let sequentialSyncId = getInitialSequentialSyncId();
+
+  const snapshotFloor = storage.snapshotFloor ?? createStoredValue({ initialValue: 0 });
+  // The floor while a snapshot is being merged: its rows are in the tables, but nodes pulling from
+  // this one can only get them once the merge completes.
+  const SNAPSHOT_MERGE_UNFINISHED = Number.MAX_SAFE_INTEGER;
 
   const eventTarget = createTypedEventTarget<{
     "events-applied": EventsAppliedPayload;
@@ -530,7 +559,8 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     }
     eventTarget.dispatchEvent("events-applied", {
       syncId: sequentialSyncId,
-      stateHash: sequentialSyncId === localSyncId ? getStateHash() : null,
+      stateHash:
+        sequentialSyncId === localSyncId && snapshotFloor.current !== SNAPSHOT_MERGE_UNFINISHED ? getStateHash() : null,
     });
   };
 
@@ -650,6 +680,104 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
   });
   const applyCrdtEvent = (event: Parameters<typeof applyCrdtEventWithoutStateHash>[0]) =>
     withStateHash(() => applyCrdtEventWithoutStateHash(event));
+
+  const readSnapshotPage = createSnapshotPageReader({
+    db,
+    updateLogTable: storage.dbConfig.updateLogTable.fullIdentifier,
+    schema: storage.schema,
+  });
+  const mergeSnapshotItem = createSQLiteCrdtMergeFunction({
+    db,
+    dbConfig: storage.dbConfig,
+    getStateHash: () => stateHash.active,
+  });
+
+  const getSnapshotPage = (request: SnapshotPullRequest, limits?: SnapshotPageLimits): SnapshotPullResponse => ({
+    schemaVersion: storage.migrator.currentSchemaVersion,
+    syncId: sequentialSyncId,
+    ...readSnapshotPage(request.cursor, limits),
+  });
+
+  const mergeSnapshotItems = (items: SnapshotItem[]) => {
+    let latestHlc = "";
+    db.executeTransaction(() => {
+      withStateHash(() => {
+        for (const item of items) {
+          const itemHlc = mergeSnapshotItem(item);
+          if (itemHlc > latestHlc) {
+            latestHlc = itemHlc;
+          }
+        }
+      });
+    });
+    snapshotFloor.current = SNAPSHOT_MERGE_UNFINISHED;
+    if (latestHlc) {
+      storage.hlc.restoreHLC(deserializeHLC(latestHlc));
+    }
+  };
+
+  // The merged rows never went through the event log, so nodes pulling from this one would miss
+  // them. The marker event moves the log forward and the floor sends everyone behind it to a snapshot.
+  const completeSnapshotMerge = (): Promise<void> => {
+    let syncId = 0;
+    db.executeTransaction((tx) => {
+      syncId = readPersistedSyncId(tx) + 1;
+      persistEvents(tx, [
+        {
+          schema_version: storage.migrator.currentSchemaVersion,
+          timestamp: serializeHLC(storage.hlc.getNextHLC()),
+          type: "item-updated",
+          dataset: "",
+          item_id: "",
+          origin: "remote",
+          source_node_id: "",
+          payload: CRDT_EVENT_NO_OP_PAYLOAD,
+          sync_id: syncId,
+          status: "pending",
+        },
+      ]);
+      snapshotFloor.current = syncId;
+    });
+    localSyncId = syncId;
+    return processEnqueuedEvents();
+  };
+
+  const getSnapshotPullMode = (afterSyncId: number, limit: number): SnapshotPullMode | null => {
+    if (Math.max(afterSyncId, 0) < snapshotFloor.current) {
+      return "required";
+    }
+    // A requester that has nothing yet and would need more than one page of events.
+    return afterSyncId <= 0 && sequentialSyncId > limit ? "offered" : null;
+  };
+
+  /** Answers a pull from another node, with a snapshot marker instead of events when one applies. */
+  const pullEvents = ({ afterSyncId, excludeNodeId, limit, acceptSnapshot }: PullEventsQuery): EventsPullResponse => {
+    // Events written meanwhile can change rows of the snapshot, which the requester does not have yet.
+    if (snapshotFloor.current === SNAPSHOT_MERGE_UNFINISHED) {
+      return { events: [], hasMore: false, nextSyncId: afterSyncId };
+    }
+    const snapshot = getSnapshotPullMode(afterSyncId, limit);
+    if (snapshot && acceptSnapshot) {
+      return { events: [], hasMore: true, nextSyncId: afterSyncId, snapshot };
+    }
+    if (snapshot === "required") {
+      throw new SnapshotRequiredError(afterSyncId);
+    }
+
+    const batch = getEventsBatch({ status: "applied", afterSyncId, excludeNodeId: excludeNodeId ?? "", limit });
+    return {
+      hasMore: batch.hasMore,
+      nextSyncId: batch.nextSyncId,
+      events: batch.events.map((event) => ({
+        schema_version: event.schema_version,
+        timestamp: event.timestamp,
+        type: event.type,
+        dataset: event.dataset,
+        item_id: event.item_id,
+        payload: event.payload,
+      })),
+    };
+  };
 
   const getFirstAcceptedSyncIdsByTimestamp = (
     tx: InternalSQLiteTransactionWrapper<InternalDbSchema>,
@@ -890,6 +1018,10 @@ where "dataset" = ? and "item_id" = ? and "payload" <> ${noOpPayloadSqlLiteral}`
     applyOwnSnapshot,
     checkIsQuiescent,
     getStateHash,
+    pullEvents,
+    getSnapshotPage,
+    mergeSnapshotItems,
+    completeSnapshotMerge,
 
     addEventListener: eventTarget.addEventListener,
     removeEventListener: eventTarget.removeEventListener,
